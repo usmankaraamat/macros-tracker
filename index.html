@@ -35,7 +35,10 @@
   .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
   header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
   h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
+  .head-right { display: flex; gap: 12px; align-items: baseline; }
   .date { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); }
+  #gear { cursor: pointer; color: var(--ink-dim); font-size: 15px; user-select: none; }
+  #gear:hover { color: var(--ink); }
   .sub { font-size: 11px; color: var(--ink-faint); margin-bottom: 18px; text-transform: uppercase; letter-spacing: 0.08em; }
 
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 12px; }
@@ -64,12 +67,13 @@
   .bar > div { height: 100%; border-radius: 2px; transition: width .3s; }
 
   label { display: block; font-size: 11px; color: var(--ink-dim); margin-bottom: 4px; }
-  select, input[type=text], input[type=number] {
+  select, input[type=text], input[type=number], input[type=password], textarea {
     width: 100%; background: var(--panel-2); border: 1px solid var(--line);
     color: var(--ink); font-family: var(--mono); font-size: 14px;
     padding: 9px 10px; border-radius: 6px; -webkit-appearance: none;
   }
-  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  textarea { font-family: var(--sans); font-size: 13px; resize: vertical; line-height: 1.5; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
   .row { display: grid; grid-template-columns: 1fr 90px; gap: 8px; margin-bottom: 10px; }
   .checks { display: flex; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
   .chk { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-dim); cursor: pointer; }
@@ -80,32 +84,78 @@
     cursor: pointer; width: 100%;
   }
   button:active { transform: translateY(1px); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
   button.ghost { background: transparent; border: 1px solid var(--line); color: var(--ink-dim); }
+  button.sm { width: auto; padding: 6px 12px; font-size: 12px; }
 
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
   th { text-align: right; font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); padding: 4px 6px; font-weight: 500; border-bottom: 1px solid var(--line); }
   th:first-child, td:first-child { text-align: left; }
-  td { padding: 6px; font-family: var(--mono); border-bottom: 1px solid var(--panel-2); }
+  td { padding: 6px; font-family: var(--mono); border-bottom: 1px solid var(--panel-2); vertical-align: top; }
   td .flags { font-family: var(--sans); font-size: 9px; color: var(--warn); display: block; }
+  td .del { cursor: pointer; color: var(--ink-faint); float: right; font-size: 12px; padding-left: 8px; }
+  td .del:hover { color: var(--bad); }
   .empty { color: var(--ink-faint); font-size: 12px; text-align: center; padding: 16px; font-style: italic; }
+
+  .badge { font-family: var(--sans); font-size: 8px; padding: 1px 5px; border-radius: 4px; background: var(--line); color: var(--ink-dim); text-transform: uppercase; letter-spacing: .05em; vertical-align: middle; }
+  .badge.est  { background: rgba(217,164,65,.15); color: var(--warn); }
+  .badge.usda { background: rgba(63,185,80,.12); color: var(--ok); }
+
+  .result { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; }
+  .result .rmeta { color: var(--ink-dim); font-family: var(--mono); font-size: 10px; }
+  .result .rname { font-size: 12px; }
+
+  .pend-item { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; }
+  .pend-top { display: grid; grid-template-columns: auto 1fr 72px; gap: 8px; align-items: center; }
+  .pend-top .pname { font-size: 12px; }
+  .pend-top input[type=number] { padding: 5px 8px; font-size: 12px; }
+  .pend-tog { display: flex; gap: 14px; margin-top: 6px; padding-left: 24px; }
 
   .solver-out { font-family: var(--mono); font-size: 13px; line-height: 1.7; }
   .solver-out .conflict { color: var(--bad); }
   .solver-out .ok { color: var(--ok); }
   .tactical { font-size: 12px; color: var(--ink-dim); line-height: 1.6; border-left: 2px solid var(--line); padding-left: 10px; margin-top: 6px; }
+  .tactical.bad { border-color: var(--bad); color: var(--bad); }
+  .tactical.good { border-color: var(--ok); color: var(--ok); }
+  .tactical a { color: var(--accent); }
   .footer-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .warn-banner { background: rgba(217,164,65,.1); border: 1px solid rgba(217,164,65,.3); color: var(--warn); font-size: 11px; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px; }
+  details summary { cursor: pointer; color: var(--ink-dim); font-size: 11px; margin-top: 6px; }
 </style>
 </head>
 <body>
 <header>
   <h1>LEDGER</h1>
-  <span class="date num" id="today"></span>
+  <div class="head-right">
+    <span class="date num" id="today"></span>
+    <span id="gear" title="Settings">&#9881;</span>
+  </div>
 </header>
 <div class="sub">deterministic core · v1 prototype</div>
 
 <div class="warn-banner" id="persistWarn">
   Prototype note: in this preview, data resets on reload. Persistence activates once hosted. Use Export to snapshot.
+</div>
+
+<!-- SETTINGS -->
+<div class="panel" id="settingsPanel" style="display:none">
+  <div class="panel-title">Settings · API keys — stored in this browser only, never uploaded</div>
+  <label>USDA FoodData Central key</label>
+  <input type="password" id="usdaKey" placeholder="api.data.gov key" autocomplete="off" style="margin-bottom:10px">
+  <label>Gemini API key</label>
+  <input type="password" id="geminiKey" placeholder="AIza…" autocomplete="off" style="margin-bottom:10px">
+  <label>Gemini model</label>
+  <input type="text" id="geminiModel" placeholder="gemini-2.5-flash" style="margin-bottom:12px">
+  <button id="saveKeys">Save keys</button>
+  <div class="tactical" id="keyStatus" style="margin-top:10px">No keys set. USDA search and AI parsing stay disabled until you add them.</div>
+  <details>
+    <summary>How to get keys (both free)</summary>
+    <div class="tactical" style="margin-top:8px">
+      <b>USDA:</b> <a href="https://fdc.nal.usda.gov/api-key-signup.html" target="_blank" rel="noopener">fdc.nal.usda.gov/api-key-signup.html</a> — instant, free, unlimited-ish.<br>
+      <b>Gemini:</b> <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> — create a key, free tier is generous.<br>
+      Keys live in localStorage on this device. Export never includes them.
+    </div>
+  </details>
 </div>
 
 <!-- CORRIDOR -->
@@ -154,9 +204,28 @@
   </div>
 </div>
 
+<!-- AI MEAL PARSE -->
+<div class="panel">
+  <div class="panel-title">Describe a meal · AI parse (Gemini → USDA)</div>
+  <textarea id="nlInput" rows="2" placeholder="e.g. two boiled eggs, a glass of skimmed milk, and 150g grilled chicken breast"></textarea>
+  <button id="parseBtn" style="margin-top:10px">Parse meal</button>
+  <div class="tactical" id="parseStatus" style="margin-top:8px;display:none"></div>
+  <div id="pending" style="margin-top:10px"></div>
+</div>
+
 <!-- INPUT -->
 <div class="panel">
-  <div class="panel-title">Log item</div>
+  <div class="panel-title">Log item · manual</div>
+  <div class="row" style="grid-template-columns:1fr 76px">
+    <div>
+      <label>Search foods (USDA)</label>
+      <input type="text" id="usdaSearch" placeholder="e.g. greek yogurt">
+    </div>
+    <div style="display:flex;align-items:flex-end">
+      <button id="usdaBtn" style="height:38px">Find</button>
+    </div>
+  </div>
+  <div id="searchResults" style="margin-bottom:10px"></div>
   <div class="row">
     <div>
       <label>Food</label>
@@ -221,13 +290,31 @@ const DB = {
 // Solver reference foods
 const RICE = DB["White rice, boiled"], CHK = DB["Chicken breast, boiled"];
 
+// Resolved-nutrient registry: name -> per-100g base. Seeded with the built-in DB,
+// extended at runtime by USDA lookups and AI parses. Keeps the deterministic core
+// (DB) intact while allowing arbitrary foods.
+const foodBase = Object.assign({}, DB);
+const foodSource = {};                       // name -> 'USDA' | 'AI est' (DB entries omitted = built-in)
+function getBase(name){ return foodBase[name] || DB[name]; }
+
 let ledger = [];
+let pending = [];                            // AI-parsed items awaiting review
+
+// ---- KEYS (localStorage; never exported) ----
+const LS = { usda:'ledger_usda_key', gem:'ledger_gemini_key', model:'ledger_gemini_model' };
+function getKey(k){ try { return localStorage.getItem(k) || ''; } catch(e){ return ''; } }
+function setKey(k,v){ try { v ? localStorage.setItem(k,v) : localStorage.removeItem(k); } catch(e){} }
+function hasUSDA(){ return !!getKey(LS.usda); }
+function hasGemini(){ return !!getKey(LS.gem); }
+function geminiModel(){ return getKey(LS.model) || 'gemini-2.5-flash'; }
 
 // ---- CORE: compute one entry's contribution with penalties applied ----
-function computeEntry(name, grams, weighed, isCurry, halfOil) {
-  const base = DB[name];
+// base = per-100g nutrients; source tags provenance so AI estimates read as provisional.
+function computeEntry(name, grams, weighed, isCurry, halfOil, base, source) {
+  base = base || getBase(name);
   const s = grams / 100;
-  let e = { name, grams, weighed, isCurry, halfOil, kcal: base.kcal*s, p: base.p*s, f: base.f*s, c: base.c*s, ca: base.ca*s, ph: base.ph*s, flags: [] };
+  let e = { name, grams, weighed, isCurry, halfOil, base, source: source || 'DB',
+            kcal: base.kcal*s, p: base.p*s, f: base.f*s, c: (base.c||0)*s, ca: base.ca*s, ph: base.ph*s, flags: [] };
   if (!weighed) {
     e.kcal *= INFLATE; e.p *= DEDUCT;
     e.flags.push("+10% kcal / −10% P");
@@ -237,6 +324,7 @@ function computeEntry(name, grams, weighed, isCurry, halfOil) {
     e.kcal += OIL_KCAL*mult; e.f += OIL_FAT*mult;
     e.flags.push(`+${mult} tbsp oil tax`);
   }
+  if (e.source === 'AI est') e.flags.push('AI-estimated nutrition — provisional');
   return e;
 }
 
@@ -319,10 +407,14 @@ function render() {
   // ledger table
   const body = document.getElementById('ledgerBody');
   if (!ledger.length) { body.innerHTML='<tr><td colspan="5" class="empty">nothing logged</td></tr>'; }
-  else body.innerHTML = ledger.map((e,i)=>
-    `<tr><td>${e.name} <small style="color:var(--ink-faint)">${e.grams}g</small>${e.flags.length?`<span class="flags">${e.flags.join(' · ')}</span>`:''}</td>`+
-    `<td>${Math.round(e.kcal)}</td><td>${e.p.toFixed(1)}</td><td>${e.f.toFixed(1)}</td><td>${Math.round(e.ca)}</td></tr>`
-  ).join('');
+  else body.innerHTML = ledger.map((e,i)=>{
+    const badge = (e.source && e.source!=='DB')
+      ? `<span class="badge ${e.source==='USDA'?'usda':'est'}">${e.source}</span> ` : '';
+    return `<tr><td>${badge}${e.name} <small style="color:var(--ink-faint)">${e.grams}g</small>`+
+      `<span class="del" data-i="${i}" title="remove">✕</span>`+
+      `${e.flags.length?`<span class="flags">${e.flags.join(' · ')}</span>`:''}</td>`+
+      `<td>${Math.round(e.kcal)}</td><td>${e.p.toFixed(1)}</td><td>${e.f.toFixed(1)}</td><td>${Math.round(e.ca)}</td></tr>`;
+  }).join('');
 
   // solver + tactical
   const sol = solveFridge(t);
@@ -340,11 +432,225 @@ function render() {
   tac.textContent = lines.slice(0,3).join(' ');
 }
 
-// ---- WIRING ----
+// ---- FOOD PICKER ----
 function initFoods(){
   const sel = document.getElementById('food');
-  sel.innerHTML = Object.keys(DB).map(k=>`<option>${k}</option>`).join('');
+  sel.innerHTML = Object.keys(foodBase).map(k=>`<option>${k}</option>`).join('');
 }
+// Register a resolved food into the picker + registry so it's selectable/reusable.
+function registerFood(name, base, source){
+  if (!foodBase[name]) {
+    foodBase[name] = base;
+    const opt = document.createElement('option');
+    opt.textContent = name;
+    document.getElementById('food').appendChild(opt);
+  } else {
+    foodBase[name] = base;                   // refresh in case values differ
+  }
+  if (source) foodSource[name] = source;
+}
+
+// ---- USDA FoodData Central ----
+// Per-100g nutrients keyed by USDA nutrient number: 208 kcal, 203 protein,
+// 204 fat, 205 carb, 301 calcium(mg), 305 phosphorus(mg).
+function nutrientsFrom(food){
+  const m = {};
+  (food.foodNutrients||[]).forEach(n=>{
+    const num = n.nutrientNumber || (n.nutrient && n.nutrient.number);
+    if (num!=null) m[String(num)] = n.value != null ? n.value : (n.amount || 0);
+  });
+  const g = num => Number(m[num] || 0);
+  return {
+    kcal: g('208') || g('957') || g('958'),
+    p:  g('203'), f: g('204'), c: g('205'),
+    ca: g('301'), ph: g('305')
+  };
+}
+async function usdaSearch(query){
+  if (!hasUSDA()) throw new Error('No USDA key — add one in ⚙ Settings.');
+  const url = 'https://api.nal.usda.gov/fdc/v1/foods/search'
+    + '?api_key=' + encodeURIComponent(getKey(LS.usda))
+    + '&query=' + encodeURIComponent(query)
+    + '&pageSize=5&dataType=' + encodeURIComponent('Foundation,SR Legacy,Survey (FNDDS)');
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('USDA API ' + r.status + (r.status===403?' — key rejected':''));
+  const d = await r.json();
+  return (d.foods||[]).map(f => ({ id:f.fdcId, name:f.description, base:nutrientsFrom(f) }));
+}
+
+// ---- Gemini natural-language parse ----
+// Returns items: {name, grams, weighed, isCurry, est:{per-100g}}. est is a fallback
+// used only when USDA has no match — flagged so it never masquerades as authoritative.
+async function geminiParse(text){
+  if (!hasGemini()) throw new Error('No Gemini key — add one in ⚙ Settings.');
+  const prompt =
+`You convert a meal description into structured food items for a macro tracker.
+Return JSON: {"items":[{"name":<short generic food name good for a USDA database search>,`+
+`"grams":<number, estimate a realistic portion if none is stated>,`+
+`"weighed":<boolean, true ONLY if the user gave an explicit weight or exact measure>,`+
+`"isCurry":<boolean, true if cooked in curry/gravy/added oil>,`+
+`"est":{"kcal":<per 100g>,"p":<per 100g>,"f":<per 100g>,"c":<per 100g>,"ca":<mg per 100g>,"ph":<mg per 100g>}}]}.
+"est" is your best per-100g estimate, used only as a fallback. Output JSON only, no prose.
+Meal: """${text}"""`;
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/'
+    + encodeURIComponent(geminiModel()) + ':generateContent?key=' + encodeURIComponent(getKey(LS.gem));
+  const r = await fetch(url, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      contents:[{parts:[{text:prompt}]}],
+      generationConfig:{ responseMimeType:'application/json', temperature:0 }
+    })
+  });
+  if (!r.ok){ const t = await r.text().catch(()=> ''); throw new Error('Gemini API '+r.status+' '+t.slice(0,140)); }
+  const d = await r.json();
+  const txt = d.candidates && d.candidates[0] && d.candidates[0].content
+    && d.candidates[0].content.parts && d.candidates[0].content.parts[0].text || '';
+  if (!txt) throw new Error('Gemini returned no content (blocked or empty).');
+  let parsed;
+  try { parsed = JSON.parse(txt); }
+  catch(e){ const m = txt.match(/[\[{][\s\S]*[\]}]/); if(!m) throw new Error('Could not parse AI JSON.'); parsed = JSON.parse(m[0]); }
+  const items = Array.isArray(parsed) ? parsed : (parsed.items || []);
+  if (!items.length) throw new Error('No foods recognised.');
+  return items;
+}
+
+// ---- PENDING (AI review) ----
+function renderPending(){
+  const wrap = document.getElementById('pending');
+  if (!pending.length){ wrap.innerHTML=''; return; }
+  wrap.innerHTML = pending.map((p,i)=>{
+    const badge = `<span class="badge ${p.source==='USDA'?'usda':'est'}">${p.source}</span>`;
+    return `<div class="pend-item">
+      <div class="pend-top">
+        <input type="checkbox" id="ps${i}" ${p.include?'checked':''} style="width:auto">
+        <span class="pname">${badge} ${p.name}</span>
+        <input type="number" id="pg${i}" value="${Math.round(p.grams)}" min="0" step="1" title="grams">
+      </div>
+      <div class="pend-tog">
+        <label class="chk"><input type="checkbox" id="pw${i}" ${p.weighed?'checked':''}> weighed</label>
+        <label class="chk"><input type="checkbox" id="pc${i}" ${p.isCurry?'checked':''}> curry</label>
+      </div>
+    </div>`;
+  }).join('')
+  + `<div class="footer-actions" style="margin-top:8px">
+       <button id="addPendingBtn">Add selected to ledger</button>
+       <button class="ghost" id="discardBtn">Discard</button>
+     </div>`;
+  document.getElementById('addPendingBtn').onclick = commitPending;
+  document.getElementById('discardBtn').onclick = ()=>{ pending=[]; renderPending(); };
+}
+function commitPending(){
+  let added = 0;
+  pending.forEach((p,i)=>{
+    if (!document.getElementById('ps'+i).checked) return;
+    const grams = parseFloat(document.getElementById('pg'+i).value);
+    if (!grams || grams<=0) return;
+    const weighed = document.getElementById('pw'+i).checked;
+    const isCurry = document.getElementById('pc'+i).checked;
+    registerFood(p.name, p.base, p.source);
+    ledger.push(computeEntry(p.name, grams, weighed, isCurry, false, p.base, p.source));
+    added++;
+  });
+  pending = []; renderPending();
+  if (added){ save(); render(); }
+}
+
+// ---- WIRING ----
+function setStatus(el, msg, cls){
+  el.style.display = msg ? 'block' : 'none';
+  el.textContent = msg || '';
+  el.className = 'tactical' + (cls ? ' '+cls : '');
+}
+
+document.getElementById('gear').onclick = ()=>{
+  const p = document.getElementById('settingsPanel');
+  p.style.display = p.style.display==='none' ? 'block' : 'none';
+};
+
+function refreshKeyUI(){
+  const st = document.getElementById('keyStatus');
+  const bits = [];
+  bits.push(hasUSDA() ? 'USDA ✓' : 'USDA — not set');
+  bits.push(hasGemini() ? 'Gemini ✓' : 'Gemini — not set');
+  st.textContent = bits.join('  ·  ') + (hasUSDA()&&hasGemini() ? '  · all systems go.' : '  · features disabled until set.');
+  document.getElementById('usdaBtn').disabled = !hasUSDA();
+  document.getElementById('parseBtn').disabled = !hasGemini();
+}
+document.getElementById('saveKeys').onclick = ()=>{
+  setKey(LS.usda,  document.getElementById('usdaKey').value.trim());
+  setKey(LS.gem,   document.getElementById('geminiKey').value.trim());
+  setKey(LS.model, document.getElementById('geminiModel').value.trim());
+  refreshKeyUI();
+  setStatus(document.getElementById('keyStatus'),
+    'Saved. ' + (hasUSDA()&&hasGemini() ? 'All systems go.' : 'Some keys still missing.'),
+    (hasUSDA()&&hasGemini()) ? 'good' : null);
+};
+
+// Manual USDA search → clickable results that load into the picker.
+document.getElementById('usdaBtn').onclick = async ()=>{
+  const q = document.getElementById('usdaSearch').value.trim();
+  const out = document.getElementById('searchResults');
+  if (!q){ out.innerHTML=''; return; }
+  out.innerHTML = '<div class="tactical">Searching USDA…</div>';
+  try {
+    const results = await usdaSearch(q);
+    if (!results.length){ out.innerHTML='<div class="tactical">No matches.</div>'; return; }
+    out.innerHTML = results.map((r,i)=>
+      `<div class="result">
+         <div><div class="rname">${r.name}</div>
+           <div class="rmeta">${Math.round(r.base.kcal)} kcal · P ${r.base.p.toFixed(1)} · F ${r.base.f.toFixed(1)} /100g</div></div>
+         <button class="sm" data-i="${i}">Use</button>
+       </div>`).join('');
+    out.querySelectorAll('button[data-i]').forEach(btn=>{
+      btn.onclick = ()=>{
+        const r = results[+btn.dataset.i];
+        registerFood(r.name, r.base, 'USDA');
+        document.getElementById('food').value = r.name;
+        out.innerHTML = `<div class="tactical good">Loaded “${r.name}”. Set grams below and add.</div>`;
+        document.getElementById('grams').focus();
+      };
+    });
+  } catch(err){ out.innerHTML = `<div class="tactical bad">${err.message}</div>`; }
+};
+
+// AI meal parse → resolve each item against USDA, else keep the AI estimate.
+document.getElementById('parseBtn').onclick = async ()=>{
+  const text = document.getElementById('nlInput').value.trim();
+  const status = document.getElementById('parseStatus');
+  if (!text){ return; }
+  setStatus(status, 'Parsing with Gemini…');
+  const btn = document.getElementById('parseBtn'); btn.disabled = true;
+  try {
+    const items = await geminiParse(text);
+    setStatus(status, `Parsed ${items.length} item(s). Resolving nutrients via USDA…`);
+    pending = [];
+    for (const it of items){
+      let base = it.est || {kcal:0,p:0,f:0,c:0,ca:0,ph:0};
+      let source = 'AI est';
+      if (hasUSDA() && it.name){
+        try {
+          const res = await usdaSearch(it.name);
+          if (res.length){ base = res[0].base; source = 'USDA'; }
+        } catch(e){ /* fall back to AI estimate */ }
+      }
+      pending.push({
+        name: it.name || 'unknown',
+        grams: Number(it.grams) || 0,
+        weighed: !!it.weighed,
+        isCurry: !!it.isCurry,
+        base, source, include: true
+      });
+    }
+    const nUsda = pending.filter(p=>p.source==='USDA').length;
+    setStatus(status, `${pending.length} item(s) ready · ${nUsda} from USDA, ${pending.length-nUsda} AI-estimated. Review and add.`,
+      hasUSDA() ? null : null);
+    renderPending();
+  } catch(err){
+    setStatus(status, err.message, 'bad');
+    pending = []; renderPending();
+  } finally { btn.disabled = !hasGemini(); }
+};
+
 document.getElementById('addBtn').onclick = ()=>{
   const name = document.getElementById('food').value;
   const grams = parseFloat(document.getElementById('grams').value);
@@ -352,11 +658,19 @@ document.getElementById('addBtn').onclick = ()=>{
   const e = computeEntry(name, grams,
     document.getElementById('weighed').checked,
     document.getElementById('isCurry').checked,
-    document.getElementById('halfOil').checked);
+    document.getElementById('halfOil').checked,
+    getBase(name), foodSource[name] || 'DB');
   ledger.push(e);
   document.getElementById('grams').value='';
   save(); render();
 };
+
+// Per-row delete (event delegation).
+document.getElementById('ledgerBody').onclick = (e)=>{
+  const d = e.target.closest('.del');
+  if (d){ ledger.splice(+d.dataset.i, 1); save(); render(); }
+};
+
 document.getElementById('resetBtn').onclick = ()=>{ if(confirm('Clear all entries for today?')){ledger=[];save();render();} };
 document.getElementById('exportBtn').onclick = ()=>{
   const blob = new Blob([JSON.stringify({date:dateStr(),ledger,totals:totals()},null,2)],{type:'application/json'});
@@ -379,10 +693,13 @@ document.getElementById('importFile').onchange = (ev)=>{
       const data = JSON.parse(reader.result);
       if (!data.ledger || !Array.isArray(data.ledger)) throw new Error('no ledger array');
       if (ledger.length && !confirm(`Replace current ${ledger.length} entries with ${data.ledger.length} imported?`)) return;
-      // Recompute from stored raw fields so imported entries stay consistent with current DB/logic.
-      ledger = data.ledger.map(e => (e.name && DB[e.name] && 'weighed' in e)
-        ? computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil)
-        : e);
+      // Recompute from stored raw fields + carried base so imported entries stay consistent.
+      ledger = data.ledger.map(e => {
+        const base = e.base || DB[e.name];
+        return (e.name && base && 'weighed' in e)
+          ? computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source)
+          : e;
+      });
       save(); render();
     } catch(err){ alert('Import failed: '+err.message); }
     ev.target.value='';
@@ -397,8 +714,16 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// Hydrate key fields from storage on boot.
+function loadKeys(){
+  document.getElementById('usdaKey').value   = getKey(LS.usda);
+  document.getElementById('geminiKey').value = getKey(LS.gem);
+  document.getElementById('geminiModel').value = getKey(LS.model) || 'gemini-2.5-flash';
+  refreshKeyUI();
+}
+
 document.getElementById('today').textContent = dateStr();
-initFoods(); load(); render();
+loadKeys(); initFoods(); load(); render();
 </script>
 </body>
 </html>
