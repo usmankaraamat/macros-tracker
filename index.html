@@ -482,12 +482,22 @@ function nutrientsFrom(food){
 }
 async function usdaSearch(query){
   if (!hasUSDA()) throw new Error('No USDA key — add one in ⚙ Settings.');
-  const url = 'https://api.nal.usda.gov/fdc/v1/foods/search'
-    + '?api_key=' + encodeURIComponent(getKey(LS.usda))
-    + '&query=' + encodeURIComponent(query)
-    + '&pageSize=5&dataType=' + encodeURIComponent('Foundation,SR Legacy,Survey (FNDDS)');
-  const r = await fetch(url);
-  if (!r.ok) throw new Error('USDA API ' + r.status + (r.status===403?' — key rejected':''));
+  const q = (query||'').trim();
+  if (!q) return [];
+  // POST with a JSON body — the documented form. Passing dataType as an array here
+  // avoids the URL-encoding quirks that make the GET query 400 on spaces/parens.
+  const url = 'https://api.nal.usda.gov/fdc/v1/foods/search?api_key='
+    + encodeURIComponent(getKey(LS.usda));
+  const r = await fetch(url, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      query: q,
+      dataType: ['Foundation','SR Legacy','Survey (FNDDS)'],
+      pageSize: 5
+    })
+  });
+  if (!r.ok) throw new Error('USDA API ' + r.status
+    + (r.status===403 ? ' — key rejected' : r.status===400 ? ' — bad request' : ''));
   const d = await r.json();
   return (d.foods||[]).map(f => ({ id:f.fdcId, name:f.description, base:nutrientsFrom(f) }));
 }
