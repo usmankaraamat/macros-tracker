@@ -172,8 +172,6 @@
     <div><label>Calorie floor (kcal)</label><input type="number" id="tFloor" min="0" step="10"></div>
     <div><label>Calorie ceiling (kcal)</label><input type="number" id="tCeil" min="0" step="10"></div>
     <div><label>Protein floor (g)</label><input type="number" id="tP" min="0" step="1"></div>
-    <div><label>Calcium (mg)</label><input type="number" id="tCa" min="0" step="10"></div>
-    <div><label>Phosphorus (mg)</label><input type="number" id="tPh" min="0" step="10"></div>
   </div>
   <div class="footer-actions">
     <button id="saveTargets">Save targets</button>
@@ -227,19 +225,6 @@
       <div class="v"><span id="fNow">0</span><small>g · <span id="fPct">0</span>% kcal</small></div>
     </div>
   </div>
-  <div class="panel-title" style="margin-top:16px">Bone minerals</div>
-  <div class="grid">
-    <div class="stat">
-      <div class="k">Calcium · <span id="caTitle">1000</span>mg</div>
-      <div class="v"><span id="caNow">0</span><small>mg</small></div>
-      <div class="bar"><div id="caBar" style="width:0%;background:var(--ok)"></div></div>
-    </div>
-    <div class="stat">
-      <div class="k">Phosphorus · <span id="phTitle">700</span>mg</div>
-      <div class="v"><span id="phNow">0</span><small>mg</small></div>
-      <div class="bar"><div id="phBar" style="width:0%;background:var(--ok)"></div></div>
-    </div>
-  </div>
 </div>
 
 <!-- AI MEAL PARSE -->
@@ -287,7 +272,7 @@
 <div class="panel">
   <div class="panel-title">Today's entries</div>
   <table>
-    <thead><tr><th>Item</th><th>kcal</th><th>P</th><th>F</th><th>Ca</th></tr></thead>
+    <thead><tr><th>Item</th><th>kcal</th><th>P</th><th>F</th><th>C</th></tr></thead>
     <tbody id="ledgerBody"><tr><td colspan="5" class="empty">nothing logged</td></tr></tbody>
   </table>
 </div>
@@ -319,25 +304,25 @@
 // ---- CONSTANTS (protocol) ----
 // PROTOCOL holds the authoritative defaults; live targets are user-overridable
 // via Settings and persisted separately, so the protocol itself never mutates.
-const PROTOCOL = { floor:1700, ceil:1900, p:120, ca:1000, ph:700 };
+const PROTOCOL = { floor:1700, ceil:1900, p:120 };
 let FLOOR = PROTOCOL.floor, CEIL = PROTOCOL.ceil;
-let P_TARGET = PROTOCOL.p, CA_TARGET = PROTOCOL.ca, PH_TARGET = PROTOCOL.ph;
+let P_TARGET = PROTOCOL.p;
 const OIL_KCAL = 132, OIL_FAT = 14;      // 1 tbsp hidden oil
 const INFLATE = 1.10, DEDUCT = 0.90;     // unweighed: +10% kcal, -10% protein
 
 function loadTargets(){
   try {
     const t = JSON.parse(localStorage.getItem('ledger_targets')||'null');
-    if (t){ FLOOR=+t.floor||FLOOR; CEIL=+t.ceil||CEIL; P_TARGET=+t.p||P_TARGET; CA_TARGET=+t.ca||CA_TARGET; PH_TARGET=+t.ph||PH_TARGET; }
+    if (t){ FLOOR=+t.floor||FLOOR; CEIL=+t.ceil||CEIL; P_TARGET=+t.p||P_TARGET; }
   } catch(e){}
 }
 function saveTargets(){
-  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR,ceil:CEIL,p:P_TARGET,ca:CA_TARGET,ph:PH_TARGET})); } catch(e){}
+  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR,ceil:CEIL,p:P_TARGET})); } catch(e){}
 }
 function refreshTargetLabels(){
   const set=(id,v)=>{const el=document.getElementById(id); if(el) el.textContent=v;};
   set('floorTitle',FLOOR); set('ceilTitle',CEIL); set('solverTitle',FLOOR);
-  set('pTitle',P_TARGET); set('caTitle',CA_TARGET); set('phTitle',PH_TARGET);
+  set('pTitle',P_TARGET);
   set('floorLabel',FLOOR); set('ceilLabel',CEIL);
 }
 
@@ -378,7 +363,7 @@ function computeEntry(name, grams, weighed, isCurry, halfOil, base, source) {
   base = base || getBase(name);
   const s = grams / 100;
   let e = { name, grams, weighed, isCurry, halfOil, base, source: source || 'DB',
-            kcal: base.kcal*s, p: base.p*s, f: base.f*s, c: (base.c||0)*s, ca: base.ca*s, ph: base.ph*s, flags: [] };
+            kcal: base.kcal*s, p: base.p*s, f: base.f*s, c: (base.c||0)*s, ca: (base.ca||0)*s, ph: (base.ph||0)*s, flags: [] };
   if (!weighed) {
     e.kcal *= INFLATE; e.p *= DEDUCT;
     e.flags.push("+10% kcal / −10% P");
@@ -480,15 +465,12 @@ function render() {
   const set = (id,v)=>document.getElementById(id).textContent=v;
   set('pNow', t.p.toFixed(1)); set('pRem', Math.max(0,P_TARGET-t.p).toFixed(1));
   set('fNow', t.f.toFixed(1)); set('cNow', t.c.toFixed(1));
-  set('caNow', Math.round(t.ca)); set('phNow', Math.round(t.ph));
   // kcal composition — surfaces which macros dominate intake, no fixed target imposed
   const macroKcal = (t.p*4 + t.c*4 + t.f*9) || 1;
   set('cPct', Math.round(t.c*4/macroKcal*100));
   set('fPct', Math.round(t.f*9/macroKcal*100));
   const bar=(id,frac,warn)=>{const el=document.getElementById(id);el.style.width=Math.min(100,frac*100)+'%';el.style.background=frac>=1?'var(--ok)':(warn?'var(--warn)':'var(--accent)');};
   bar('pBar', t.p/P_TARGET, true);
-  bar('caBar', t.ca/CA_TARGET, true);
-  bar('phBar', t.ph/PH_TARGET, true);
 
   // ledger table
   const body = document.getElementById('ledgerBody');
@@ -500,7 +482,7 @@ function render() {
       `<span class="del" data-i="${i}" title="remove">✕</span>`+
       `<span class="del edit" data-i="${i}" title="edit grams">✎</span>`+
       `${e.flags.length?`<span class="flags">${e.flags.join(' · ')}</span>`:''}</td>`+
-      `<td>${Math.round(e.kcal)}</td><td>${e.p.toFixed(1)}</td><td>${e.f.toFixed(1)}</td><td>${Math.round(e.ca)}</td></tr>`;
+      `<td>${Math.round(e.kcal)}</td><td>${e.p.toFixed(1)}</td><td>${e.f.toFixed(1)}</td><td>${(e.c||0).toFixed(1)}</td></tr>`;
   }).join('');
 
   // solver + tactical
@@ -514,7 +496,6 @@ function render() {
     if (remKcal>0) lines.push(`${Math.round(remKcal)} kcal to floor, ${Math.max(0,remP).toFixed(0)}g protein outstanding.`);
     else if (t.kcal<=CEIL) lines.push(`Inside corridor with ${Math.round(CEIL-t.kcal)} kcal of ceiling headroom.`);
     else lines.push(`Ceiling breached by ${Math.round(t.kcal-CEIL)} kcal — integrity compromised.`);
-    if (t.ca<CA_TARGET) lines.push(`Calcium ${Math.round(CA_TARGET-t.ca)}mg short of 1000mg bone-density minimum.`);
   }
   tac.textContent = lines.slice(0,3).join(' ');
 
@@ -537,7 +518,7 @@ function renderHistory(){
                : '<span style="color:var(--warn)">△</span>';
     const rows = d.ledger.map(e=>
       `<tr><td>${e.name} <small style="color:var(--ink-faint)">${e.grams}g</small></td>`+
-      `<td>${Math.round(e.kcal)}</td><td>${(e.p||0).toFixed(1)}</td><td>${(e.f||0).toFixed(1)}</td><td>${Math.round(e.ca||0)}</td></tr>`).join('');
+      `<td>${Math.round(e.kcal)}</td><td>${(e.p||0).toFixed(1)}</td><td>${(e.f||0).toFixed(1)}</td><td>${(e.c||0).toFixed(1)}</td></tr>`).join('');
     return `<details class="hist-day">
       <summary><span class="hd-date">${d.date}</span>
         <span>${Math.round(t.kcal)} kcal · P ${t.p.toFixed(0)}g</span>
@@ -545,7 +526,7 @@ function renderHistory(){
         <button class="sm ghost" data-rep="${di}" style="padding:3px 9px;font-size:10px">repeat</button>
       </summary>
       <div class="hd-body"><table>
-        <thead><tr><th>Item</th><th>kcal</th><th>P</th><th>F</th><th>Ca</th></tr></thead>
+        <thead><tr><th>Item</th><th>kcal</th><th>P</th><th>F</th><th>C</th></tr></thead>
         <tbody>${rows}</tbody></table></div>
     </details>`;
   }).join('');
@@ -698,7 +679,7 @@ Return JSON: {"items":[{"name":<short generic food name good for a USDA database
 `"grams":<number, estimate a realistic portion if none is stated>,`+
 `"weighed":<boolean, true ONLY if the user gave an explicit weight or exact measure>,`+
 `"isCurry":<boolean, true if cooked in curry/gravy/added oil>,`+
-`"est":{"kcal":<per 100g>,"p":<per 100g>,"f":<per 100g>,"c":<per 100g>,"ca":<mg per 100g>,"ph":<mg per 100g>}}]}.
+`"est":{"kcal":<per 100g>,"p":<protein g per 100g>,"f":<fat g per 100g>,"c":<carb g per 100g>}}]}.
 "est" is your best per-100g estimate, used only as a fallback. Output JSON only, no prose.
 Meal: """${text}"""`;
   let model = geminiModel();
@@ -859,7 +840,7 @@ document.getElementById('parseBtn').onclick = async ()=>{
     setStatus(status, `Parsed ${items.length} item(s). Resolving nutrients via USDA…`);
     pending = [];
     for (const it of items){
-      let base = it.est || {kcal:0,p:0,f:0,c:0,ca:0,ph:0};
+      let base = it.est || {kcal:0,p:0,f:0,c:0};
       let source = 'AI est';
       if (hasUSDA() && it.name){
         try {
@@ -920,23 +901,21 @@ function fillTargetInputs(){
   document.getElementById('tFloor').value = FLOOR;
   document.getElementById('tCeil').value  = CEIL;
   document.getElementById('tP').value     = P_TARGET;
-  document.getElementById('tCa').value    = CA_TARGET;
-  document.getElementById('tPh').value    = PH_TARGET;
 }
 document.getElementById('saveTargets').onclick = ()=>{
   const st = document.getElementById('targetStatus');
   const f = +document.getElementById('tFloor').value, c = +document.getElementById('tCeil').value;
-  const p = +document.getElementById('tP').value, ca = +document.getElementById('tCa').value, ph = +document.getElementById('tPh').value;
-  if (!(f>0 && c>0 && p>0 && ca>0 && ph>0)){ setStatus(st,'All targets must be positive numbers.','bad'); return; }
+  const p = +document.getElementById('tP').value;
+  if (!(f>0 && c>0 && p>0)){ setStatus(st,'All targets must be positive numbers.','bad'); return; }
   if (c < f){ setStatus(st,'Ceiling cannot be below floor.','bad'); return; }
-  FLOOR=f; CEIL=c; P_TARGET=p; CA_TARGET=ca; PH_TARGET=ph;
+  FLOOR=f; CEIL=c; P_TARGET=p;
   saveTargets(); render();
   setStatus(st,'Targets saved. Corridor, solver and history all follow the new numbers.','good');
 };
 document.getElementById('resetTargets').onclick = ()=>{
-  FLOOR=PROTOCOL.floor; CEIL=PROTOCOL.ceil; P_TARGET=PROTOCOL.p; CA_TARGET=PROTOCOL.ca; PH_TARGET=PROTOCOL.ph;
+  FLOOR=PROTOCOL.floor; CEIL=PROTOCOL.ceil; P_TARGET=PROTOCOL.p;
   saveTargets(); fillTargetInputs(); render();
-  setStatus(document.getElementById('targetStatus'),'Protocol defaults restored (1700/1900 · 120g · 1000mg · 700mg).','good');
+  setStatus(document.getElementById('targetStatus'),'Protocol defaults restored (1700/1900 · 120g protein).','good');
 };
 
 document.getElementById('resetBtn').onclick = ()=>{ if(confirm('Clear all entries for today?')){ledger=[];save();render();} };
@@ -947,7 +926,7 @@ document.getElementById('exportBtn').onclick = ()=>{
   allDays(true).forEach(d => { days[d.date] = d.ledger; });
   days[dateStr()] = ledger;                       // today's live state wins
   const payload = { exported: dateStr(), version: 2,
-    targets: {floor:FLOOR,ceil:CEIL,p:P_TARGET,ca:CA_TARGET,ph:PH_TARGET},
+    targets: {floor:FLOOR,ceil:CEIL,p:P_TARGET},
     days, date: dateStr(), ledger, totals: totals() };   // date/ledger kept for v1 compat
   const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
   const url = URL.createObjectURL(blob); const a=document.createElement('a');
@@ -986,7 +965,7 @@ document.getElementById('importFile').onchange = (ev)=>{
         });
         if (data.targets){
           FLOOR=+data.targets.floor||FLOOR; CEIL=+data.targets.ceil||CEIL;
-          P_TARGET=+data.targets.p||P_TARGET; CA_TARGET=+data.targets.ca||CA_TARGET; PH_TARGET=+data.targets.ph||PH_TARGET;
+          P_TARGET=+data.targets.p||P_TARGET;
           saveTargets(); fillTargetInputs();
         }
       } else if (data.ledger && Array.isArray(data.ledger)) {
