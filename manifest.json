@@ -1,0 +1,16 @@
+{
+  "name": "Ledger — Macro Tracker",
+  "short_name": "Ledger",
+  "description": "Deterministic macro & micro tracker with hard caloric corridor",
+  "start_url": "/macros-tracker/",
+  "scope": "/macros-tracker/",
+  "display": "standalone",
+  "background_color": "#0c0e12",
+  "theme_color": "#0c0e12",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
