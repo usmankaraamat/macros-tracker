@@ -122,6 +122,20 @@
   .footer-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .warn-banner { background: rgba(217,164,65,.1); border: 1px solid rgba(217,164,65,.3); color: var(--warn); font-size: 11px; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px; }
   details summary { cursor: pointer; color: var(--ink-dim); font-size: 11px; margin-top: 6px; }
+
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .chip { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 3px 10px; cursor: pointer; }
+  .chip:hover { border-color: var(--accent); color: var(--ink); }
+  .chip small { color: var(--ink-faint); }
+
+  .hist-day { border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; background: var(--panel-2); }
+  .hist-day summary { list-style: none; display: grid; grid-template-columns: 86px 1fr auto auto; gap: 8px; align-items: center; padding: 8px 10px; margin: 0; font-family: var(--mono); font-size: 12px; color: var(--ink); }
+  .hist-day summary::-webkit-details-marker { display: none; }
+  .hist-day .hd-date { color: var(--ink-dim); }
+  .hist-day .hd-mark { font-size: 11px; }
+  .hist-day .hd-body { padding: 4px 10px 10px; border-top: 1px solid var(--line); }
+  .hist-day .hd-body table { font-size: 11px; }
+  .targets-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; margin-bottom: 10px; }
 </style>
 </head>
 <body>
@@ -146,13 +160,26 @@
   <label>Gemini API key</label>
   <input type="password" id="geminiKey" placeholder="AIza…" autocomplete="off" style="margin-bottom:10px">
   <label>Gemini model</label>
-  <input type="text" id="geminiModel" list="modelList" placeholder="gemini-2.5-flash" style="margin-bottom:8px">
+  <input type="text" id="geminiModel" list="modelList" placeholder="gemini-3.1-flash-lite" style="margin-bottom:8px">
   <datalist id="modelList"></datalist>
   <div class="footer-actions" style="margin-bottom:12px">
     <button id="saveKeys">Save keys</button>
     <button class="ghost" id="loadModelsBtn">Load models</button>
   </div>
-  <div class="tactical" id="keyStatus" style="margin-top:10px">No keys set. USDA search and AI parsing stay disabled until you add them.</div>
+  <div class="tactical" id="keyStatus" style="margin-top:10px;margin-bottom:14px">No keys set. USDA search and AI parsing stay disabled until you add them.</div>
+  <div class="panel-title">Targets · protocol defaults shown — edit deliberately</div>
+  <div class="targets-grid">
+    <div><label>Calorie floor (kcal)</label><input type="number" id="tFloor" min="0" step="10"></div>
+    <div><label>Calorie ceiling (kcal)</label><input type="number" id="tCeil" min="0" step="10"></div>
+    <div><label>Protein floor (g)</label><input type="number" id="tP" min="0" step="1"></div>
+    <div><label>Calcium (mg)</label><input type="number" id="tCa" min="0" step="10"></div>
+    <div><label>Phosphorus (mg)</label><input type="number" id="tPh" min="0" step="10"></div>
+  </div>
+  <div class="footer-actions">
+    <button id="saveTargets">Save targets</button>
+    <button class="ghost" id="resetTargets">Protocol defaults</button>
+  </div>
+  <div class="tactical" id="targetStatus" style="margin-top:10px;display:none"></div>
   <details>
     <summary>How to get keys (both free)</summary>
     <div class="tactical" style="margin-top:8px">
@@ -165,7 +192,7 @@
 
 <!-- CORRIDOR -->
 <div class="panel">
-  <div class="panel-title">Caloric corridor · 1700 floor / 1900 ceiling</div>
+  <div class="panel-title">Caloric corridor · <span id="floorTitle">1700</span> floor / <span id="ceilTitle">1900</span> ceiling</div>
   <div class="corridor-wrap">
     <div class="corridor-cursor" id="cursor" style="left:0%"></div>
     <div class="corridor-track"><div class="corridor-fill" id="fill" style="width:0%"></div></div>
@@ -187,7 +214,7 @@
   <div class="panel-title">Macros consumed</div>
   <div class="grid grid-3">
     <div class="stat">
-      <div class="k">Protein · 120g floor</div>
+      <div class="k">Protein · <span id="pTitle">120</span>g floor</div>
       <div class="v"><span id="pNow">0</span><small>g · <span id="pRem">120</span> left</small></div>
       <div class="bar"><div id="pBar" style="width:0%;background:var(--ok)"></div></div>
     </div>
@@ -203,12 +230,12 @@
   <div class="panel-title" style="margin-top:16px">Bone minerals</div>
   <div class="grid">
     <div class="stat">
-      <div class="k">Calcium · 1000mg</div>
+      <div class="k">Calcium · <span id="caTitle">1000</span>mg</div>
       <div class="v"><span id="caNow">0</span><small>mg</small></div>
       <div class="bar"><div id="caBar" style="width:0%;background:var(--ok)"></div></div>
     </div>
     <div class="stat">
-      <div class="k">Phosphorus · 700mg</div>
+      <div class="k">Phosphorus · <span id="phTitle">700</span>mg</div>
       <div class="v"><span id="phNow">0</span><small>mg</small></div>
       <div class="bar"><div id="phBar" style="width:0%;background:var(--ok)"></div></div>
     </div>
@@ -227,6 +254,7 @@
 <!-- INPUT -->
 <div class="panel">
   <div class="panel-title">Log item · manual</div>
+  <div class="chips" id="freqChips" style="display:none"></div>
   <div class="row" style="grid-template-columns:1fr 76px">
     <div>
       <label>Search foods (USDA)</label>
@@ -266,9 +294,15 @@
 
 <!-- SOLVER -->
 <div class="panel">
-  <div class="panel-title">Fridge closer · boiled rice + chicken to hit 1700</div>
+  <div class="panel-title">Fridge closer · boiled rice + chicken to hit <span id="solverTitle">1700</span></div>
   <div class="solver-out" id="solverOut">Log something to compute.</div>
   <div class="tactical" id="tactical"></div>
+</div>
+
+<!-- HISTORY -->
+<div class="panel">
+  <div class="panel-title">History</div>
+  <div id="histList"><div class="empty">No previous days yet.</div></div>
 </div>
 
 <div class="footer-actions" style="grid-template-columns:1fr 1fr 1fr">
@@ -283,10 +317,29 @@
 
 <script>
 // ---- CONSTANTS (protocol) ----
-const FLOOR = 1700, CEIL = 1900;
-const P_TARGET = 120, CA_TARGET = 1000, PH_TARGET = 700;
+// PROTOCOL holds the authoritative defaults; live targets are user-overridable
+// via Settings and persisted separately, so the protocol itself never mutates.
+const PROTOCOL = { floor:1700, ceil:1900, p:120, ca:1000, ph:700 };
+let FLOOR = PROTOCOL.floor, CEIL = PROTOCOL.ceil;
+let P_TARGET = PROTOCOL.p, CA_TARGET = PROTOCOL.ca, PH_TARGET = PROTOCOL.ph;
 const OIL_KCAL = 132, OIL_FAT = 14;      // 1 tbsp hidden oil
 const INFLATE = 1.10, DEDUCT = 0.90;     // unweighed: +10% kcal, -10% protein
+
+function loadTargets(){
+  try {
+    const t = JSON.parse(localStorage.getItem('ledger_targets')||'null');
+    if (t){ FLOOR=+t.floor||FLOOR; CEIL=+t.ceil||CEIL; P_TARGET=+t.p||P_TARGET; CA_TARGET=+t.ca||CA_TARGET; PH_TARGET=+t.ph||PH_TARGET; }
+  } catch(e){}
+}
+function saveTargets(){
+  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR,ceil:CEIL,p:P_TARGET,ca:CA_TARGET,ph:PH_TARGET})); } catch(e){}
+}
+function refreshTargetLabels(){
+  const set=(id,v)=>{const el=document.getElementById(id); if(el) el.textContent=v;};
+  set('floorTitle',FLOOR); set('ceilTitle',CEIL); set('solverTitle',FLOOR);
+  set('pTitle',P_TARGET); set('caTitle',CA_TARGET); set('phTitle',PH_TARGET);
+  set('floorLabel',FLOOR); set('ceilLabel',CEIL);
+}
 
 // ---- FOOD DB (per 100g): kcal, protein, fat, carb, calcium_mg, phosphorus_mg ----
 // Values reconciled against USDA SR; egg/milk set verified vs the Jul 1 log.
@@ -317,7 +370,7 @@ function getKey(k){ try { return localStorage.getItem(k) || ''; } catch(e){ retu
 function setKey(k,v){ try { v ? localStorage.setItem(k,v) : localStorage.removeItem(k); } catch(e){} }
 function hasUSDA(){ return !!getKey(LS.usda); }
 function hasGemini(){ return !!getKey(LS.gem); }
-function geminiModel(){ return getKey(LS.model) || 'gemini-2.5-flash'; }
+function geminiModel(){ return getKey(LS.model) || 'gemini-3.1-flash-lite'; }
 
 // ---- CORE: compute one entry's contribution with penalties applied ----
 // base = per-100g nutrients; source tags provenance so AI estimates read as provisional.
@@ -339,10 +392,29 @@ function computeEntry(name, grams, weighed, isCurry, halfOil, base, source) {
   return e;
 }
 
-function totals() {
-  return ledger.reduce((t,e)=>({
-    kcal:t.kcal+e.kcal, p:t.p+e.p, f:t.f+e.f, c:t.c+e.c, ca:t.ca+e.ca, ph:t.ph+e.ph
+function totalsOf(l) {
+  return l.reduce((t,e)=>({
+    kcal:t.kcal+e.kcal, p:t.p+e.p, f:t.f+e.f, c:t.c+(e.c||0), ca:t.ca+e.ca, ph:t.ph+e.ph
   }), {kcal:0,p:0,f:0,c:0,ca:0,ph:0});
+}
+function totals(){ return totalsOf(ledger); }
+
+// ---- HISTORY: every logged day already lives in localStorage under ledger_YYYY-MM-DD ----
+function allDays(includeToday){
+  const days = [];
+  try {
+    for (let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      const m = k && k.match(/^ledger_(\d{4}-\d{2}-\d{2})$/);
+      if (!m) continue;
+      if (!includeToday && m[1]===dateStr()) continue;
+      try {
+        const l = JSON.parse(localStorage.getItem(k));
+        if (Array.isArray(l) && l.length) days.push({date:m[1], ledger:l});
+      } catch(e){}
+    }
+  } catch(e){}
+  return days.sort((a,b)=> a.date<b.date ? 1 : -1);   // newest first
 }
 
 // ---- SOLVER: rice(r) + chicken(k) grams to LAND at FLOOR kcal, protein as a floor ----
@@ -426,6 +498,7 @@ function render() {
       ? `<span class="badge ${e.source==='USDA'?'usda':'est'}">${e.source}</span> ` : '';
     return `<tr><td>${badge}${e.name} <small style="color:var(--ink-faint)">${e.grams}g</small>`+
       `<span class="del" data-i="${i}" title="remove">✕</span>`+
+      `<span class="del edit" data-i="${i}" title="edit grams">✎</span>`+
       `${e.flags.length?`<span class="flags">${e.flags.join(' · ')}</span>`:''}</td>`+
       `<td>${Math.round(e.kcal)}</td><td>${e.p.toFixed(1)}</td><td>${e.f.toFixed(1)}</td><td>${Math.round(e.ca)}</td></tr>`;
   }).join('');
@@ -444,6 +517,83 @@ function render() {
     if (t.ca<CA_TARGET) lines.push(`Calcium ${Math.round(CA_TARGET-t.ca)}mg short of 1000mg bone-density minimum.`);
   }
   tac.textContent = lines.slice(0,3).join(' ');
+
+  refreshTargetLabels();
+  renderHistory();
+  renderFrequents();
+}
+
+// ---- HISTORY PANEL ----
+function renderHistory(){
+  const wrap = document.getElementById('histList');
+  const days = allDays(false);
+  if (!days.length){ wrap.innerHTML = '<div class="empty">No previous days yet.</div>'; return; }
+  wrap.innerHTML = days.map((d,di)=>{
+    const t = totalsOf(d.ledger);
+    const inC = t.kcal >= FLOOR && t.kcal <= CEIL;
+    const pOk = t.p >= P_TARGET;
+    const mark = inC && pOk ? '<span style="color:var(--ok)">✓</span>'
+               : t.kcal > CEIL ? '<span style="color:var(--bad)">✗</span>'
+               : '<span style="color:var(--warn)">△</span>';
+    const rows = d.ledger.map(e=>
+      `<tr><td>${e.name} <small style="color:var(--ink-faint)">${e.grams}g</small></td>`+
+      `<td>${Math.round(e.kcal)}</td><td>${(e.p||0).toFixed(1)}</td><td>${(e.f||0).toFixed(1)}</td><td>${Math.round(e.ca||0)}</td></tr>`).join('');
+    return `<details class="hist-day">
+      <summary><span class="hd-date">${d.date}</span>
+        <span>${Math.round(t.kcal)} kcal · P ${t.p.toFixed(0)}g</span>
+        <span class="hd-mark">${mark}</span>
+        <button class="sm ghost" data-rep="${di}" style="padding:3px 9px;font-size:10px">repeat</button>
+      </summary>
+      <div class="hd-body"><table>
+        <thead><tr><th>Item</th><th>kcal</th><th>P</th><th>F</th><th>Ca</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+    </details>`;
+  }).join('');
+  wrap.querySelectorAll('button[data-rep]').forEach(btn=>{
+    btn.onclick = (ev)=>{
+      ev.preventDefault(); ev.stopPropagation();          // don't toggle the <details>
+      const d = days[+btn.dataset.rep];
+      if (!confirm(`Copy ${d.ledger.length} entries from ${d.date} into today?`)) return;
+      d.ledger.forEach(e=>{
+        const base = e.base || DB[e.name];
+        if (!base) return;
+        if (e.base) registerFood(e.name, e.base, e.source);
+        ledger.push(computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source));
+      });
+      save(); render();
+      window.scrollTo({top:0, behavior:'smooth'});
+    };
+  });
+}
+
+// ---- FREQUENT FOODS: mined from history + today, one tap prefills the form ----
+function renderFrequents(){
+  const wrap = document.getElementById('freqChips');
+  const count = {}, last = {};
+  allDays(true).forEach(d => d.ledger.forEach(e=>{
+    if (!e.name) return;
+    count[e.name] = (count[e.name]||0) + 1;
+    // days are newest-first, so keep only the first (most recent) sighting
+    if (!last[e.name]) last[e.name] = e;
+  }));
+  const top = Object.keys(count).sort((a,b)=>count[b]-count[a]).slice(0,6);
+  if (!top.length){ wrap.style.display='none'; wrap.innerHTML=''; return; }
+  wrap.style.display='flex';
+  wrap.innerHTML = top.map(n=>
+    `<span class="chip" data-n="${n.replace(/"/g,'&quot;')}">${n} <small>${last[n].grams}g</small></span>`).join('');
+  wrap.querySelectorAll('.chip').forEach(ch=>{
+    ch.onclick = ()=>{
+      const e = last[ch.dataset.n];
+      const base = e.base || DB[e.name];
+      if (base && !foodBase[e.name]) registerFood(e.name, base, e.source);
+      document.getElementById('food').value = e.name;
+      document.getElementById('grams').value = e.grams;
+      document.getElementById('weighed').checked = !!e.weighed;
+      document.getElementById('isCurry').checked = !!e.isCurry;
+      document.getElementById('halfOil').checked = !!e.halfOil;
+      document.getElementById('grams').focus();
+    };
+  });
 }
 
 // ---- FOOD PICKER ----
@@ -516,10 +666,12 @@ async function listGeminiModels(){
     .map(m => (m.name||'').replace(/^models\//,''))
     .filter(Boolean);
 }
-// Prefer a current flash model (fast + cheap), else any flash, else whatever exists.
+// Prefer the known-good default, then newest flash-lite/flash, else whatever exists.
 function pickModel(list){
-  return list.find(n=>/2\.5.*flash/.test(n) && !/thinking|preview/.test(n))
-      || list.find(n=>/flash/.test(n) && !/preview/.test(n))
+  return list.find(n=>n==='gemini-3.1-flash-lite')
+      || list.find(n=>/3\.\d.*flash-lite/.test(n) && !/preview/.test(n))
+      || list.find(n=>/flash-lite/.test(n) && !/preview/.test(n))
+      || list.find(n=>/flash/.test(n) && !/thinking|preview/.test(n))
       || list.find(n=>/flash/.test(n))
       || list[0];
 }
@@ -747,15 +899,57 @@ document.getElementById('addBtn').onclick = ()=>{
   save(); render();
 };
 
-// Per-row delete (event delegation).
-document.getElementById('ledgerBody').onclick = (e)=>{
-  const d = e.target.closest('.del');
-  if (d){ ledger.splice(+d.dataset.i, 1); save(); render(); }
+// Per-row delete + in-place gram edit (event delegation).
+document.getElementById('ledgerBody').onclick = (ev)=>{
+  const d = ev.target.closest('.del');
+  if (!d) return;
+  const i = +d.dataset.i;
+  if (d.classList.contains('edit')) {
+    const e = ledger[i];
+    const g = parseFloat(prompt(`Grams for ${e.name}:`, e.grams));
+    if (!g || g<=0) return;
+    ledger[i] = computeEntry(e.name, g, e.weighed, e.isCurry, e.halfOil, e.base || DB[e.name], e.source);
+  } else {
+    ledger.splice(i, 1);
+  }
+  save(); render();
+};
+
+// Targets: user-overridable, protocol defaults recoverable in one tap.
+function fillTargetInputs(){
+  document.getElementById('tFloor').value = FLOOR;
+  document.getElementById('tCeil').value  = CEIL;
+  document.getElementById('tP').value     = P_TARGET;
+  document.getElementById('tCa').value    = CA_TARGET;
+  document.getElementById('tPh').value    = PH_TARGET;
+}
+document.getElementById('saveTargets').onclick = ()=>{
+  const st = document.getElementById('targetStatus');
+  const f = +document.getElementById('tFloor').value, c = +document.getElementById('tCeil').value;
+  const p = +document.getElementById('tP').value, ca = +document.getElementById('tCa').value, ph = +document.getElementById('tPh').value;
+  if (!(f>0 && c>0 && p>0 && ca>0 && ph>0)){ setStatus(st,'All targets must be positive numbers.','bad'); return; }
+  if (c < f){ setStatus(st,'Ceiling cannot be below floor.','bad'); return; }
+  FLOOR=f; CEIL=c; P_TARGET=p; CA_TARGET=ca; PH_TARGET=ph;
+  saveTargets(); render();
+  setStatus(st,'Targets saved. Corridor, solver and history all follow the new numbers.','good');
+};
+document.getElementById('resetTargets').onclick = ()=>{
+  FLOOR=PROTOCOL.floor; CEIL=PROTOCOL.ceil; P_TARGET=PROTOCOL.p; CA_TARGET=PROTOCOL.ca; PH_TARGET=PROTOCOL.ph;
+  saveTargets(); fillTargetInputs(); render();
+  setStatus(document.getElementById('targetStatus'),'Protocol defaults restored (1700/1900 · 120g · 1000mg · 700mg).','good');
 };
 
 document.getElementById('resetBtn').onclick = ()=>{ if(confirm('Clear all entries for today?')){ledger=[];save();render();} };
+// Export EVERY logged day (plus targets) — this is the durable backup, so it must
+// carry the whole history, not just today.
 document.getElementById('exportBtn').onclick = ()=>{
-  const blob = new Blob([JSON.stringify({date:dateStr(),ledger,totals:totals()},null,2)],{type:'application/json'});
+  const days = {};
+  allDays(true).forEach(d => { days[d.date] = d.ledger; });
+  days[dateStr()] = ledger;                       // today's live state wins
+  const payload = { exported: dateStr(), version: 2,
+    targets: {floor:FLOOR,ceil:CEIL,p:P_TARGET,ca:CA_TARGET,ph:PH_TARGET},
+    days, date: dateStr(), ledger, totals: totals() };   // date/ledger kept for v1 compat
+  const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
   const url = URL.createObjectURL(blob); const a=document.createElement('a');
   a.href=url; a.download=`ledger_${dateStr()}.json`; a.click(); URL.revokeObjectURL(url);
 };
@@ -773,15 +967,33 @@ document.getElementById('importFile').onchange = (ev)=>{
   reader.onload = ()=>{
     try {
       const data = JSON.parse(reader.result);
-      if (!data.ledger || !Array.isArray(data.ledger)) throw new Error('no ledger array');
-      if (ledger.length && !confirm(`Replace current ${ledger.length} entries with ${data.ledger.length} imported?`)) return;
       // Recompute from stored raw fields + carried base so imported entries stay consistent.
-      ledger = data.ledger.map(e => {
+      const rebuild = l => l.map(e => {
         const base = e.base || DB[e.name];
         return (e.name && base && 'weighed' in e)
           ? computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source)
           : e;
       });
+      if (data.days && typeof data.days === 'object') {
+        // v2 backup: restore every day + targets.
+        const dates = Object.keys(data.days).filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d));
+        if (!dates.length) throw new Error('no days in backup');
+        if (!confirm(`Restore ${dates.length} day(s) from backup? Existing days with the same date are overwritten.`)) return;
+        dates.forEach(d=>{
+          const l = rebuild(data.days[d]);
+          try { localStorage.setItem('ledger_'+d, JSON.stringify(l)); } catch(e){}
+          if (d === dateStr()) ledger = l;
+        });
+        if (data.targets){
+          FLOOR=+data.targets.floor||FLOOR; CEIL=+data.targets.ceil||CEIL;
+          P_TARGET=+data.targets.p||P_TARGET; CA_TARGET=+data.targets.ca||CA_TARGET; PH_TARGET=+data.targets.ph||PH_TARGET;
+          saveTargets(); fillTargetInputs();
+        }
+      } else if (data.ledger && Array.isArray(data.ledger)) {
+        // v1 single-day export.
+        if (ledger.length && !confirm(`Replace current ${ledger.length} entries with ${data.ledger.length} imported?`)) return;
+        ledger = rebuild(data.ledger);
+      } else throw new Error('no ledger array');
       save(); render();
     } catch(err){ alert('Import failed: '+err.message); }
     ev.target.value='';
@@ -800,12 +1012,12 @@ if ('serviceWorker' in navigator) {
 function loadKeys(){
   document.getElementById('usdaKey').value   = getKey(LS.usda);
   document.getElementById('geminiKey').value = getKey(LS.gem);
-  document.getElementById('geminiModel').value = getKey(LS.model) || 'gemini-2.5-flash';
+  document.getElementById('geminiModel').value = getKey(LS.model) || 'gemini-3.1-flash-lite';
   refreshKeyUI();
 }
 
 document.getElementById('today').textContent = dateStr();
-loadKeys(); initFoods(); load(); render();
+loadTargets(); fillTargetInputs(); loadKeys(); initFoods(); load(); render();
 </script>
 </body>
 </html>
