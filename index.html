@@ -146,8 +146,12 @@
   <label>Gemini API key</label>
   <input type="password" id="geminiKey" placeholder="AIza…" autocomplete="off" style="margin-bottom:10px">
   <label>Gemini model</label>
-  <input type="text" id="geminiModel" placeholder="gemini-2.5-flash" style="margin-bottom:12px">
-  <button id="saveKeys">Save keys</button>
+  <input type="text" id="geminiModel" list="modelList" placeholder="gemini-2.5-flash" style="margin-bottom:8px">
+  <datalist id="modelList"></datalist>
+  <div class="footer-actions" style="margin-bottom:12px">
+    <button id="saveKeys">Save keys</button>
+    <button class="ghost" id="loadModelsBtn">Load models</button>
+  </div>
   <div class="tactical" id="keyStatus" style="margin-top:10px">No keys set. USDA search and AI parsing stay disabled until you add them.</div>
   <details>
     <summary>How to get keys (both free)</summary>
@@ -488,9 +492,42 @@ async function usdaSearch(query){
   return (d.foods||[]).map(f => ({ id:f.fdcId, name:f.description, base:nutrientsFrom(f) }));
 }
 
+// ---- Gemini model discovery ----
+// Model names available to a key vary by account/region, so we can list them and
+// auto-pick a working one rather than hardcoding a name that may be rejected.
+async function listGeminiModels(){
+  if (!hasGemini()) throw new Error('No Gemini key — add one in ⚙ Settings.');
+  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key='
+    + encodeURIComponent(getKey(LS.gem)));
+  if (!r.ok) throw new Error('Model list failed: Gemini API ' + r.status);
+  const d = await r.json();
+  return (d.models||[])
+    .filter(m => (m.supportedGenerationMethods||[]).includes('generateContent'))
+    .map(m => (m.name||'').replace(/^models\//,''))
+    .filter(Boolean);
+}
+// Prefer a current flash model (fast + cheap), else any flash, else whatever exists.
+function pickModel(list){
+  return list.find(n=>/2\.5.*flash/.test(n) && !/thinking|preview/.test(n))
+      || list.find(n=>/flash/.test(n) && !/preview/.test(n))
+      || list.find(n=>/flash/.test(n))
+      || list[0];
+}
+
 // ---- Gemini natural-language parse ----
 // Returns items: {name, grams, weighed, isCurry, est:{per-100g}}. est is a fallback
 // used only when USDA has no match — flagged so it never masquerades as authoritative.
+function geminiGenerate(model, prompt){
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/'
+    + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(getKey(LS.gem));
+  return fetch(url, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      contents:[{parts:[{text:prompt}]}],
+      generationConfig:{ responseMimeType:'application/json', temperature:0 }
+    })
+  });
+}
 async function geminiParse(text){
   if (!hasGemini()) throw new Error('No Gemini key — add one in ⚙ Settings.');
   const prompt =
@@ -502,15 +539,17 @@ Return JSON: {"items":[{"name":<short generic food name good for a USDA database
 `"est":{"kcal":<per 100g>,"p":<per 100g>,"f":<per 100g>,"c":<per 100g>,"ca":<mg per 100g>,"ph":<mg per 100g>}}]}.
 "est" is your best per-100g estimate, used only as a fallback. Output JSON only, no prose.
 Meal: """${text}"""`;
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/'
-    + encodeURIComponent(geminiModel()) + ':generateContent?key=' + encodeURIComponent(getKey(LS.gem));
-  const r = await fetch(url, {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
-      contents:[{parts:[{text:prompt}]}],
-      generationConfig:{ responseMimeType:'application/json', temperature:0 }
-    })
-  });
+  let model = geminiModel();
+  let r = await geminiGenerate(model, prompt);
+  // 404/400 → configured model not available for this key; auto-detect and retry once.
+  if (r.status === 404 || r.status === 400) {
+    const alt = pickModel(await listGeminiModels());
+    if (!alt) throw new Error('No Gemini models support generateContent for this key.');
+    setKey(LS.model, alt);
+    const mf = document.getElementById('geminiModel'); if (mf) mf.value = alt;
+    model = alt;
+    r = await geminiGenerate(model, prompt);
+  }
   if (!r.ok){ const t = await r.text().catch(()=> ''); throw new Error('Gemini API '+r.status+' '+t.slice(0,140)); }
   const d = await r.json();
   const txt = d.candidates && d.candidates[0] && d.candidates[0].content
@@ -594,6 +633,29 @@ document.getElementById('saveKeys').onclick = ()=>{
   setStatus(document.getElementById('keyStatus'),
     'Saved. ' + (hasUSDA()&&hasGemini() ? 'All systems go.' : 'Some keys still missing.'),
     (hasUSDA()&&hasGemini()) ? 'good' : null);
+};
+
+// Discover which models this key can actually use, and pick a valid one.
+document.getElementById('loadModelsBtn').onclick = async ()=>{
+  const st = document.getElementById('keyStatus');
+  setKey(LS.gem, document.getElementById('geminiKey').value.trim());  // use whatever's typed
+  refreshKeyUI();
+  if (!hasGemini()){ setStatus(st, 'Enter your Gemini key first.', 'bad'); return; }
+  setStatus(st, 'Loading available models…');
+  try {
+    const list = await listGeminiModels();
+    if (!list.length){ setStatus(st, 'No usable models returned for this key.', 'bad'); return; }
+    document.getElementById('modelList').innerHTML = list.map(n=>`<option value="${n}">`).join('');
+    const field = document.getElementById('geminiModel');
+    const cur = field.value.trim();
+    if (!list.includes(cur)) {
+      const alt = pickModel(list);
+      field.value = alt; setKey(LS.model, alt);
+      setStatus(st, `${list.length} models found — set to “${alt}”. Click a suggestion to change, then Save.`, 'good');
+    } else {
+      setStatus(st, `${list.length} models found — current “${cur}” is valid.`, 'good');
+    }
+  } catch(err){ setStatus(st, err.message, 'bad'); }
 };
 
 // Manual USDA search → clickable results that load into the picker.
