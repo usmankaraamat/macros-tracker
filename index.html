@@ -1861,7 +1861,10 @@ function dateStr(){ return new Date().toISOString().slice(0,10); }        // wal
 // midnight still lands on the day it belongs to. It only advances when the user closes
 // the day — never automatically at 00:00. Defaults to today's calendar date on first run.
 let ACTIVE_DATE = (()=>{ try{ return localStorage.getItem('ledger_active_date') || dateStr(); }catch(e){ return dateStr(); } })();
-function nextDay(ds){ const d=new Date(ds+'T00:00:00'); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); }
+// UTC-based so it stays consistent with dateStr() (which is toISOString/UTC). Parsing
+// "YYYY-MM-DDT00:00:00" as LOCAL time would shift the UTC date in +offset zones and,
+// combined with +1 day, could return the SAME date — leaving the day unable to advance.
+function nextDay(ds){ const [y,m,d]=ds.split('-').map(Number); const dt=new Date(Date.UTC(y,m-1,d)); dt.setUTCDate(dt.getUTCDate()+1); return dt.toISOString().slice(0,10); }
 // Persistence: no-op-safe. In a real host these use localStorage; in-sandbox they may throw.
 function save(){ try{ localStorage.setItem('ledger_'+ACTIVE_DATE, JSON.stringify(ledger)); }catch(e){} }
 function load(){ try{ const r=localStorage.getItem('ledger_'+ACTIVE_DATE); if(r)ledger=JSON.parse(r);}catch(e){} }
