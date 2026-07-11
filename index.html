@@ -714,13 +714,35 @@ async function usdaSearch(query){
     body: JSON.stringify({
       query: q,
       dataType: ['Foundation','SR Legacy','Survey (FNDDS)'],
-      pageSize: 5
+      pageSize: 10
     })
   });
   if (!r.ok) throw new Error('USDA API ' + r.status
     + (r.status===403 ? ' — key rejected' : r.status===400 ? ' — bad request' : ''));
   const d = await r.json();
-  return (d.foods||[]).map(f => ({ id:f.fdcId, name:f.description, base:nutrientsFrom(f) }));
+  const foods = (d.foods||[]).map(f => ({ id:f.fdcId, name:f.description, base:nutrientsFrom(f) }));
+  return rankFoods(foods, q);
+}
+// USDA relevance often floats processed/composite entries to the top for a generic
+// query ("banana" → dehydrated powder; "white rice" → "Beans and white rice"). Down-rank
+// those so the default match is the plain food; the user can still override in the picker.
+const JUNK = ['dehydrated','powder','dried',' juice','nectar','concentrate','baby','infant',
+  'breaded','chips','paste','butter',' oil','flour','lunchmeat',' roll','pudding','split',
+  'sauce','gravy','soup','flavored','salted','sweetened','smoked',' and ',' with '];
+function scoreFood(name, ql){
+  const d = ' ' + name.toLowerCase() + ' ';
+  let s = 0;
+  JUNK.forEach(tok => { if (d.includes(tok) && !ql.includes(tok.trim())) s -= 12; });
+  if (/\braw\b/.test(d)) s += 6;
+  if (/\bnfs\b/.test(d)) s += 4;                 // "not further specified" = the generic form
+  s -= Math.max(0, name.split(/[ ,]+/).filter(Boolean).length - 3);  // prefer concise entries
+  return s;
+}
+function rankFoods(foods, query){
+  const ql = ' ' + (query||'').toLowerCase() + ' ';
+  return foods.map((f,i)=>({f, s:scoreFood(f.name, ql), i}))
+    .sort((a,b)=> b.s - a.s || a.i - b.i)      // best score first; USDA relevance breaks ties
+    .map(x=>x.f);
 }
 
 // ---- Gemini model discovery ----
@@ -797,32 +819,51 @@ Meal: """${text}"""`;
 }
 
 // ---- PENDING (AI review) ----
-// Capture live input state back into `pending` so a re-render (e.g. after a swap)
-// doesn't lose grams/toggle edits the user already made.
+// Resolve a pending item's active choice (a USDA candidate or the AI estimate).
+function pendResolve(p){
+  if (p.sel==='est' || !p.candidates.length)
+    return {base: p.estBase || {kcal:0,p:0,f:0,c:0}, source:'AI est', label: p.name};
+  const c = p.candidates[+p.sel.slice(1)] || p.candidates[0];
+  return {base: c.base, source:'USDA', label: c.name};
+}
+function pendWarn(p){
+  const r = pendResolve(p);
+  if (r.source==='USDA' && p.estBase && p.estBase.kcal>0 &&
+      Math.abs(r.base.kcal - p.estBase.kcal)/p.estBase.kcal > 0.25)
+    return `USDA ${Math.round(r.base.kcal)} vs AI est ${Math.round(p.estBase.kcal)} kcal/100g — check the match`;
+  return '';
+}
+// Capture live input state back into `pending` so a re-render doesn't lose edits.
 function syncPendingFromDOM(){
   pending.forEach((p,i)=>{
     const g=document.getElementById('pg'+i); if(g && g.value!=='') p.grams=parseFloat(g.value);
     const s=document.getElementById('ps'+i); if(s) p.include=s.checked;
     const w=document.getElementById('pw'+i); if(w) p.weighed=w.checked;
     const c=document.getElementById('pc'+i); if(c) p.isCurry=c.checked;
+    const f=document.getElementById('pf'+i); if(f) p.sel=f.value;
   });
 }
 function renderPending(){
   const wrap = document.getElementById('pending');
   if (!pending.length){ wrap.innerHTML=''; return; }
   wrap.innerHTML = pending.map((p,i)=>{
-    const badge = `<span class="badge ${p.source==='USDA'?'usda':'est'}">${p.source}</span>`;
-    const kc = Math.round(p.base.kcal||0);
-    const canSwap = p.usdaBase && p.estBase;
-    const swap = canSwap ? ` <a href="#" data-sw="${i}" style="color:var(--accent);font-size:10px">use ${p.source==='USDA'?'AI est':'USDA'}</a>` : '';
-    const meta = `<span style="color:var(--ink-dim);font-family:var(--mono);font-size:10px">${kc} kcal/100g</span>`;
-    const warnLine = p.warn ? `<div class="tactical bad" style="margin-top:6px;font-size:10px;padding-left:8px">${p.warn}</div>` : '';
+    const r = pendResolve(p);
+    const badge = `<span class="badge ${r.source==='USDA'?'usda':'est'}">${r.source}</span>`;
+    const kc = Math.round(r.base.kcal||0);
+    const opts = p.candidates.map((c,idx)=>
+      `<option value="u${idx}" ${p.sel==='u'+idx?'selected':''}>${c.name} · ${Math.round(c.base.kcal)} kcal/100g</option>`).join('')
+      + (p.estBase ? `<option value="est" ${p.sel==='est'?'selected':''}>AI estimate · ${Math.round(p.estBase.kcal)} kcal/100g</option>` : '');
+    const picker = (p.candidates.length || p.estBase)
+      ? `<select id="pf${i}" style="margin-top:6px;font-size:11px">${opts}</select>` : '';
+    const warn = pendWarn(p);
+    const warnLine = warn ? `<div class="tactical bad" style="margin-top:6px;font-size:10px;padding-left:8px">${warn}</div>` : '';
     return `<div class="pend-item">
       <div class="pend-top">
         <input type="checkbox" id="ps${i}" ${p.include?'checked':''} style="width:auto">
-        <span class="pname">${badge} ${p.name} ${meta}${swap}</span>
+        <span class="pname">${badge} ${p.name} <span style="color:var(--ink-dim);font-family:var(--mono);font-size:10px">${kc} kcal/100g</span></span>
         <input type="number" id="pg${i}" value="${Math.round(p.grams)}" min="0" step="1" title="grams">
       </div>
+      ${picker}
       <div class="pend-tog">
         <label class="chk"><input type="checkbox" id="pw${i}" ${p.weighed?'checked':''}> weighed</label>
         <label class="chk"><input type="checkbox" id="pc${i}" ${p.isCurry?'checked':''}> curry</label>
@@ -836,27 +877,20 @@ function renderPending(){
      </div>`;
   document.getElementById('addPendingBtn').onclick = commitPending;
   document.getElementById('discardBtn').onclick = ()=>{ pending=[]; renderPending(); };
-  wrap.querySelectorAll('a[data-sw]').forEach(a=>{
-    a.onclick = (ev)=>{
-      ev.preventDefault();
-      syncPendingFromDOM();
-      const p = pending[+a.dataset.sw];
-      p.source = p.source==='USDA' ? 'AI est' : 'USDA';
-      p.base = p.source==='USDA' ? p.usdaBase : p.estBase;
-      renderPending();
-    };
+  pending.forEach((p,i)=>{
+    const f = document.getElementById('pf'+i);
+    if (f) f.onchange = ()=>{ syncPendingFromDOM(); renderPending(); };
   });
 }
 function commitPending(){
+  syncPendingFromDOM();
   let added = 0;
-  pending.forEach((p,i)=>{
-    if (!document.getElementById('ps'+i).checked) return;
-    const grams = parseFloat(document.getElementById('pg'+i).value);
-    if (!grams || grams<=0) return;
-    const weighed = document.getElementById('pw'+i).checked;
-    const isCurry = document.getElementById('pc'+i).checked;
-    registerFood(p.name, p.base, p.source);
-    ledger.push(computeEntry(p.name, grams, weighed, isCurry, false, p.base, p.source));
+  pending.forEach(p=>{
+    if (!p.include || !p.grams || p.grams<=0) return;
+    const r = pendResolve(p);
+    const name = r.source==='USDA' ? r.label : p.name;   // log under the real matched food name
+    registerFood(name, r.base, r.source);
+    ledger.push(computeEntry(name, p.grams, p.weighed, p.isCurry, false, r.base, r.source));
     added++;
   });
   pending = []; renderPending();
@@ -958,28 +992,23 @@ document.getElementById('parseBtn').onclick = async ()=>{
     for (const it of items){
       const estBase = (it.est && it.est.kcal!=null)
         ? {kcal:+it.est.kcal||0, p:+it.est.p||0, f:+it.est.f||0, c:+it.est.c||0} : null;
-      let usdaBase = null;
+      let candidates = [];
       if (hasUSDA() && it.name){
-        try { const res = await usdaSearch(it.name); if (res.length) usdaBase = res[0].base; }
+        try { candidates = (await usdaSearch(it.name)).slice(0,6); }
         catch(e){ /* fall back to AI estimate */ }
       }
-      const source = usdaBase ? 'USDA' : 'AI est';
-      const base = usdaBase || estBase || {kcal:0,p:0,f:0,c:0};
-      // If the USDA match and Gemini's own estimate disagree sharply, the match is suspect.
-      const warn = (usdaBase && estBase && estBase.kcal>0 &&
-        Math.abs(usdaBase.kcal-estBase.kcal)/estBase.kcal > 0.25)
-        ? `USDA ${Math.round(usdaBase.kcal)} vs AI est ${Math.round(estBase.kcal)} kcal/100g — check the match` : '';
       pending.push({
         name: it.name || 'unknown',
         grams: Number(it.grams) || 0,
         weighed: !!it.weighed,
         isCurry: !!it.isCurry,
-        usdaBase, estBase, source, base, warn, include: true
+        candidates, estBase,
+        sel: candidates.length ? 'u0' : 'est',   // 'u<index>' picks a USDA match; 'est' the AI estimate
+        include: true
       });
     }
-    const nUsda = pending.filter(p=>p.source==='USDA').length;
-    setStatus(status, `${pending.length} item(s) ready · ${nUsda} from USDA, ${pending.length-nUsda} AI-estimated. Review and add.`,
-      hasUSDA() ? null : null);
+    const nUsda = pending.filter(p=>p.sel!=='est').length;
+    setStatus(status, `${pending.length} item(s) ready · ${nUsda} matched to USDA, ${pending.length-nUsda} AI-estimated. Check each match in the dropdown, then add.`);
     renderPending();
   } catch(err){
     setStatus(status, err.message, 'bad');
