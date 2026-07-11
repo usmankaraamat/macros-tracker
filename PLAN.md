@@ -40,3 +40,18 @@ Ensure the deterministic core remains accurate as the app scales.
 * **Unit Testing:** Implement a testing framework (like **Vitest** or **Jest**).
 * **Test Coverage:** Write comprehensive tests for critical math functions, particularly `solveFridge()` and `computeEntry()`, to guarantee that the macro math and caloric targets remain 100% accurate across updates.
 * **Build Tooling:** If migrating to a framework, integrate a bundler (Vite/Webpack) to minify assets, handle CSS pre-processing, and properly generate the PWA manifest and service workers.
+
+## 6. Interactive Meal Engineering (Ternary Plot Widget)
+**Concept:** A highly advanced, gamified UI widget that allows the user to balance exactly three food items (e.g., Chicken, Rice, Eggs) against their remaining calorie budget in real-time.
+
+**Mathematical Foundation (2-Simplex / Barycentric Coordinates):**
+* The set of all possible non-negative portions of 3 foods that sum to a strict calorie target forms a 2D triangle in 3D space.
+* By projecting this into a **Ternary Plot** (an equilateral triangle), the user can drag a point inside the triangle to seamlessly adjust the ratios of the three foods.
+* The dead-center of the triangle represents an equal 33% calorie split among the three foods. The vertices represent 100% of a single food.
+
+**Implementation Steps:**
+1. **Constraint Solving:** Write a function that takes 3 foods and a calorie target, and maps their valid coordinate space to a 2D SVG/Canvas triangle.
+2. **Protein Floor Overlay:** Draw a line cutting across the inside of the triangle representing the mathematical boundary of the protein target. The area above this line is the "green zone" (valid macro hits).
+3. **Interactive UI:** Implement an SVG or Canvas element with pointer event listeners (`pointerdown`, `pointermove`, `pointerup`) to allow dragging the data point.
+4. **Real-time Binding:** As the user drags the point, reverse-calculate the exact grams of each of the three foods based on the cursor's barycentric coordinates and instantly update the DOM readout.
+5. **Food Selection:** Add three dropdowns above the widget to allow the user to choose which three foods from their `foodBase` they want to engineer.
