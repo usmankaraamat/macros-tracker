@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ledger · core math tests</title>
+<style>
+  body { background:#0f172a; color:#f8fafc; font-family:'JetBrains Mono',monospace; font-size:13px; padding:24px; max-width:760px; margin:0 auto; line-height:1.6; }
+  h1 { font-size:16px; font-family:sans-serif; }
+  #summary { font-size:15px; font-weight:700; padding:10px 14px; border-radius:8px; margin:14px 0; }
+  .allpass { background:rgba(16,185,129,0.15); color:#10b981; }
+  .anyfail { background:rgba(239,68,68,0.18); color:#f87171; }
+  .case { padding:5px 10px; border-radius:6px; margin:3px 0; background:rgba(255,255,255,0.03); }
+  .pass::before { content:'✓ '; color:#10b981; }
+  .fail { background:rgba(239,68,68,0.12); }
+  .fail::before { content:'✗ '; color:#f87171; }
+  .detail { color:#94a3b8; }
+  .grp { color:#64748b; text-transform:uppercase; letter-spacing:0.08em; font-size:10px; margin:14px 0 4px; }
+</style>
+</head>
+<body>
+<h1>Ledger — core math lock</h1>
+<p class="detail">Exercises the real <code>core.js</code> the app ships. Green = the deterministic core still holds.</p>
+<div id="summary">running…</div>
+<div id="out"></div>
+
+<script src="core.js"></script>
+<script>
+const out = document.getElementById('out');
+let passed = 0, failed = 0;
+const approx = (a,b,eps=0.5) => Math.abs(a-b) <= eps;
+function group(name){ const d=document.createElement('div'); d.className='grp'; d.textContent=name; out.appendChild(d); }
+function check(name, cond, detail){
+  const d = document.createElement('div');
+  d.className = 'case ' + (cond ? 'pass' : 'fail');
+  d.innerHTML = name + (detail ? ` <span class="detail">— ${detail}</span>` : '');
+  out.appendChild(d);
+  cond ? passed++ : failed++;
+}
+
+const C = LedgerCore, T = LedgerCore.ternary;
+
+// ---- nutrientsFrom: USDA energy pick ----
+group('nutrientsFrom — energy field selection');
+(function(){
+  const food = { foodNutrients:[
+    {nutrientNumber:'208', value:5}, {nutrientNumber:'957', value:73.5},
+    {nutrientNumber:'203', value:1.9}, {nutrientNumber:'204', value:0.1}, {nutrientNumber:'205', value:17}
+  ]};
+  const n = C.nutrientsFrom(food);
+  check('prefers Atwater #957 over bogus #208', approx(n.kcal, 73.5), `got ${n.kcal}`);
+
+  const food2 = { foodNutrients:[
+    {nutrientNumber:'208', value:5},
+    {nutrientNumber:'203', value:1.9}, {nutrientNumber:'204', value:0.1}, {nutrientNumber:'205', value:17}
+  ]};
+  const n2 = C.nutrientsFrom(food2);         // no Atwater, #208=5 is < half of macro est (76.5) → trust macros
+  check('macro safety net overrides implausible #208', approx(n2.kcal, 76.5), `got ${n2.kcal}`);
+
+  const food3 = { foodNutrients:[
+    {nutrientNumber:'208', value:165},
+    {nutrientNumber:'203', value:31}, {nutrientNumber:'204', value:3.6}, {nutrientNumber:'205', value:0}
+  ]};
+  const n3 = C.nutrientsFrom(food3);
+  check('uses plausible #208 when no Atwater present', approx(n3.kcal, 165), `got ${n3.kcal}`);
+})();
+
+// ---- target resolution ----
+group('resolvePTarget / capGrams');
+check('protein 30% of 1700 kcal floor = 127.5g', approx(C.resolvePTarget({mode:'pct',val:30}, 1700), 127.5), '');
+check('protein grams mode passes through', C.resolvePTarget({mode:'g',val:120}, 1700) === 120, '');
+check('carb cap 40% of 1700 @4kcal/g = 170g', approx(C.capGrams({mode:'pct',val:40}, 4, 1700), 170), '');
+check('cap of 0 = off', C.capGrams({mode:'g',val:0}, 9, 1700) === 0, '');
+
+// ---- computeEntry: penalties ----
+group('computeEntry — penalties & oil tax');
+const PEN = {inflate:1.1, deduct:0.9, oilK:132, oilF:14};
+const chk = {kcal:165, p:31, f:3.6, c:0};
+(function(){
+  const w = C.computeEntry('Chicken', 150, true, false, false, chk, 'DB', PEN);
+  check('weighed 150g chicken: 247.5 kcal', approx(w.kcal, 247.5), `got ${w.kcal.toFixed(1)}`);
+  check('weighed 150g chicken: 46.5g P', approx(w.p, 46.5), `got ${w.p.toFixed(1)}`);
+  check('weighed entry carries no flags', w.flags.length === 0, '');
+
+  const u = C.computeEntry('Chicken', 150, false, false, false, chk, 'DB', PEN);
+  check('unweighed +10% kcal = 272.25', approx(u.kcal, 272.25), `got ${u.kcal.toFixed(2)}`);
+  check('unweighed −10% P = 41.85', approx(u.p, 41.85), `got ${u.p.toFixed(2)}`);
+
+  const cu = C.computeEntry('Curry', 150, false, true, false, chk, 'DB', PEN);
+  check('unweighed curry adds 132 kcal oil tax', approx(cu.kcal, 272.25 + 132), `got ${cu.kcal.toFixed(2)}`);
+  check('unweighed curry adds 14g fat', approx(cu.f, 3.6*1.5 + 14), `got ${cu.f.toFixed(2)}`);
+
+  const half = C.computeEntry('Curry', 150, false, true, true, chk, 'DB', PEN);
+  check('half oil tax adds 66 kcal', approx(half.kcal, 272.25 + 66), `got ${half.kcal.toFixed(2)}`);
+})();
+
+// ---- solveFridge ----
+group('solveFridge — rice + chicken to floor');
+const RICE = {kcal:130, p:2.7}, CHKf = {kcal:165, p:31};
+const cfg = t => ({floor:1700, ceil:1900, pTarget:120, rice:RICE, chk:CHKf});
+(function(){
+  const s = C.solveFridge({kcal:1000, p:60}, cfg());
+  check('exact-both solves (status ok)', s.status === 'ok', s.status);
+  check('  → ~329g rice', approx(s.r, 329, 1), `got ${s.r.toFixed(1)}`);
+  check('  → ~165g chicken', approx(s.k, 165, 1), `got ${s.k.toFixed(1)}`);
+  check('  → protein lands ~120g', approx(s.vp, 120, 0.5), `got ${s.vp.toFixed(1)}`);
+
+  const s2 = C.solveFridge({kcal:1000, p:115}, cfg());   // tiny protein gap ⇒ chicken-only branch
+  check('chicken-only branch (rice=0)', s2.status === 'ok' && s2.r === 0, `r=${s2.r}`);
+  check('  → ~424g chicken', approx(s2.k, 424, 1), `got ${s2.k.toFixed(1)}`);
+
+  const s3 = C.solveFridge({kcal:1650, p:20}, cfg());     // small kcal gap, huge protein gap
+  check('genuine conflict flagged', s3.status === 'conflict', s3.status);
+  check('  → protein shortfall ~90.6g', approx(s3.shortfall, 90.6, 0.5), `got ${s3.shortfall.toFixed(1)}`);
+
+  const s4 = C.solveFridge({kcal:1750, p:130}, cfg());    // already over floor
+  check('floor already met → done', s4.status === 'done', s4.status);
+})();
+
+// ---- budgetCombos ----
+group('budgetCombos — pair solver');
+(function(){
+  const foods = [['Chicken', {kcal:165,p:31}], ['Rice', {kcal:130,p:2.7}]];
+  const combos = C.budgetCombos(foods, 500, 40);
+  check('returns exactly one valid pair', combos.length === 1, `got ${combos.length}`);
+  const c = combos[0];
+  check('  → ~107g chicken', approx(c.gA, 107, 1), `got ${c.gA}`);
+  check('  → ~248g rice', approx(c.gB, 248, 1), `got ${c.gB}`);
+  check('  → lands ~500 kcal', approx(c.kcal, 500, 1), `got ${c.kcal}`);
+  check('  → delivers ~40g protein', approx(c.p, 40, 1), `got ${c.p}`);
+  check('  → not protein-penalised (score < 500)', c.score < 500, `score ${c.score.toFixed(1)}`);
+})();
+
+// ---- ternary math ----
+group('ternary — barycentric plot');
+(function(){
+  const V = [[100,10],[10,180],[190,180]];
+  const w = [0.2, 0.3, 0.5];
+  const xy = T.cartesianFromBary(w, V);
+  check('cartesianFromBary([.2,.3,.5]) = (118,146)', approx(xy[0],118) && approx(xy[1],146), `got ${xy}`);
+  const back = T.baryFromCartesian(xy[0], xy[1], V);
+  check('baryFromCartesian round-trips the weights',
+    approx(back[0],0.2,1e-3) && approx(back[1],0.3,1e-3) && approx(back[2],0.5,1e-3), `got ${back.map(v=>v.toFixed(3))}`);
+
+  const cl = T.clampBary([-0.4, 0.6, 0.8]);
+  check('clampBary removes negatives & normalises to sum 1',
+    cl[0]===0 && approx(cl[0]+cl[1]+cl[2], 1, 1e-9) && cl.every(v=>v>=0), `got ${cl.map(v=>v.toFixed(3))}`);
+
+  // Meal example: chicken / rice / whole egg, 600 kcal budget, centre point.
+  const foods = [{kcal:165,p:31,f:3.6,c:0},{kcal:130,p:2.7,f:0.3,c:28.2},{kcal:155,p:12.6,f:10.6,c:1.1}];
+  const grams = T.baryToGrams([1/3,1/3,1/3], foods, 600);
+  check('centre split → ~121g chicken', approx(grams[0],121.2,0.5), `got ${grams[0].toFixed(1)}`);
+  check('centre split → ~154g rice', approx(grams[1],153.8,0.5), `got ${grams[1].toFixed(1)}`);
+  const tot = T.totalsForGrams(grams, foods);
+  check('kcal total equals the target (600)', approx(tot.kcal,600,0.5), `got ${tot.kcal.toFixed(1)}`);
+  check('centre protein ≈ 58g', approx(tot.p,58,0.5), `got ${tot.p.toFixed(1)}`);
+
+  const vp = T.vertexProteins(foods, 600);
+  check('vertex protein (all chicken) ≈ 112.7g', approx(vp[0],112.7,0.5), `got ${vp[0].toFixed(1)}`);
+
+  const TVe = [[120,20],[26,188],[214,188]];
+  const cross = T.isoProteinCrossings(foods, 600, 60, TVe);
+  check('iso-protein(60g) line crosses two edges', cross.length === 2, `got ${cross.length}`);
+  const poly = T.greenPolygon(foods, 600, 60, TVe);
+  check('green zone is a polygon (≥3 pts)', poly.length >= 3, `got ${poly.length}`);
+  check('impossible protein → empty green zone', T.greenPolygon(foods, 600, 999, TVe).length === 0, '');
+  check('already-met protein → full triangle green', T.greenPolygon(foods, 600, 0, TVe).length === 3, '');
+})();
+
+// ---- summary ----
+const sum = document.getElementById('summary');
+sum.className = failed === 0 ? 'allpass' : 'anyfail';
+sum.textContent = failed === 0
+  ? `✓ all ${passed} assertions passed — core math locked`
+  : `✗ ${failed} of ${passed+failed} assertions FAILED`;
+</script>
+</body>
+</html>

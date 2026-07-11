@@ -45,7 +45,7 @@ Ensure the deterministic core remains accurate as the app scales.
 **Concept:** A highly advanced, gamified UI widget that allows the user to balance exactly three food items (e.g., Chicken, Rice, Eggs) against their remaining calorie budget in real-time.
 
 **Mathematical Foundation (2-Simplex / Barycentric Coordinates):**
-* The set of all possible non-negative portions of 3 foods that sum to a strict calorie target forms a 2D triangle in 3D space.
+* The set of all possible non-negative portions of 3 or more foods that sum to a strict calorie target forms a 2D triangle in 3D space.
 * By projecting this into a **Ternary Plot** (an equilateral triangle), the user can drag a point inside the triangle to seamlessly adjust the ratios of the three foods.
 * The dead-center of the triangle represents an equal 33% calorie split among the three foods. The vertices represent 100% of a single food.
 
