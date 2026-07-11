@@ -371,24 +371,6 @@
   <div id="donutWrap" style="margin-top:16px;border-top:1px solid rgba(255,255,255,0.06);padding-top:16px"></div>
 </div>
 
-<!-- INTELLIGENCE DASHBOARD -->
-<div class="panel intel-section">
-  <div class="panel-title">Intelligence · rolling averages</div>
-  <div class="avg-grid" id="avgGrid">
-    <div class="avg-card"><div class="avg-label">7-Day Avg Kcal</div><div class="avg-val" id="avg7k">—</div><div class="avg-sub" id="avg7kSub"></div></div>
-    <div class="avg-card"><div class="avg-label">7-Day Avg Protein</div><div class="avg-val" id="avg7p">—</div><div class="avg-sub" id="avg7pSub"></div></div>
-    <div class="avg-card"><div class="avg-label">30-Day Avg Kcal</div><div class="avg-val" id="avg30k">—</div><div class="avg-sub" id="avg30kSub"></div></div>
-    <div class="avg-card"><div class="avg-label">30-Day Avg Protein</div><div class="avg-val" id="avg30p">—</div><div class="avg-sub" id="avg30pSub"></div></div>
-  </div>
-</div>
-
-<div class="panel intel-section">
-  <div class="panel-title">Remaining budget · what you can still eat</div>
-  <div class="budget-suggestions" id="budgetSuggestions">
-    <div class="budget-item"><span class="budget-icon">🍽️</span><div class="budget-text">Log food to see suggestions</div></div>
-  </div>
-</div>
-
 <!-- AI MEAL PARSE -->
 <div class="panel">
   <div class="panel-title">Describe a meal · AI parse (Gemini → USDA)</div>
@@ -439,21 +421,34 @@
   </table>
 </div>
 
-<!-- SOLVER -->
-<div class="panel">
-  <div class="panel-title">Fridge closer · boiled rice + chicken to hit <span id="solverTitle">1700</span></div>
-  <div class="solver-out" id="solverOut">Log something to compute.</div>
+<!-- BUDGET TRANSLATOR (replaces fridge closer) -->
+<div class="panel intel-section">
+  <div class="panel-title">Meal combos to close the gap · <span id="solverTitle">1700</span> kcal target</div>
+  <div class="budget-suggestions" id="budgetSuggestions">
+    <div class="budget-item"><span class="budget-icon">🍽️</span><div class="budget-text">Log food to see suggestions</div></div>
+  </div>
   <div class="tactical" id="tactical"></div>
 </div>
 
-<!-- HISTORY & INSIGHTS -->
+<!-- INTELLIGENCE DASHBOARD -->
 <div class="panel intel-section">
-  <div class="panel-title">Compliance heatmap · last 8 weeks</div>
-  <div class="heatmap-wrap">
+  <div class="panel-title">Intelligence · rolling averages</div>
+  <div class="avg-grid" id="avgGrid">
+    <div class="avg-card"><div class="avg-label">7-Day Avg Kcal</div><div class="avg-val" id="avg7k">—</div><div class="avg-sub" id="avg7kSub"></div></div>
+    <div class="avg-card"><div class="avg-label">7-Day Avg Protein</div><div class="avg-val" id="avg7p">—</div><div class="avg-sub" id="avg7pSub"></div></div>
+    <div class="avg-card"><div class="avg-label">30-Day Avg Kcal</div><div class="avg-val" id="avg30k">—</div><div class="avg-sub" id="avg30kSub"></div></div>
+    <div class="avg-card"><div class="avg-label">30-Day Avg Protein</div><div class="avg-val" id="avg30p">—</div><div class="avg-sub" id="avg30pSub"></div></div>
+  </div>
+</div>
+
+<!-- INSIGHTS (collapsed by default) -->
+<details class="panel intel-section">
+  <summary class="panel-title" style="cursor:pointer;margin-bottom:0">Compliance heatmap · last 8 weeks ▸</summary>
+  <div class="heatmap-wrap" style="margin-top:12px">
     <div class="heatmap-days"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
     <div class="heatmap-grid" id="heatmapGrid"></div>
   </div>
-</div>
+</details>
 
 <div class="panel intel-section">
   <div class="panel-title">Weekly report card</div>
@@ -465,12 +460,14 @@
   <div class="topfoods-list" id="topFoodsList"><div class="empty">No history yet.</div></div>
 </div>
 
-<!-- HISTORY -->
-<div class="panel">
-  <div class="panel-title">History</div>
-  <div class="tactical" id="histSummary" style="display:none;margin-bottom:10px;margin-top:0"></div>
-  <div id="histList"><div class="empty">No previous days yet.</div></div>
-</div>
+<!-- HISTORY (collapsed by default) -->
+<details class="panel">
+  <summary class="panel-title" style="cursor:pointer;margin-bottom:0">History ▸</summary>
+  <div style="margin-top:12px">
+    <div class="tactical" id="histSummary" style="display:none;margin-bottom:10px;margin-top:0"></div>
+    <div id="histList"><div class="empty">No previous days yet.</div></div>
+  </div>
+</details>
 
 <div class="footer-actions" style="grid-template-columns:1fr 1fr 1fr">
   <button class="ghost" id="exportBtn">Export</button>
@@ -708,9 +705,7 @@ function render() {
       `<td>${Math.round(e.kcal)}</td><td>${e.p.toFixed(1)}</td><td>${e.f.toFixed(1)}</td><td>${(e.c||0).toFixed(1)}</td></tr>`;
   }).join('');
 
-  // solver + tactical
-  const sol = solveFridge(t);
-  document.getElementById('solverOut').innerHTML = sol.msg;
+  // tactical status + budget combos (replaces old fridge closer)
   const tac = document.getElementById('tactical');
   const remKcal = FLOOR - t.kcal, remP = P_TARGET - t.p;
   let lines = [];
