@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0c0e12">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -11,23 +14,32 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <style>
   :root {
-    --bg: #0c0e12;
-    --panel: #14171d;
-    --panel-2: #1b1f27;
-    --line: #262b35;
-    --ink: #e6e9ef;
-    --ink-dim: #8b93a3;
-    --ink-faint: #565e6d;
-    --mono: 'SF Mono','JetBrains Mono','Fira Code',ui-monospace,'Cascadia Code',Menlo,monospace;
-    --sans: system-ui,-apple-system,'Segoe UI',sans-serif;
-    --ok: #3fb950;
-    --warn: #d9a441;
-    --bad: #e5534b;
-    --accent: #4a9ed6;
+    --bg: #0f172a;
+    --bg-gradient: linear-gradient(135deg, #020617 0%, #0f172a 100%);
+    --panel: rgba(30, 41, 59, 0.7);
+    --panel-2: rgba(15, 23, 42, 0.6);
+    --line: rgba(51, 65, 85, 0.5);
+    --ink: #f8fafc;
+    --ink-dim: #94a3b8;
+    --ink-faint: #64748b;
+    --mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+    --sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --ok: #10b981;
+    --ok-bg: linear-gradient(90deg, #059669, #34d399);
+    --warn: #f59e0b;
+    --warn-bg: linear-gradient(90deg, #d97706, #fbbf24);
+    --bad: #ef4444;
+    --bad-bg: linear-gradient(90deg, #dc2626, #f87171);
+    --accent: #3b82f6;
+    --accent-bg: linear-gradient(90deg, #2563eb, #60a5fa);
+    --accent-glow: rgba(59, 130, 246, 0.5);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    background: var(--bg); color: var(--ink);
+    background: var(--bg);
+    background-image: var(--bg-gradient);
+    min-height: 100vh;
+    color: var(--ink);
     font-family: var(--sans); font-size: 14px; line-height: 1.5;
     padding: 16px; max-width: 640px; margin: 0 auto;
     -webkit-font-smoothing: antialiased;
@@ -41,52 +53,63 @@
   #gear:hover { color: var(--ink); }
   .sub { font-size: 11px; color: var(--ink-faint); margin-bottom: 18px; text-transform: uppercase; letter-spacing: 0.08em; }
 
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+  .panel { background: var(--panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 4px 24px -4px rgba(0,0,0,0.3); }
   .panel-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-faint); margin-bottom: 12px; }
 
   /* CORRIDOR GAUGE — the signature element */
-  .corridor-wrap { position: relative; height: 46px; margin: 6px 0 10px; }
+  .corridor-wrap { position: relative; height: 60px; margin: 10px 0 24px; }
   .corridor-track {
-    position: absolute; top: 18px; left: 0; right: 0; height: 10px;
-    background: var(--panel-2); border-radius: 5px; overflow: hidden;
+    position: absolute; top: 20px; left: 0; right: 0; height: 20px;
+    background: rgba(0,0,0,0.4); border-radius: 10px; overflow: hidden;
+    box-shadow: inset 0 2px 6px rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.05);
   }
-  .corridor-fill { position: absolute; top: 0; left: 0; height: 100%; border-radius: 5px 0 0 5px; transition: width .35s ease, background .35s ease; }
-  .corridor-marker { position: absolute; top: 12px; width: 2px; height: 22px; background: var(--ink-dim); }
-  .corridor-label { position: absolute; top: 0; font-family: var(--mono); font-size: 10px; color: var(--ink-faint); transform: translateX(-50%); }
-  .corridor-cursor { position: absolute; top: 8px; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid var(--ink); transform: translateX(-50%); transition: left .35s ease; }
+  .corridor-fill { position: absolute; top: 0; left: 0; height: 100%; border-radius: 10px 0 0 10px; transition: width 0.8s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.4s ease; box-shadow: inset 0 0 8px rgba(255,255,255,0.3); }
+  .corridor-marker { position: absolute; top: 10px; width: 2px; height: 40px; background: rgba(255,255,255,0.15); border-radius: 1px; }
+  .corridor-label { position: absolute; top: -10px; font-family: var(--sans); font-size: 11px; font-weight: 700; color: var(--ink-dim); transform: translateX(-50%); }
+  .corridor-cursor { position: absolute; top: 10px; width: 4px; height: 40px; background: #fff; border-radius: 2px; box-shadow: 0 0 12px 2px rgba(255,255,255,0.6); transform: translateX(-50%); transition: left 0.8s cubic-bezier(0.34, 1.56, 0.64, 1); z-index: 2; }
   .corridor-readout { display: flex; justify-content: space-between; margin-top: 2px; }
   .corridor-readout .big { font-family: var(--mono); font-size: 22px; font-weight: 600; }
   .corridor-readout .status { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; align-self: flex-end; padding-bottom: 3px; }
 
-  .grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 10px; }
+  .grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 16px; animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
   .grid-3 { grid-template-columns: repeat(3,1fr); }
-  .stat { background: var(--panel-2); border-radius: 6px; padding: 10px 12px; }
-  .stat .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); }
-  .stat .v { font-family: var(--mono); font-size: 18px; margin-top: 3px; }
-  .stat .v small { font-size: 11px; color: var(--ink-dim); }
-  .bar { height: 4px; background: var(--panel); border-radius: 2px; margin-top: 7px; overflow: hidden; }
-  .bar > div { height: 100%; border-radius: 2px; transition: width .3s; }
+  .stat { background: linear-gradient(145deg, rgba(30,41,59,0.7), rgba(15,23,42,0.8)); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 20px; box-shadow: 0 8px 24px -8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease; }
+  .stat:hover { transform: translateY(-4px); box-shadow: 0 16px 32px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1); }
+  .stat .k { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.15em; color: var(--ink-dim); }
+  .stat .v { font-family: var(--sans); font-size: 32px; font-weight: 800; letter-spacing: -1px; margin-top: 10px; color: #fff; display: flex; align-items: baseline; gap: 8px; }
+  .stat .v small { font-size: 13px; font-weight: 600; color: var(--ink-dim); font-family: var(--mono); letter-spacing: 0; }
+  .bar { height: 10px; background: rgba(0,0,0,0.4); border-radius: 5px; margin-top: 20px; overflow: hidden; box-shadow: inset 0 2px 4px rgba(0,0,0,0.4); }
+  .bar > div { height: 100%; border-radius: 5px; transition: width 0.8s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.4s ease; position: relative; }
+  .bar > div::after { content: ''; position: absolute; top:0; left:0; right:0; bottom:0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3) 50%, transparent); opacity: 0; transition: opacity 0.3s; }
+  .stat:hover .bar > div::after { opacity: 1; animation: shimmer 2s infinite linear; }
+  
+  @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
 
   label { display: block; font-size: 11px; color: var(--ink-dim); margin-bottom: 4px; }
   select, input[type=text], input[type=number], input[type=password], textarea {
     width: 100%; background: var(--panel-2); border: 1px solid var(--line);
     color: var(--ink); font-family: var(--mono); font-size: 14px;
-    padding: 9px 10px; border-radius: 6px; -webkit-appearance: none;
+    padding: 10px 12px; border-radius: 8px; -webkit-appearance: none;
+    transition: all 0.2s ease;
   }
   textarea { font-family: var(--sans); font-size: 13px; resize: vertical; line-height: 1.5; }
-  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); background: rgba(15,23,42,0.8); }
   .row { display: grid; grid-template-columns: 1fr 90px; gap: 8px; margin-bottom: 10px; }
   .checks { display: flex; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
-  .chk { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-dim); cursor: pointer; }
-  .chk input { width: auto; }
+  .chk { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-dim); cursor: pointer; transition: color 0.2s; }
+  .chk:hover { color: var(--ink); }
+  .chk input { width: auto; cursor: pointer; }
   button {
-    background: var(--accent); color: #06121a; border: none; font-family: var(--sans);
-    font-weight: 600; font-size: 13px; padding: 10px 14px; border-radius: 6px;
-    cursor: pointer; width: 100%;
+    background: linear-gradient(to bottom, #60a5fa, #3b82f6); color: #ffffff; border: none; font-family: var(--sans); text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    font-weight: 600; font-size: 13px; padding: 10px 14px; border-radius: 8px;
+    cursor: pointer; width: 100%; transition: all 0.2s ease; box-shadow: 0 2px 4px var(--accent-glow);
   }
-  button:active { transform: translateY(1px); }
-  button:disabled { opacity: .45; cursor: not-allowed; }
-  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--ink-dim); }
+  button:hover { transform: translateY(-1px); box-shadow: 0 4px 8px var(--accent-glow); }
+  button:active { transform: translateY(1px); box-shadow: 0 1px 2px var(--accent-glow); }
+  button:disabled { opacity: .45; cursor: not-allowed; background: var(--line); box-shadow: none; color: var(--ink-dim); text-shadow: none; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--ink-dim); box-shadow: none; text-shadow: none; }
+  button.ghost:hover { background: var(--panel-2); color: var(--ink); box-shadow: none; }
   button.sm { width: auto; padding: 6px 12px; font-size: 12px; }
 
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -498,9 +521,9 @@ function solveFridge(t) {
 
 // ---- RENDER ----
 function statusColor(kcal){
-  if (kcal < FLOOR) return {c:'var(--warn)', s:'below floor'};
-  if (kcal <= CEIL) return {c:'var(--ok)', s:'in corridor'};
-  return {c:'var(--bad)', s:'CEILING BREACH'};
+  if (kcal < FLOOR) return {c:'var(--warn)', bg:'var(--warn-bg)', s:'below floor'};
+  if (kcal <= CEIL) return {c:'var(--ok)', bg:'var(--ok-bg)', s:'in corridor'};
+  return {c:'var(--bad)', bg:'var(--bad-bg)', s:'CEILING BREACH'};
 }
 function render() {
   computePTarget();          // resolve % protein against current floor before anything reads it
@@ -514,7 +537,7 @@ function render() {
   document.getElementById('ceilLabel').style.left = pct(CEIL)+'%';
   const sc = statusColor(t.kcal);
   const fill = document.getElementById('fill');
-  fill.style.width = pct(t.kcal)+'%'; fill.style.background = sc.c;
+  fill.style.width = pct(t.kcal)+'%'; fill.style.background = sc.bg;
   document.getElementById('cursor').style.left = pct(t.kcal)+'%';
   document.getElementById('kcalNow').textContent = Math.round(t.kcal);
   const st = document.getElementById('kcalStatus'); st.textContent = sc.s; st.style.color = sc.c;
@@ -526,7 +549,7 @@ function render() {
   const macroKcal = (t.p*4 + t.c*4 + t.f*9) || 1;
   set('cPct', Math.round(t.c*4/macroKcal*100));
   set('fPct', Math.round(t.f*9/macroKcal*100));
-  const bar=(id,frac,warn)=>{const el=document.getElementById(id);el.style.width=Math.min(100,frac*100)+'%';el.style.background=frac>=1?'var(--ok)':(warn?'var(--warn)':'var(--accent)');};
+  const bar=(id,frac,warn)=>{const el=document.getElementById(id);el.style.width=Math.min(100,frac*100)+'%';el.style.background=frac>=1?'var(--ok-bg)':(warn?'var(--warn-bg)':'var(--accent-bg)');};
   bar('pBar', t.p/P_TARGET, true);
   // Optional caps: ceilings, so over-limit reads bad (inverse of the protein floor bar).
   const capBar=(wrapId,barId,lblId,val,cap,kcalPerG)=>{
@@ -537,7 +560,7 @@ function render() {
     lbl.textContent = cap.mode==='pct' ? ` · ${cap.val}% ≈ ${Math.round(max)}g cap` : ` · ${max}g cap`;
     const el=document.getElementById(barId);
     el.style.width = Math.min(100, val/max*100)+'%';
-    el.style.background = val>max ? 'var(--bad)' : (val>=max*0.85 ? 'var(--warn)' : 'var(--accent)');
+    el.style.background = val>max ? 'var(--bad-bg)' : (val>=max*0.85 ? 'var(--warn-bg)' : 'var(--accent-bg)');
   };
   capBar('cBarWrap','cBar','cCapLbl', t.c, C_CAP, 4);
   capBar('fBarWrap','fBar','fCapLbl', t.f, F_CAP, 9);
