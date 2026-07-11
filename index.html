@@ -166,7 +166,12 @@
   <div class="targets-grid">
     <div><label>Calorie floor (kcal)</label><input type="number" id="tFloor" min="0" step="10"></div>
     <div><label>Calorie ceiling (kcal)</label><input type="number" id="tCeil" min="0" step="10"></div>
-    <div><label>Protein floor (g)</label><input type="number" id="tP" min="0" step="1"></div>
+    <div><label>Protein floor — g or % kcal</label>
+      <div style="display:flex;gap:6px">
+        <input type="number" id="tP" min="0" step="1">
+        <select id="tPMode" style="width:84px"><option value="g">g</option><option value="pct">% kcal</option></select>
+      </div>
+    </div>
     <div><label>Carb cap — blank = off</label>
       <div style="display:flex;gap:6px">
         <input type="number" id="tCMax" min="0" step="1" placeholder="off">
@@ -333,7 +338,11 @@
 // via Settings and persisted separately, so the protocol itself never mutates.
 const PROTOCOL = { floor:1700, ceil:1900, p:120, penK:10, penP:10, oilK:132, oilF:14 };
 let FLOOR = PROTOCOL.floor, CEIL = PROTOCOL.ceil;
+// Protein floor, like the caps, can be a fixed gram value or a % of the calorie
+// floor (at 4 kcal/g). P_TARGET is the resolved grams used everywhere downstream.
+let P_CFG = {mode:'g', val:PROTOCOL.p};
 let P_TARGET = PROTOCOL.p;
+function computePTarget(){ P_TARGET = P_CFG.mode==='pct' ? P_CFG.val/100*FLOOR/4 : P_CFG.val; }
 // Optional caps: {mode:'g'|'pct', val}; val 0 = off. 'pct' = % of the calorie
 // floor (the day is engineered to land there), converted at 4 kcal/g carb, 9 fat.
 let C_CAP = {mode:'g', val:0}, F_CAP = {mode:'g', val:0};
@@ -347,7 +356,9 @@ let INFLATE = 1 + PROTOCOL.penK/100, DEDUCT = 1 - PROTOCOL.penP/100;  // unweigh
 function loadTargets(){
   try {
     const t = JSON.parse(localStorage.getItem('ledger_targets')||'null');
-    if (t){ FLOOR=+t.floor||FLOOR; CEIL=+t.ceil||CEIL; P_TARGET=+t.p||P_TARGET;
+    if (t){ FLOOR=+t.floor||FLOOR; CEIL=+t.ceil||CEIL;
+            if (t.pCfg) P_CFG={mode:t.pCfg.mode==='pct'?'pct':'g', val:+t.pCfg.val||PROTOCOL.p};
+            else if (+t.p) P_CFG={mode:'g', val:+t.p};              // legacy grams-only
             if (t.cCap) C_CAP={mode:t.cCap.mode==='pct'?'pct':'g', val:+t.cCap.val||0};
             else if (+t.cMax) C_CAP={mode:'g', val:+t.cMax};        // legacy grams-only
             if (t.fCap) F_CAP={mode:t.fCap.mode==='pct'?'pct':'g', val:+t.fCap.val||0};
@@ -358,7 +369,7 @@ function loadTargets(){
   } catch(e){}
 }
 function saveTargets(){
-  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR,ceil:CEIL,p:P_TARGET,cCap:C_CAP,fCap:F_CAP})); } catch(e){}
+  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR,ceil:CEIL,pCfg:P_CFG,cCap:C_CAP,fCap:F_CAP})); } catch(e){}
 }
 function savePens(){
   try { localStorage.setItem('ledger_pen', JSON.stringify({
@@ -367,7 +378,7 @@ function savePens(){
 function refreshTargetLabels(){
   const set=(id,v)=>{const el=document.getElementById(id); if(el) el.textContent=v;};
   set('floorTitle',FLOOR); set('ceilTitle',CEIL); set('solverTitle',FLOOR);
-  set('pTitle',P_TARGET);
+  set('pTitle', P_CFG.mode==='pct' ? `${P_CFG.val}% ≈ ${Math.round(P_TARGET)}` : `${Math.round(P_TARGET)}`);
   set('floorLabel',FLOOR); set('ceilLabel',CEIL);
 }
 
@@ -492,6 +503,7 @@ function statusColor(kcal){
   return {c:'var(--bad)', s:'CEILING BREACH'};
 }
 function render() {
+  computePTarget();          // resolve % protein against current floor before anything reads it
   const t = totals();
   // corridor: scale 0..CEIL*1.15 so breach is visible
   const scaleMax = CEIL * 1.15;
@@ -979,7 +991,8 @@ document.getElementById('ledgerBody').onclick = (ev)=>{
 function fillTargetInputs(){
   document.getElementById('tFloor').value = FLOOR;
   document.getElementById('tCeil').value  = CEIL;
-  document.getElementById('tP').value     = P_TARGET;
+  document.getElementById('tP').value     = P_CFG.val;
+  document.getElementById('tPMode').value = P_CFG.mode;
   document.getElementById('tCMax').value  = C_CAP.val || '';
   document.getElementById('tCMode').value = C_CAP.mode;
   document.getElementById('tFMax').value  = F_CAP.val || '';
@@ -992,19 +1005,19 @@ function fillTargetInputs(){
 document.getElementById('saveTargets').onclick = ()=>{
   const st = document.getElementById('targetStatus');
   const f = +document.getElementById('tFloor').value, c = +document.getElementById('tCeil').value;
-  const p = +document.getElementById('tP').value;
+  const p = +document.getElementById('tP').value, pMode = document.getElementById('tPMode').value;
   const cm = +document.getElementById('tCMax').value || 0, fm = +document.getElementById('tFMax').value || 0;
   const cMode = document.getElementById('tCMode').value, fMode = document.getElementById('tFMode').value;
   if (!(f>0 && c>0 && p>0)){ setStatus(st,'Floor, ceiling and protein must be positive.','bad'); return; }
   if (c < f){ setStatus(st,'Ceiling cannot be below floor.','bad'); return; }
-  if ((cMode==='pct' && cm>100) || (fMode==='pct' && fm>100)){ setStatus(st,'Percentage caps cannot exceed 100.','bad'); return; }
-  FLOOR=f; CEIL=c; P_TARGET=p;
+  if ((pMode==='pct' && p>100) || (cMode==='pct' && cm>100) || (fMode==='pct' && fm>100)){ setStatus(st,'Percentage values cannot exceed 100.','bad'); return; }
+  FLOOR=f; CEIL=c; P_CFG={mode:pMode, val:p};
   C_CAP={mode:cMode, val:cm}; F_CAP={mode:fMode, val:fm};
   saveTargets(); render();
   setStatus(st,'Targets saved. Corridor, solver and history all follow the new numbers.','good');
 };
 document.getElementById('resetTargets').onclick = ()=>{
-  FLOOR=PROTOCOL.floor; CEIL=PROTOCOL.ceil; P_TARGET=PROTOCOL.p;
+  FLOOR=PROTOCOL.floor; CEIL=PROTOCOL.ceil; P_CFG={mode:'g', val:PROTOCOL.p};
   C_CAP={mode:'g', val:0}; F_CAP={mode:'g', val:0};
   saveTargets(); fillTargetInputs(); render();
   setStatus(document.getElementById('targetStatus'),'Protocol defaults restored (1700/1900 · 120g protein · caps off).','good');
@@ -1033,7 +1046,7 @@ document.getElementById('exportBtn').onclick = ()=>{
   allDays(true).forEach(d => { days[d.date] = d.ledger; });
   days[dateStr()] = ledger;                       // today's live state wins
   const payload = { exported: dateStr(), version: 2,
-    targets: {floor:FLOOR,ceil:CEIL,p:P_TARGET,cCap:C_CAP,fCap:F_CAP},
+    targets: {floor:FLOOR,ceil:CEIL,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP},
     pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
     days, date: dateStr(), ledger, totals: totals() };   // date/ledger kept for v1 compat
   const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
@@ -1073,7 +1086,8 @@ document.getElementById('importFile').onchange = (ev)=>{
         });
         if (data.targets){
           FLOOR=+data.targets.floor||FLOOR; CEIL=+data.targets.ceil||CEIL;
-          P_TARGET=+data.targets.p||P_TARGET;
+          if (data.targets.pCfg) P_CFG={mode:data.targets.pCfg.mode==='pct'?'pct':'g', val:+data.targets.pCfg.val||PROTOCOL.p};
+          else if (+data.targets.p) P_CFG={mode:'g', val:+data.targets.p};
           if (data.targets.cCap) C_CAP={mode:data.targets.cCap.mode==='pct'?'pct':'g', val:+data.targets.cCap.val||0};
           else if (+data.targets.cMax) C_CAP={mode:'g', val:+data.targets.cMax};
           if (data.targets.fCap) F_CAP={mode:data.targets.fCap.mode==='pct'?'pct':'g', val:+data.targets.fCap.val||0};
