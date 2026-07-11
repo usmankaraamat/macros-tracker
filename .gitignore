@@ -1,0 +1,7 @@
+# Build/spec doc — not part of the deployed app
+BUILD.md
+
+# Local secrets for QA/testing — NEVER commit. Keys live only on disk + in browser localStorage.
+.env
+.env.*
+!.env.example

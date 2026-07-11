@@ -691,11 +691,15 @@ function nutrientsFrom(food){
     if (num!=null) m[String(num)] = n.value != null ? n.value : (n.amount || 0);
   });
   const g = num => Number(m[num] || 0);
-  return {
-    kcal: g('208') || g('957') || g('958') || (g('268') ? g('268')/4.184 : 0),  // kJ→kcal fallback
-    p:  g('203'), f: g('204'), c: g('205'),
-    ca: g('301'), ph: g('305')
-  };
+  const p = g('203'), f = g('204'), c = g('205');
+  // Energy: prefer the Atwater factors (reliable on Foundation foods) over #208, which
+  // USDA sometimes ships as a bogus low placeholder — e.g. "Potatoes, gold, raw" reports
+  // #208 = 5 kcal while #957 = 73.5. Fall back to #208, then kJ. Finally, if the chosen
+  // value is implausibly low versus the macro-derived estimate, trust the macros.
+  let kcal = g('957') || g('958') || g('208') || (g('268') ? g('268')/4.184 : 0);
+  const est = 4*c + 4*p + 9*f;
+  if (est > 0 && kcal < est*0.5) kcal = est;
+  return { kcal, p, f, c, ca: g('301'), ph: g('305') };
 }
 async function usdaSearch(query){
   if (!hasUSDA()) throw new Error('No USDA key — add one in ⚙ Settings.');
