@@ -72,7 +72,7 @@
   .corridor-readout .status { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; align-self: flex-end; padding-bottom: 3px; }
 
   .grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 16px; animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
-  .grid-3 { grid-template-columns: repeat(3,1fr); }
+  .grid-3 { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
   .stat { background: linear-gradient(145deg, rgba(30,41,59,0.7), rgba(15,23,42,0.8)); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 20px; box-shadow: 0 8px 24px -8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease; }
   .stat:hover { transform: translateY(-4px); box-shadow: 0 16px 32px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1); }
   .stat .k { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.15em; color: var(--ink-dim); }
@@ -541,6 +541,7 @@ const DB = {
   "Chicken breast, boiled":{kcal:165,p:31.0,f:3.6,  c:0,    ca:15,  ph:228},
   "White rice, boiled":  {kcal:130, p:2.7,  f:0.3,  c:28.2, ca:10,  ph:43},
   "Whole egg, boiled":   {kcal:155, p:12.6, f:10.6, c:1.1,  ca:50,  ph:172},
+  "Potatoes, air-fried": {kcal:93,  p:2.5,  f:0.1,  c:21.0, ca:10,  ph:50},
 };
 // Solver reference foods
 const RICE = DB["White rice, boiled"], CHK = DB["Chicken breast, boiled"];
@@ -997,8 +998,9 @@ function renderBudget() {
       combos.push({
         nameA, nameB, gA: Math.round(gA), gB: Math.round(gB),
         kcal: Math.round(totalKcal), p: Math.round(totalP),
-        // Score: prefer combos where both portions are moderate (penalize lopsided combos)
-        score: Math.abs(gA - gB) + (totalP < remP ? 500 : 0)
+        // Score: prefer combos where both portions are moderate.
+        // Use a 0.5g tolerance for floating point inaccuracies to avoid falsely penalizing exact solutions.
+        score: Math.abs(gA - gB) + (totalP < remP - 0.5 ? 500 : 0)
       });
     }
   }
