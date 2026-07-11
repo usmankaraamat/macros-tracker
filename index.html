@@ -139,6 +139,16 @@
   .pend-group .pend-item:last-child { margin-bottom: 0; }
   .pend-group-head { font-size: 12px; font-weight: 600; color: var(--ink); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; text-transform: capitalize; }
   .pend-group-head .pgh-meta { font-family: var(--mono); font-size: 10px; font-weight: 400; color: var(--ink-faint); text-transform: none; }
+  .pend-research { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-top: 6px; }
+  .pend-research input { padding: 5px 8px; font-size: 11px; }
+  .pend-research button { width: 34px; padding: 5px 0; font-size: 13px; flex-shrink: 0; }
+  .pend-summary { background: var(--panel-2); border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; margin-top: 10px; box-shadow: 0 0 0 3px rgba(59,130,246,0.08); }
+  .pend-summary .ps-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink); }
+  .pend-summary .ps-row + .ps-row { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+  .pend-summary .ps-macros { font-family: var(--mono); }
+  .pend-summary .ps-day { color: var(--ink-dim); font-family: var(--mono); }
+  .pend-summary b { color: var(--ink); font-weight: 600; }
+  .ink-dim { color: var(--ink-dim); }
 
   .solver-out { font-family: var(--mono); font-size: 13px; line-height: 1.7; }
   .solver-out .conflict { color: var(--bad); }
@@ -1480,6 +1490,34 @@ function syncPendingFromDOM(){
     const f=document.getElementById('pf'+i); if(f) p.sel=f.value;
   });
 }
+// Aggregate what the currently-selected pending items would contribute if added —
+// runs the same computeEntry (penalties and all) so the preview matches the ledger.
+function pendingTotals(){
+  return pending.reduce((t,p)=>{
+    if (!p.include || !p.grams || p.grams<=0) return t;
+    const r = pendResolve(p);
+    const e = computeEntry(p.name, p.grams, p.weighed, p.isCurry, false, r.base, r.source);
+    t.kcal+=e.kcal; t.p+=e.p; t.f+=e.f; t.c+=e.c; t.n++;
+    return t;
+  }, {kcal:0,p:0,f:0,c:0,n:0});
+}
+function pendSummaryHTML(){
+  const t = pendingTotals();
+  if (!t.n) return `<div class="pend-summary"><span class="ink-dim">Nothing selected.</span></div>`;
+  const after = totals().kcal + t.kcal;
+  const sc = statusColor(after);
+  return `<div class="pend-summary">
+    <div class="ps-row"><span>This meal · ${t.n} item${t.n>1?'s':''}</span>
+      <span class="ps-macros"><b>${Math.round(t.kcal)}</b> kcal · <b>${t.p.toFixed(0)}</b>P · <b>${t.f.toFixed(0)}</b>F · <b>${t.c.toFixed(0)}</b>C</span></div>
+    <div class="ps-row ps-day"><span>Day after adding</span>
+      <span><b style="color:${sc.c}">${Math.round(after)}</b> / ${FLOOR}–${CEIL} kcal · ${sc.s}</span></div>
+  </div>`;
+}
+function updatePendSummary(){
+  const el = document.getElementById('pendSummaryWrap');
+  if (el) el.innerHTML = pendSummaryHTML();
+}
+
 // One reviewable ingredient card. `i` is the pending index — its DOM ids stay stable
 // regardless of grouping so syncPendingFromDOM keeps working by index.
 function renderPendItem(p, i){
@@ -1493,6 +1531,7 @@ function renderPendItem(p, i){
     ? `<select id="pf${i}" style="margin-top:6px;font-size:11px">${opts}</select>` : '';
   const warn = pendWarn(p);
   const warnLine = warn ? `<div class="tactical bad" style="margin-top:6px;font-size:10px;padding-left:8px">${warn}</div>` : '';
+  const qv = (p.name||'').replace(/"/g,'&quot;');
   return `<div class="pend-item">
     <div class="pend-top">
       <input type="checkbox" id="ps${i}" ${p.include?'checked':''} style="width:auto">
@@ -1500,12 +1539,32 @@ function renderPendItem(p, i){
       <input type="number" id="pg${i}" value="${Math.round(p.grams)}" min="0" step="1" title="grams">
     </div>
     ${picker}
+    <div class="pend-research">
+      <input type="text" id="pq${i}" value="${qv}" placeholder="wrong match? type a better USDA term">
+      <button class="sm ghost" data-research="${i}" title="Search USDA for this term">&#8635;</button>
+    </div>
     <div class="pend-tog">
       <label class="chk"><input type="checkbox" id="pw${i}" ${p.weighed?'checked':''}> weighed</label>
       <label class="chk"><input type="checkbox" id="pc${i}" ${p.isCurry?'checked':''}> curry</label>
     </div>
     ${warnLine}
   </div>`;
+}
+// Re-run a USDA search for one component with a user-supplied term — the fix when the
+// AI's search word matched the wrong food (e.g. "maida" → wheat flour, not all-purpose).
+async function researchPending(i){
+  const inp = document.getElementById('pq'+i);
+  const q = (inp && inp.value || '').trim();
+  if (!q) return;
+  syncPendingFromDOM();                              // keep other edits (grams, toggles, picks)
+  const btn = document.querySelector(`[data-research="${i}"]`);
+  if (btn){ btn.disabled = true; btn.innerHTML = '<span class="spin"></span>'; }
+  try {
+    const cands = (await usdaSearch(q)).slice(0,6);
+    if (cands.length){ pending[i].candidates = cands; pending[i].sel = 'u0'; pending[i].name = q; }
+    else if (btn){ btn.disabled = false; btn.textContent = '∅'; return; }
+  } catch(e){ if (btn){ btn.disabled = false; btn.textContent = '!'; } return; }
+  renderPending();
 }
 function renderPending(){
   const wrap = document.getElementById('pending');
@@ -1530,16 +1589,25 @@ function renderPending(){
       ${items}
     </div>`;
   }).join('')
+  + `<div id="pendSummaryWrap"></div>`
   + `<div class="footer-actions" style="margin-top:8px">
        <button id="addPendingBtn">Add selected to ledger</button>
        <button class="ghost" id="discardBtn">Discard</button>
      </div>`;
+  updatePendSummary();
   document.getElementById('addPendingBtn').onclick = commitPending;
   document.getElementById('discardBtn').onclick = ()=>{ pending=[]; renderPending(); };
-  pending.forEach((p,i)=>{
-    const f = document.getElementById('pf'+i);
-    if (f) f.onchange = ()=>{ syncPendingFromDOM(); renderPending(); };
+  wrap.querySelectorAll('[data-research]').forEach(btn=>{
+    btn.onclick = ()=> researchPending(+btn.dataset.research);
   });
+  wrap.querySelectorAll('input[id^="pq"]').forEach(inp=>{
+    inp.addEventListener('keydown', ev=>{ if (ev.key==='Enter'){ ev.preventDefault(); researchPending(+inp.id.slice(2)); } });
+  });
+  // Live totals: typing grams updates just the summary (keeps focus); a discrete toggle
+  // or candidate swap rebuilds the list. The re-search term box is exempt from rebuilds
+  // so an in-progress query isn't wiped when it loses focus.
+  wrap.oninput  = ev => { if (ev.target.id && ev.target.id.startsWith('pq')) return; syncPendingFromDOM(); updatePendSummary(); };
+  wrap.onchange = ev => { if (ev.target.id && ev.target.id.startsWith('pq')) return; syncPendingFromDOM(); renderPending(); };
 }
 function commitPending(){
   syncPendingFromDOM();
