@@ -692,7 +692,7 @@ function nutrientsFrom(food){
   });
   const g = num => Number(m[num] || 0);
   return {
-    kcal: g('208') || g('957') || g('958'),
+    kcal: g('208') || g('957') || g('958') || (g('268') ? g('268')/4.184 : 0),  // kJ→kcal fallback
     p:  g('203'), f: g('204'), c: g('205'),
     ca: g('301'), ph: g('305')
   };
@@ -793,21 +793,37 @@ Meal: """${text}"""`;
 }
 
 // ---- PENDING (AI review) ----
+// Capture live input state back into `pending` so a re-render (e.g. after a swap)
+// doesn't lose grams/toggle edits the user already made.
+function syncPendingFromDOM(){
+  pending.forEach((p,i)=>{
+    const g=document.getElementById('pg'+i); if(g && g.value!=='') p.grams=parseFloat(g.value);
+    const s=document.getElementById('ps'+i); if(s) p.include=s.checked;
+    const w=document.getElementById('pw'+i); if(w) p.weighed=w.checked;
+    const c=document.getElementById('pc'+i); if(c) p.isCurry=c.checked;
+  });
+}
 function renderPending(){
   const wrap = document.getElementById('pending');
   if (!pending.length){ wrap.innerHTML=''; return; }
   wrap.innerHTML = pending.map((p,i)=>{
     const badge = `<span class="badge ${p.source==='USDA'?'usda':'est'}">${p.source}</span>`;
+    const kc = Math.round(p.base.kcal||0);
+    const canSwap = p.usdaBase && p.estBase;
+    const swap = canSwap ? ` <a href="#" data-sw="${i}" style="color:var(--accent);font-size:10px">use ${p.source==='USDA'?'AI est':'USDA'}</a>` : '';
+    const meta = `<span style="color:var(--ink-dim);font-family:var(--mono);font-size:10px">${kc} kcal/100g</span>`;
+    const warnLine = p.warn ? `<div class="tactical bad" style="margin-top:6px;font-size:10px;padding-left:8px">${p.warn}</div>` : '';
     return `<div class="pend-item">
       <div class="pend-top">
         <input type="checkbox" id="ps${i}" ${p.include?'checked':''} style="width:auto">
-        <span class="pname">${badge} ${p.name}</span>
+        <span class="pname">${badge} ${p.name} ${meta}${swap}</span>
         <input type="number" id="pg${i}" value="${Math.round(p.grams)}" min="0" step="1" title="grams">
       </div>
       <div class="pend-tog">
         <label class="chk"><input type="checkbox" id="pw${i}" ${p.weighed?'checked':''}> weighed</label>
         <label class="chk"><input type="checkbox" id="pc${i}" ${p.isCurry?'checked':''}> curry</label>
       </div>
+      ${warnLine}
     </div>`;
   }).join('')
   + `<div class="footer-actions" style="margin-top:8px">
@@ -816,6 +832,16 @@ function renderPending(){
      </div>`;
   document.getElementById('addPendingBtn').onclick = commitPending;
   document.getElementById('discardBtn').onclick = ()=>{ pending=[]; renderPending(); };
+  wrap.querySelectorAll('a[data-sw]').forEach(a=>{
+    a.onclick = (ev)=>{
+      ev.preventDefault();
+      syncPendingFromDOM();
+      const p = pending[+a.dataset.sw];
+      p.source = p.source==='USDA' ? 'AI est' : 'USDA';
+      p.base = p.source==='USDA' ? p.usdaBase : p.estBase;
+      renderPending();
+    };
+  });
 }
 function commitPending(){
   let added = 0;
@@ -926,20 +952,25 @@ document.getElementById('parseBtn').onclick = async ()=>{
     setStatus(status, `Parsed ${items.length} item(s). Resolving nutrients via USDA…`);
     pending = [];
     for (const it of items){
-      let base = it.est || {kcal:0,p:0,f:0,c:0};
-      let source = 'AI est';
+      const estBase = (it.est && it.est.kcal!=null)
+        ? {kcal:+it.est.kcal||0, p:+it.est.p||0, f:+it.est.f||0, c:+it.est.c||0} : null;
+      let usdaBase = null;
       if (hasUSDA() && it.name){
-        try {
-          const res = await usdaSearch(it.name);
-          if (res.length){ base = res[0].base; source = 'USDA'; }
-        } catch(e){ /* fall back to AI estimate */ }
+        try { const res = await usdaSearch(it.name); if (res.length) usdaBase = res[0].base; }
+        catch(e){ /* fall back to AI estimate */ }
       }
+      const source = usdaBase ? 'USDA' : 'AI est';
+      const base = usdaBase || estBase || {kcal:0,p:0,f:0,c:0};
+      // If the USDA match and Gemini's own estimate disagree sharply, the match is suspect.
+      const warn = (usdaBase && estBase && estBase.kcal>0 &&
+        Math.abs(usdaBase.kcal-estBase.kcal)/estBase.kcal > 0.25)
+        ? `USDA ${Math.round(usdaBase.kcal)} vs AI est ${Math.round(estBase.kcal)} kcal/100g — check the match` : '';
       pending.push({
         name: it.name || 'unknown',
         grams: Number(it.grams) || 0,
         weighed: !!it.weighed,
         isCurry: !!it.isCurry,
-        base, source, include: true
+        usdaBase, estBase, source, base, warn, include: true
       });
     }
     const nUsda = pending.filter(p=>p.source==='USDA').length;
