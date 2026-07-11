@@ -120,7 +120,6 @@
   .tactical.good { border-color: var(--ok); color: var(--ok); }
   .tactical a { color: var(--accent); }
   .footer-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .warn-banner { background: rgba(217,164,65,.1); border: 1px solid rgba(217,164,65,.3); color: var(--warn); font-size: 11px; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px; }
   details summary { cursor: pointer; color: var(--ink-dim); font-size: 11px; margin-top: 6px; }
 
   .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -146,11 +145,7 @@
     <span id="gear" title="Settings">&#9881;</span>
   </div>
 </header>
-<div class="sub">deterministic core · v1 prototype</div>
-
-<div class="warn-banner" id="persistWarn">
-  Prototype note: in this preview, data resets on reload. Persistence activates once hosted. Use Export to snapshot.
-</div>
+<div class="sub">macro tracker · works offline</div>
 
 <!-- SETTINGS -->
 <div class="panel" id="settingsPanel" style="display:none">
@@ -166,18 +161,44 @@
     <button id="saveKeys">Save keys</button>
     <button class="ghost" id="loadModelsBtn">Load models</button>
   </div>
-  <div class="tactical" id="keyStatus" style="margin-top:10px;margin-bottom:14px">No keys set. USDA search and AI parsing stay disabled until you add them.</div>
+  <div class="tactical" id="keyStatus" style="margin-top:10px;margin-bottom:14px">Add your free USDA + Gemini keys to enable search and AI parsing.</div>
   <div class="panel-title">Targets · protocol defaults shown — edit deliberately</div>
   <div class="targets-grid">
     <div><label>Calorie floor (kcal)</label><input type="number" id="tFloor" min="0" step="10"></div>
     <div><label>Calorie ceiling (kcal)</label><input type="number" id="tCeil" min="0" step="10"></div>
     <div><label>Protein floor (g)</label><input type="number" id="tP" min="0" step="1"></div>
+    <div><label>Carb cap — blank = off</label>
+      <div style="display:flex;gap:6px">
+        <input type="number" id="tCMax" min="0" step="1" placeholder="off">
+        <select id="tCMode" style="width:84px"><option value="g">g</option><option value="pct">% kcal</option></select>
+      </div>
+    </div>
+    <div><label>Fat cap — blank = off</label>
+      <div style="display:flex;gap:6px">
+        <input type="number" id="tFMax" min="0" step="1" placeholder="off">
+        <select id="tFMode" style="width:84px"><option value="g">g</option><option value="pct">% kcal</option></select>
+      </div>
+    </div>
   </div>
   <div class="footer-actions">
     <button id="saveTargets">Save targets</button>
     <button class="ghost" id="resetTargets">Protocol defaults</button>
   </div>
   <div class="tactical" id="targetStatus" style="margin-top:10px;display:none"></div>
+  <details style="margin-top:12px">
+    <summary>Advanced · unweighed penalties &amp; oil tax</summary>
+    <div class="targets-grid" style="margin-top:10px">
+      <div><label>Unweighed kcal inflation (%)</label><input type="number" id="penK" min="0" step="1"></div>
+      <div><label>Unweighed protein cut (%)</label><input type="number" id="penP" min="0" step="1"></div>
+      <div><label>Oil tax · kcal per tbsp</label><input type="number" id="penOK" min="0" step="1"></div>
+      <div><label>Oil tax · fat g per tbsp</label><input type="number" id="penOF" min="0" step="1"></div>
+    </div>
+    <div class="footer-actions">
+      <button id="savePens">Save penalties</button>
+      <button class="ghost" id="resetPens">Protocol defaults</button>
+    </div>
+    <div class="tactical" style="margin-top:8px">Penalties keep unweighed logging honest — lower them deliberately, not after a big dinner.</div>
+  </details>
   <details>
     <summary>How to get keys (both free)</summary>
     <div class="tactical" style="margin-top:8px">
@@ -217,12 +238,14 @@
       <div class="bar"><div id="pBar" style="width:0%;background:var(--ok)"></div></div>
     </div>
     <div class="stat">
-      <div class="k">Carbs</div>
+      <div class="k">Carbs<span id="cCapLbl"></span></div>
       <div class="v"><span id="cNow">0</span><small>g · <span id="cPct">0</span>% kcal</small></div>
+      <div class="bar" id="cBarWrap" style="display:none"><div id="cBar" style="width:0%;background:var(--accent)"></div></div>
     </div>
     <div class="stat">
-      <div class="k">Fat</div>
+      <div class="k">Fat<span id="fCapLbl"></span></div>
       <div class="v"><span id="fNow">0</span><small>g · <span id="fPct">0</span>% kcal</small></div>
+      <div class="bar" id="fBarWrap" style="display:none"><div id="fBar" style="width:0%;background:var(--accent)"></div></div>
     </div>
   </div>
 </div>
@@ -287,6 +310,7 @@
 <!-- HISTORY -->
 <div class="panel">
   <div class="panel-title">History</div>
+  <div class="tactical" id="histSummary" style="display:none;margin-bottom:10px;margin-top:0"></div>
   <div id="histList"><div class="empty">No previous days yet.</div></div>
 </div>
 
@@ -297,27 +321,48 @@
 </div>
 <input type="file" id="importFile" accept="application/json" style="display:none">
 <p style="font-size:10px;color:var(--ink-faint);text-align:center;margin-top:10px">
-  Export regularly — it's the only durable backup. Local storage can be evicted by the OS.
+  Data lives on this device — Export is your backup.
 </p>
+<div id="toast" style="display:none;position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--accent);color:#06121a;font-size:12px;font-weight:600;padding:9px 16px;border-radius:20px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.5);z-index:50">
+  Update ready — tap to reload
+</div>
 
 <script>
 // ---- CONSTANTS (protocol) ----
 // PROTOCOL holds the authoritative defaults; live targets are user-overridable
 // via Settings and persisted separately, so the protocol itself never mutates.
-const PROTOCOL = { floor:1700, ceil:1900, p:120 };
+const PROTOCOL = { floor:1700, ceil:1900, p:120, penK:10, penP:10, oilK:132, oilF:14 };
 let FLOOR = PROTOCOL.floor, CEIL = PROTOCOL.ceil;
 let P_TARGET = PROTOCOL.p;
-const OIL_KCAL = 132, OIL_FAT = 14;      // 1 tbsp hidden oil
-const INFLATE = 1.10, DEDUCT = 0.90;     // unweighed: +10% kcal, -10% protein
+// Optional caps: {mode:'g'|'pct', val}; val 0 = off. 'pct' = % of the calorie
+// floor (the day is engineered to land there), converted at 4 kcal/g carb, 9 fat.
+let C_CAP = {mode:'g', val:0}, F_CAP = {mode:'g', val:0};
+function capGrams(cap, kcalPerG){
+  if (!cap.val) return 0;
+  return cap.mode==='pct' ? cap.val/100*FLOOR/kcalPerG : cap.val;
+}
+let OIL_KCAL = PROTOCOL.oilK, OIL_FAT = PROTOCOL.oilF;   // 1 tbsp hidden oil
+let INFLATE = 1 + PROTOCOL.penK/100, DEDUCT = 1 - PROTOCOL.penP/100;  // unweighed adjustments
 
 function loadTargets(){
   try {
     const t = JSON.parse(localStorage.getItem('ledger_targets')||'null');
-    if (t){ FLOOR=+t.floor||FLOOR; CEIL=+t.ceil||CEIL; P_TARGET=+t.p||P_TARGET; }
+    if (t){ FLOOR=+t.floor||FLOOR; CEIL=+t.ceil||CEIL; P_TARGET=+t.p||P_TARGET;
+            if (t.cCap) C_CAP={mode:t.cCap.mode==='pct'?'pct':'g', val:+t.cCap.val||0};
+            else if (+t.cMax) C_CAP={mode:'g', val:+t.cMax};        // legacy grams-only
+            if (t.fCap) F_CAP={mode:t.fCap.mode==='pct'?'pct':'g', val:+t.fCap.val||0};
+            else if (+t.fMax) F_CAP={mode:'g', val:+t.fMax}; }
+    const pn = JSON.parse(localStorage.getItem('ledger_pen')||'null');
+    if (pn){ INFLATE = 1 + (+pn.k||0)/100; DEDUCT = 1 - (+pn.p||0)/100;
+             OIL_KCAL = +pn.oilK>=0 ? +pn.oilK : OIL_KCAL; OIL_FAT = +pn.oilF>=0 ? +pn.oilF : OIL_FAT; }
   } catch(e){}
 }
 function saveTargets(){
-  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR,ceil:CEIL,p:P_TARGET})); } catch(e){}
+  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR,ceil:CEIL,p:P_TARGET,cCap:C_CAP,fCap:F_CAP})); } catch(e){}
+}
+function savePens(){
+  try { localStorage.setItem('ledger_pen', JSON.stringify({
+    k: Math.round((INFLATE-1)*100), p: Math.round((1-DEDUCT)*100), oilK: OIL_KCAL, oilF: OIL_FAT })); } catch(e){}
 }
 function refreshTargetLabels(){
   const set=(id,v)=>{const el=document.getElementById(id); if(el) el.textContent=v;};
@@ -366,7 +411,7 @@ function computeEntry(name, grams, weighed, isCurry, halfOil, base, source) {
             kcal: base.kcal*s, p: base.p*s, f: base.f*s, c: (base.c||0)*s, ca: (base.ca||0)*s, ph: (base.ph||0)*s, flags: [] };
   if (!weighed) {
     e.kcal *= INFLATE; e.p *= DEDUCT;
-    e.flags.push("+10% kcal / −10% P");
+    e.flags.push(`+${Math.round((INFLATE-1)*100)}% kcal / −${Math.round((1-DEDUCT)*100)}% P`);
   }
   if (isCurry && !weighed) {
     const mult = halfOil ? 0.5 : 1;
@@ -471,6 +516,19 @@ function render() {
   set('fPct', Math.round(t.f*9/macroKcal*100));
   const bar=(id,frac,warn)=>{const el=document.getElementById(id);el.style.width=Math.min(100,frac*100)+'%';el.style.background=frac>=1?'var(--ok)':(warn?'var(--warn)':'var(--accent)');};
   bar('pBar', t.p/P_TARGET, true);
+  // Optional caps: ceilings, so over-limit reads bad (inverse of the protein floor bar).
+  const capBar=(wrapId,barId,lblId,val,cap,kcalPerG)=>{
+    const wrap=document.getElementById(wrapId), lbl=document.getElementById(lblId);
+    const max = capGrams(cap, kcalPerG);
+    if (!max){ wrap.style.display='none'; lbl.textContent=''; return; }
+    wrap.style.display='block';
+    lbl.textContent = cap.mode==='pct' ? ` · ${cap.val}% ≈ ${Math.round(max)}g cap` : ` · ${max}g cap`;
+    const el=document.getElementById(barId);
+    el.style.width = Math.min(100, val/max*100)+'%';
+    el.style.background = val>max ? 'var(--bad)' : (val>=max*0.85 ? 'var(--warn)' : 'var(--accent)');
+  };
+  capBar('cBarWrap','cBar','cCapLbl', t.c, C_CAP, 4);
+  capBar('fBarWrap','fBar','fCapLbl', t.f, F_CAP, 9);
 
   // ledger table
   const body = document.getElementById('ledgerBody');
@@ -491,8 +549,7 @@ function render() {
   const tac = document.getElementById('tactical');
   const remKcal = FLOOR - t.kcal, remP = P_TARGET - t.p;
   let lines = [];
-  if (t.kcal===0) lines.push('Empty ledger.');
-  else {
+  if (t.kcal>0) {
     if (remKcal>0) lines.push(`${Math.round(remKcal)} kcal to floor, ${Math.max(0,remP).toFixed(0)}g protein outstanding.`);
     else if (t.kcal<=CEIL) lines.push(`Inside corridor with ${Math.round(CEIL-t.kcal)} kcal of ceiling headroom.`);
     else lines.push(`Ceiling breached by ${Math.round(t.kcal-CEIL)} kcal — integrity compromised.`);
@@ -505,7 +562,24 @@ function render() {
 }
 
 // ---- HISTORY PANEL ----
+function dayOk(t){ return t.kcal >= FLOOR && t.kcal <= CEIL && t.p >= P_TARGET; }
+function renderHistSummary(){
+  const el = document.getElementById('histSummary');
+  // Most recent logged days incl. today, newest first.
+  const all = allDays(false);
+  if (ledger.length) all.unshift({date: dateStr(), ledger});
+  if (!all.length){ el.style.display='none'; return; }
+  const week = all.slice(0,7).map(d=>totalsOf(d.ledger));
+  const avgK = week.reduce((s,t)=>s+t.kcal,0)/week.length;
+  const avgP = week.reduce((s,t)=>s+t.p,0)/week.length;
+  const okN = week.filter(dayOk).length;
+  let streak = 0;
+  for (const d of all){ if (dayOk(totalsOf(d.ledger))) streak++; else break; }
+  el.style.display='block';
+  el.textContent = `Last ${week.length} logged day${week.length>1?'s':''}: avg ${Math.round(avgK)} kcal · ${avgP.toFixed(0)}g P · ${okN}/${week.length} ✓` + (streak>1 ? ` · streak ${streak}` : '');
+}
 function renderHistory(){
+  renderHistSummary();
   const wrap = document.getElementById('histList');
   const days = allDays(false);
   if (!days.length){ wrap.innerHTML = '<div class="empty">No previous days yet.</div>'; return; }
@@ -880,6 +954,11 @@ document.getElementById('addBtn').onclick = ()=>{
   save(); render();
 };
 
+// Keyboard: Enter logs / searches; Ctrl+Enter parses the meal text.
+document.getElementById('grams').addEventListener('keydown', e=>{ if (e.key==='Enter') document.getElementById('addBtn').click(); });
+document.getElementById('usdaSearch').addEventListener('keydown', e=>{ if (e.key==='Enter') document.getElementById('usdaBtn').click(); });
+document.getElementById('nlInput').addEventListener('keydown', e=>{ if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) document.getElementById('parseBtn').click(); });
+
 // Per-row delete + in-place gram edit (event delegation).
 document.getElementById('ledgerBody').onclick = (ev)=>{
   const d = ev.target.closest('.del');
@@ -901,21 +980,49 @@ function fillTargetInputs(){
   document.getElementById('tFloor').value = FLOOR;
   document.getElementById('tCeil').value  = CEIL;
   document.getElementById('tP').value     = P_TARGET;
+  document.getElementById('tCMax').value  = C_CAP.val || '';
+  document.getElementById('tCMode').value = C_CAP.mode;
+  document.getElementById('tFMax').value  = F_CAP.val || '';
+  document.getElementById('tFMode').value = F_CAP.mode;
+  document.getElementById('penK').value   = Math.round((INFLATE-1)*100);
+  document.getElementById('penP').value   = Math.round((1-DEDUCT)*100);
+  document.getElementById('penOK').value  = OIL_KCAL;
+  document.getElementById('penOF').value  = OIL_FAT;
 }
 document.getElementById('saveTargets').onclick = ()=>{
   const st = document.getElementById('targetStatus');
   const f = +document.getElementById('tFloor').value, c = +document.getElementById('tCeil').value;
   const p = +document.getElementById('tP').value;
-  if (!(f>0 && c>0 && p>0)){ setStatus(st,'All targets must be positive numbers.','bad'); return; }
+  const cm = +document.getElementById('tCMax').value || 0, fm = +document.getElementById('tFMax').value || 0;
+  const cMode = document.getElementById('tCMode').value, fMode = document.getElementById('tFMode').value;
+  if (!(f>0 && c>0 && p>0)){ setStatus(st,'Floor, ceiling and protein must be positive.','bad'); return; }
   if (c < f){ setStatus(st,'Ceiling cannot be below floor.','bad'); return; }
+  if ((cMode==='pct' && cm>100) || (fMode==='pct' && fm>100)){ setStatus(st,'Percentage caps cannot exceed 100.','bad'); return; }
   FLOOR=f; CEIL=c; P_TARGET=p;
+  C_CAP={mode:cMode, val:cm}; F_CAP={mode:fMode, val:fm};
   saveTargets(); render();
   setStatus(st,'Targets saved. Corridor, solver and history all follow the new numbers.','good');
 };
 document.getElementById('resetTargets').onclick = ()=>{
   FLOOR=PROTOCOL.floor; CEIL=PROTOCOL.ceil; P_TARGET=PROTOCOL.p;
+  C_CAP={mode:'g', val:0}; F_CAP={mode:'g', val:0};
   saveTargets(); fillTargetInputs(); render();
-  setStatus(document.getElementById('targetStatus'),'Protocol defaults restored (1700/1900 · 120g protein).','good');
+  setStatus(document.getElementById('targetStatus'),'Protocol defaults restored (1700/1900 · 120g protein · caps off).','good');
+};
+document.getElementById('savePens').onclick = ()=>{
+  const st = document.getElementById('targetStatus');
+  const k = +document.getElementById('penK').value, p = +document.getElementById('penP').value;
+  const ok = +document.getElementById('penOK').value, of = +document.getElementById('penOF').value;
+  if ([k,p,ok,of].some(v=>isNaN(v)||v<0) || p>=100){ setStatus(st,'Penalties must be ≥0 (protein cut below 100).','bad'); return; }
+  INFLATE = 1 + k/100; DEDUCT = 1 - p/100; OIL_KCAL = ok; OIL_FAT = of;
+  savePens(); render();
+  setStatus(st,`Penalties saved: +${k}% kcal / −${p}% P unweighed · oil ${ok} kcal / ${of}g fat per tbsp. Applies to new entries.`,'good');
+};
+document.getElementById('resetPens').onclick = ()=>{
+  INFLATE = 1 + PROTOCOL.penK/100; DEDUCT = 1 - PROTOCOL.penP/100;
+  OIL_KCAL = PROTOCOL.oilK; OIL_FAT = PROTOCOL.oilF;
+  savePens(); fillTargetInputs(); render();
+  setStatus(document.getElementById('targetStatus'),'Protocol penalties restored (+10% / −10% · 132 kcal / 14g per tbsp).','good');
 };
 
 document.getElementById('resetBtn').onclick = ()=>{ if(confirm('Clear all entries for today?')){ledger=[];save();render();} };
@@ -926,7 +1033,8 @@ document.getElementById('exportBtn').onclick = ()=>{
   allDays(true).forEach(d => { days[d.date] = d.ledger; });
   days[dateStr()] = ledger;                       // today's live state wins
   const payload = { exported: dateStr(), version: 2,
-    targets: {floor:FLOOR,ceil:CEIL,p:P_TARGET},
+    targets: {floor:FLOOR,ceil:CEIL,p:P_TARGET,cCap:C_CAP,fCap:F_CAP},
+    pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
     days, date: dateStr(), ledger, totals: totals() };   // date/ledger kept for v1 compat
   const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
   const url = URL.createObjectURL(blob); const a=document.createElement('a');
@@ -966,8 +1074,19 @@ document.getElementById('importFile').onchange = (ev)=>{
         if (data.targets){
           FLOOR=+data.targets.floor||FLOOR; CEIL=+data.targets.ceil||CEIL;
           P_TARGET=+data.targets.p||P_TARGET;
-          saveTargets(); fillTargetInputs();
+          if (data.targets.cCap) C_CAP={mode:data.targets.cCap.mode==='pct'?'pct':'g', val:+data.targets.cCap.val||0};
+          else if (+data.targets.cMax) C_CAP={mode:'g', val:+data.targets.cMax};
+          if (data.targets.fCap) F_CAP={mode:data.targets.fCap.mode==='pct'?'pct':'g', val:+data.targets.fCap.val||0};
+          else if (+data.targets.fMax) F_CAP={mode:'g', val:+data.targets.fMax};
+          saveTargets();
         }
+        if (data.pen){
+          INFLATE = 1 + (+data.pen.k||0)/100; DEDUCT = 1 - (+data.pen.p||0)/100;
+          OIL_KCAL = +data.pen.oilK>=0 ? +data.pen.oilK : OIL_KCAL;
+          OIL_FAT  = +data.pen.oilF>=0 ? +data.pen.oilF : OIL_FAT;
+          savePens();
+        }
+        fillTargetInputs();
       } else if (data.ledger && Array.isArray(data.ledger)) {
         // v1 single-day export.
         if (ledger.length && !confirm(`Replace current ${ledger.length} entries with ${data.ledger.length} imported?`)) return;
@@ -981,10 +1100,17 @@ document.getElementById('importFile').onchange = (ev)=>{
 };
 
 // Register service worker (relative path keeps scope under /macros-tracker/).
+// The new SW skipWaiting()s on install; when it takes over an existing page,
+// offer a one-tap reload so the fresh shell actually loads.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', ()=>{
     navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW registration failed:', err));
   });
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+    if (hadController) document.getElementById('toast').style.display='block';
+  });
+  document.getElementById('toast').onclick = ()=> location.reload();
 }
 
 // Hydrate key fields from storage on boot.
