@@ -134,6 +134,11 @@
   .pend-top .pname { font-size: 12px; }
   .pend-top input[type=number] { padding: 5px 8px; font-size: 12px; }
   .pend-tog { display: flex; gap: 14px; margin-top: 6px; padding-left: 24px; }
+  .pend-group { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: 8px; margin-bottom: 8px; background: rgba(59,130,246,0.04); }
+  .pend-group .pend-item { margin-bottom: 6px; }
+  .pend-group .pend-item:last-child { margin-bottom: 0; }
+  .pend-group-head { font-size: 12px; font-weight: 600; color: var(--ink); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; text-transform: capitalize; }
+  .pend-group-head .pgh-meta { font-family: var(--mono); font-size: 10px; font-weight: 400; color: var(--ink-faint); text-transform: none; }
 
   .solver-out { font-family: var(--mono); font-size: 13px; line-height: 1.7; }
   .solver-out .conflict { color: var(--bad); }
@@ -1398,8 +1403,10 @@ function pickModel(list){
 }
 
 // ---- Gemini natural-language parse ----
-// Returns items: {name, grams, weighed, isCurry, est:{per-100g}}. est is a fallback
-// used only when USDA has no match — flagged so it never masquerades as authoritative.
+// Returns items: {name, partOf, grams, weighed, isCurry, est:{per-100g}}. Composite
+// dishes are decomposed into base ingredients (USDA only has clean data for simple
+// foods); partOf groups a dish's components in review. est is a fallback used only
+// when USDA has no match — flagged so it never masquerades as authoritative.
 function geminiGenerate(model, prompt){
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/'
     + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(getKey(LS.gem));
@@ -1415,10 +1422,12 @@ async function geminiParse(text){
   if (!hasGemini()) throw new Error('No Gemini key — add one in ⚙ Settings.');
   const prompt =
 `You convert a meal description into structured food items for a macro tracker.
-Return JSON: {"items":[{"name":<short generic food name good for a USDA database search>,`+
+Break composite or prepared dishes (samosa, biryani, sandwich, burger, pizza slice, curry, paratha, wrap, etc.) into their base single-ingredient components — the nutrient database only has reliable data for simple ingredients, not assembled dishes. Each component gets its own estimated grams; the components of one dish should sum to roughly that dish's total weight. When a dish is fried or oily, add a "cooking oil" component for the absorbed fat. Leave naturally single-ingredient foods (an egg, an apple, grilled chicken, rice, milk) as ONE item — never split those.
+Return JSON: {"items":[{"name":<short generic single-ingredient name good for a USDA database search>,`+
+`"partOf":<the dish this component came from, or "" if it was logged as a plain food>,`+
 `"grams":<number, estimate a realistic portion if none is stated>,`+
-`"weighed":<boolean, true ONLY if the user gave an explicit weight or exact measure>,`+
-`"isCurry":<boolean, true if cooked in curry/gravy/added oil>,`+
+`"weighed":<boolean, true ONLY if the user gave an explicit weight/measure for THIS component; a decomposed guess is false>,`+
+`"isCurry":<boolean, true if this component sits in curry/gravy/added oil>,`+
 `"est":{"kcal":<per 100g>,"p":<protein g per 100g>,"f":<fat g per 100g>,"c":<carb g per 100g>}}]}.
 "est" is your best per-100g estimate, used only as a fallback. Output JSON only, no prose.
 Meal: """${text}"""`;
@@ -1471,32 +1480,54 @@ function syncPendingFromDOM(){
     const f=document.getElementById('pf'+i); if(f) p.sel=f.value;
   });
 }
+// One reviewable ingredient card. `i` is the pending index — its DOM ids stay stable
+// regardless of grouping so syncPendingFromDOM keeps working by index.
+function renderPendItem(p, i){
+  const r = pendResolve(p);
+  const badge = `<span class="badge ${r.source==='USDA'?'usda':'est'}">${r.source}</span>`;
+  const kc = Math.round(r.base.kcal||0);
+  const opts = p.candidates.map((c,idx)=>
+    `<option value="u${idx}" ${p.sel==='u'+idx?'selected':''}>${c.name} · ${Math.round(c.base.kcal)} kcal/100g</option>`).join('')
+    + (p.estBase ? `<option value="est" ${p.sel==='est'?'selected':''}>AI estimate · ${Math.round(p.estBase.kcal)} kcal/100g</option>` : '');
+  const picker = (p.candidates.length || p.estBase)
+    ? `<select id="pf${i}" style="margin-top:6px;font-size:11px">${opts}</select>` : '';
+  const warn = pendWarn(p);
+  const warnLine = warn ? `<div class="tactical bad" style="margin-top:6px;font-size:10px;padding-left:8px">${warn}</div>` : '';
+  return `<div class="pend-item">
+    <div class="pend-top">
+      <input type="checkbox" id="ps${i}" ${p.include?'checked':''} style="width:auto">
+      <span class="pname">${badge} ${p.name} <span style="color:var(--ink-dim);font-family:var(--mono);font-size:10px">${kc} kcal/100g</span></span>
+      <input type="number" id="pg${i}" value="${Math.round(p.grams)}" min="0" step="1" title="grams">
+    </div>
+    ${picker}
+    <div class="pend-tog">
+      <label class="chk"><input type="checkbox" id="pw${i}" ${p.weighed?'checked':''}> weighed</label>
+      <label class="chk"><input type="checkbox" id="pc${i}" ${p.isCurry?'checked':''}> curry</label>
+    </div>
+    ${warnLine}
+  </div>`;
+}
 function renderPending(){
   const wrap = document.getElementById('pending');
   if (!pending.length){ wrap.innerHTML=''; return; }
-  wrap.innerHTML = pending.map((p,i)=>{
-    const r = pendResolve(p);
-    const badge = `<span class="badge ${r.source==='USDA'?'usda':'est'}">${r.source}</span>`;
-    const kc = Math.round(r.base.kcal||0);
-    const opts = p.candidates.map((c,idx)=>
-      `<option value="u${idx}" ${p.sel==='u'+idx?'selected':''}>${c.name} · ${Math.round(c.base.kcal)} kcal/100g</option>`).join('')
-      + (p.estBase ? `<option value="est" ${p.sel==='est'?'selected':''}>AI estimate · ${Math.round(p.estBase.kcal)} kcal/100g</option>` : '');
-    const picker = (p.candidates.length || p.estBase)
-      ? `<select id="pf${i}" style="margin-top:6px;font-size:11px">${opts}</select>` : '';
-    const warn = pendWarn(p);
-    const warnLine = warn ? `<div class="tactical bad" style="margin-top:6px;font-size:10px;padding-left:8px">${warn}</div>` : '';
-    return `<div class="pend-item">
-      <div class="pend-top">
-        <input type="checkbox" id="ps${i}" ${p.include?'checked':''} style="width:auto">
-        <span class="pname">${badge} ${p.name} <span style="color:var(--ink-dim);font-family:var(--mono);font-size:10px">${kc} kcal/100g</span></span>
-        <input type="number" id="pg${i}" value="${Math.round(p.grams)}" min="0" step="1" title="grams">
-      </div>
-      ${picker}
-      <div class="pend-tog">
-        <label class="chk"><input type="checkbox" id="pw${i}" ${p.weighed?'checked':''}> weighed</label>
-        <label class="chk"><input type="checkbox" id="pc${i}" ${p.isCurry?'checked':''}> curry</label>
-      </div>
-      ${warnLine}
+  // Order into blocks: each dish (non-empty partOf) collects its components in first-seen
+  // order; plain foods are their own singleton blocks. Ids stay keyed on the pending index.
+  const blocks = [], seen = {};
+  pending.forEach((p,i)=>{
+    const dish = p.partOf || '';
+    if (dish){
+      if (seen[dish]==null){ seen[dish]=blocks.length; blocks.push({dish, idxs:[i]}); }
+      else blocks[seen[dish]].idxs.push(i);
+    } else blocks.push({dish:'', idxs:[i]});
+  });
+  wrap.innerHTML = blocks.map(b=>{
+    const items = b.idxs.map(i=>renderPendItem(pending[i], i)).join('');
+    if (!b.dish) return items;
+    const gTotal = b.idxs.reduce((s,i)=> s + (pending[i].include ? (+pending[i].grams||0) : 0), 0);
+    return `<div class="pend-group">
+      <div class="pend-group-head">🍽️ ${b.dish}
+        <span class="pgh-meta">${b.idxs.length} ingredient${b.idxs.length>1?'s':''} · ${Math.round(gTotal)}g</span></div>
+      ${items}
     </div>`;
   }).join('')
   + `<div class="footer-actions" style="margin-top:8px">
@@ -1633,6 +1664,7 @@ document.getElementById('parseBtn').onclick = async ()=>{
       }
       pending.push({
         name: it.name || 'unknown',
+        partOf: (it.partOf || '').trim(),         // dish this component was split from ('' = plain food)
         grams: Number(it.grams) || 0,
         weighed: !!it.weighed,
         isCurry: !!it.isCurry,
