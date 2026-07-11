@@ -1856,7 +1856,10 @@ document.getElementById('exportBtn').onclick = ()=>{
   a.href=url; a.download=`ledger_${ACTIVE_DATE}.json`; a.click(); URL.revokeObjectURL(url);
 };
 
-function dateStr(){ return new Date().toISOString().slice(0,10); }        // wall-clock calendar date
+// Calendar date in Pakistan Standard Time (UTC+5, no DST) so the day rolls over at
+// local midnight, not 05:00. Shift the epoch by the offset, then read the UTC date part.
+const TZ_OFFSET_MIN = 5 * 60;
+function dateStr(){ return new Date(Date.now() + TZ_OFFSET_MIN * 60000).toISOString().slice(0,10); }
 // The LOGICAL ledger day is decoupled from the wall clock so eating that runs past
 // midnight still lands on the day it belongs to. It only advances when the user closes
 // the day — never automatically at 00:00. Defaults to today's calendar date on first run.
