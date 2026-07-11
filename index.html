@@ -49,6 +49,7 @@
   h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
   .head-right { display: flex; gap: 12px; align-items: baseline; }
   .date { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); }
+  .date.day-open { color: var(--warn); }   /* logical day still running from an earlier calendar date */
   #gear { cursor: pointer; color: var(--ink-dim); font-size: 15px; user-select: none; }
   #gear:hover { color: var(--ink); }
   .sub { font-size: 11px; color: var(--ink-faint); margin-bottom: 18px; text-transform: uppercase; letter-spacing: 0.08em; }
@@ -536,10 +537,13 @@
   </div>
 </details>
 
-<div class="footer-actions" style="grid-template-columns:1fr 1fr 1fr">
+<div class="footer-actions" style="grid-template-columns:1fr 1fr;margin-bottom:8px">
+  <button class="ghost" id="closeDayBtn" title="Seal today and start a fresh day">Close day &rarr;</button>
+  <button class="ghost" id="resetBtn">Reset</button>
+</div>
+<div class="footer-actions" style="grid-template-columns:1fr 1fr">
   <button class="ghost" id="exportBtn">Export</button>
   <button class="ghost" id="importBtn">Import</button>
-  <button class="ghost" id="resetBtn">Reset</button>
 </div>
 <input type="file" id="importFile" accept="application/json" style="display:none">
 <p style="font-size:10px;color:var(--ink-faint);text-align:center;margin-top:10px">
@@ -653,7 +657,7 @@ function allDays(includeToday){
       const k = localStorage.key(i);
       const m = k && k.match(/^ledger_(\d{4}-\d{2}-\d{2})$/);
       if (!m) continue;
-      if (!includeToday && m[1]===dateStr()) continue;
+      if (!includeToday && m[1]===ACTIVE_DATE) continue;
       try {
         const l = JSON.parse(localStorage.getItem(k));
         if (Array.isArray(l) && l.length) days.push({date:m[1], ledger:l});
@@ -1842,20 +1846,47 @@ document.getElementById('resetBtn').onclick = ()=>{ if(confirm('Clear all entrie
 document.getElementById('exportBtn').onclick = ()=>{
   const days = {};
   allDays(true).forEach(d => { days[d.date] = d.ledger; });
-  days[dateStr()] = ledger;                       // today's live state wins
+  days[ACTIVE_DATE] = ledger;                     // the open day's live state wins
   const payload = { exported: dateStr(), version: 2,
     targets: {floor:FLOOR,ceil:CEIL,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP},
     pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
-    days, date: dateStr(), ledger, totals: totals() };   // date/ledger kept for v1 compat
+    days, date: ACTIVE_DATE, ledger, totals: totals() };   // date/ledger kept for v1 compat
   const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
   const url = URL.createObjectURL(blob); const a=document.createElement('a');
-  a.href=url; a.download=`ledger_${dateStr()}.json`; a.click(); URL.revokeObjectURL(url);
+  a.href=url; a.download=`ledger_${ACTIVE_DATE}.json`; a.click(); URL.revokeObjectURL(url);
 };
 
-function dateStr(){ return new Date().toISOString().slice(0,10); }
+function dateStr(){ return new Date().toISOString().slice(0,10); }        // wall-clock calendar date
+// The LOGICAL ledger day is decoupled from the wall clock so eating that runs past
+// midnight still lands on the day it belongs to. It only advances when the user closes
+// the day — never automatically at 00:00. Defaults to today's calendar date on first run.
+let ACTIVE_DATE = (()=>{ try{ return localStorage.getItem('ledger_active_date') || dateStr(); }catch(e){ return dateStr(); } })();
+function nextDay(ds){ const d=new Date(ds+'T00:00:00'); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); }
 // Persistence: no-op-safe. In a real host these use localStorage; in-sandbox they may throw.
-function save(){ try{ localStorage.setItem('ledger_'+dateStr(), JSON.stringify(ledger)); }catch(e){} }
-function load(){ try{ const r=localStorage.getItem('ledger_'+dateStr()); if(r)ledger=JSON.parse(r);}catch(e){} }
+function save(){ try{ localStorage.setItem('ledger_'+ACTIVE_DATE, JSON.stringify(ledger)); }catch(e){} }
+function load(){ try{ const r=localStorage.getItem('ledger_'+ACTIVE_DATE); if(r)ledger=JSON.parse(r);}catch(e){} }
+
+// Close the running day and open the next one. The new day is whichever is later:
+// the current calendar date, or the day after the one being closed (so closing early
+// in the evening still opens tomorrow, and closing at 1am opens today).
+function closeDay(){
+  const t = totals();
+  const open = ACTIVE_DATE;
+  const nd = [dateStr(), nextDay(ACTIVE_DATE)].sort().pop();   // max of the two dates
+  if (!confirm(`Close ${open}? ${ledger.length} item(s), ${Math.round(t.kcal)} kcal logged.\nA fresh day (${nd}) starts and this one moves to history.`)) return;
+  save();                                    // seal the day being closed
+  ACTIVE_DATE = nd;
+  try{ localStorage.setItem('ledger_active_date', ACTIVE_DATE); }catch(e){}
+  ledger = []; load();                       // load anything already stored for the new day (usually empty)
+  updateDayLabel(); render();
+}
+// Header date reflects the logical day. When it trails the wall clock the day is still
+// "open" from an earlier calendar date — flag that so the state isn't a surprise.
+function updateDayLabel(){
+  const el = document.getElementById('today');
+  el.textContent = ACTIVE_DATE + (ACTIVE_DATE < dateStr() ? ' · open' : '');
+  el.classList.toggle('day-open', ACTIVE_DATE < dateStr());
+}
 
 // Import: merge a previously exported ledger back in (durability backstop against eviction).
 document.getElementById('importBtn').onclick = ()=> document.getElementById('importFile').click();
@@ -1880,7 +1911,7 @@ document.getElementById('importFile').onchange = (ev)=>{
         dates.forEach(d=>{
           const l = rebuild(data.days[d]);
           try { localStorage.setItem('ledger_'+d, JSON.stringify(l)); } catch(e){}
-          if (d === dateStr()) ledger = l;
+          if (d === ACTIVE_DATE) ledger = l;
         });
         if (data.targets){
           FLOOR=+data.targets.floor||FLOOR; CEIL=+data.targets.ceil||CEIL;
@@ -1941,7 +1972,8 @@ function requestPersistence(){
   }
 }
 
-document.getElementById('today').textContent = dateStr();
+document.getElementById('closeDayBtn').onclick = closeDay;
+updateDayLabel();
 loadTargets(); fillTargetInputs(); loadKeys(); initFoods(); load(); render(); requestPersistence();
 </script>
 </body>
