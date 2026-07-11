@@ -1006,7 +1006,17 @@ function renderBudget() {
   }
 
   combos.sort((a, b) => a.score - b.score);
-  const top = combos.slice(0, 4);
+  
+  const staples = [];
+  const others = [];
+  const isStaple = (c) => {
+    const names = [c.nameA.toLowerCase(), c.nameB.toLowerCase()];
+    const hasChicken = names.some(n => n.includes('chicken'));
+    return hasChicken && (names.some(n => n.includes('rice')) || names.some(n => n.includes('potato')));
+  };
+  
+  combos.forEach(c => isStaple(c) ? staples.push(c) : others.push(c));
+  const top = [...staples, ...others].slice(0, 4);
 
   if (!top.length) {
     wrap.innerHTML = `<div class="budget-item"><span class="budget-icon">🍽️</span><div class="budget-text"><strong>${Math.round(remKcal)} kcal</strong> remaining — no balanced combo found in your food database</div></div>`;
