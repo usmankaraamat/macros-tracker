@@ -158,6 +158,85 @@
   .hist-day .hd-body { padding: 4px 10px 10px; border-top: 1px solid var(--line); }
   .hist-day .hd-body table { font-size: 11px; }
   .targets-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; margin-bottom: 10px; }
+
+  /* ---- INTELLIGENCE DASHBOARD ---- */
+  .intel-section { animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .intel-section:nth-child(2) { animation-delay: 0.1s; }
+  .intel-section:nth-child(3) { animation-delay: 0.2s; }
+
+  /* Donut Chart */
+  .donut-wrap { display: flex; align-items: center; gap: 24px; padding: 8px 0; }
+  .donut-svg { flex-shrink: 0; filter: drop-shadow(0 0 8px rgba(59,130,246,0.2)); }
+  .donut-legend { display: flex; flex-direction: column; gap: 10px; flex: 1; }
+  .donut-legend-item { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .donut-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .donut-legend-val { font-family: var(--mono); font-weight: 600; font-size: 15px; }
+  .donut-legend-pct { color: var(--ink-dim); font-size: 11px; font-family: var(--mono); }
+  .donut-center { font-family: var(--sans); font-weight: 800; font-size: 18px; fill: var(--ink); }
+  .donut-center-sub { font-family: var(--sans); font-weight: 500; font-size: 9px; fill: var(--ink-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+
+  /* Ghost Mode */
+  .ghost-wrap { position: relative; margin-top: 8px; }
+  .ghost-bar-track { height: 8px; background: rgba(0,0,0,0.3); border-radius: 4px; overflow: hidden; position: relative; }
+  .ghost-bar-fill { height: 100%; border-radius: 4px; transition: width 0.8s cubic-bezier(0.34,1.56,0.64,1); }
+  .ghost-bar-ghost { position: absolute; top: 0; height: 100%; border-radius: 4px; background: rgba(255,255,255,0.12); border-right: 2px dashed rgba(255,255,255,0.4); transition: width 0.8s ease; }
+  .ghost-labels { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: var(--ink-dim); }
+  .ghost-labels .ahead { color: var(--ok); }
+  .ghost-labels .behind { color: var(--warn); }
+
+  /* Rolling Averages */
+  .avg-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; }
+  .avg-card { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.04); }
+  .avg-card .avg-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-faint); margin-bottom: 4px; }
+  .avg-card .avg-val { font-family: var(--sans); font-size: 28px; font-weight: 800; color: #fff; }
+  .avg-card .avg-sub { font-size: 11px; color: var(--ink-dim); margin-top: 2px; font-family: var(--mono); }
+  .avg-card .avg-trend { display: inline-block; font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: 600; margin-top: 4px; }
+  .avg-card .avg-trend.up { background: rgba(16,185,129,0.15); color: var(--ok); }
+  .avg-card .avg-trend.down { background: rgba(239,68,68,0.15); color: var(--bad); }
+  .avg-card .avg-trend.neutral { background: rgba(148,163,184,0.15); color: var(--ink-dim); }
+
+  /* Heatmap */
+  .heatmap-wrap { overflow-x: auto; padding: 4px 0; }
+  .heatmap-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 3px; }
+  .heatmap-cell { aspect-ratio: 1; border-radius: 3px; background: rgba(0,0,0,0.3); position: relative; cursor: default; transition: transform 0.2s; }
+  .heatmap-cell:hover { transform: scale(1.3); z-index: 2; }
+  .heatmap-cell.lv0 { background: rgba(0,0,0,0.3); }
+  .heatmap-cell.lv1 { background: rgba(16,185,129,0.2); }
+  .heatmap-cell.lv2 { background: rgba(16,185,129,0.4); }
+  .heatmap-cell.lv3 { background: rgba(16,185,129,0.65); }
+  .heatmap-cell.lv4 { background: #10b981; box-shadow: 0 0 6px rgba(16,185,129,0.4); }
+  .heatmap-cell.breach { background: rgba(239,68,68,0.5); box-shadow: 0 0 6px rgba(239,68,68,0.3); }
+  .heatmap-cell.future { background: transparent; border: 1px dashed rgba(255,255,255,0.06); }
+  .heatmap-cell .hm-tip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 10px; font-family: var(--mono); white-space: nowrap; color: var(--ink); z-index: 10; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+  .heatmap-cell:hover .hm-tip { display: block; }
+  .heatmap-days { display: grid; grid-template-columns: repeat(7,1fr); gap: 3px; margin-bottom: 4px; }
+  .heatmap-days span { text-align: center; font-size: 9px; color: var(--ink-faint); text-transform: uppercase; }
+
+  /* Top Foods Bar Chart */
+  .topfoods-list { display: flex; flex-direction: column; gap: 8px; }
+  .topfood-item { display: flex; align-items: center; gap: 10px; }
+  .topfood-rank { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); width: 18px; text-align: right; flex-shrink: 0; }
+  .topfood-bar-wrap { flex: 1; height: 24px; background: rgba(0,0,0,0.2); border-radius: 6px; overflow: hidden; position: relative; }
+  .topfood-bar { height: 100%; border-radius: 6px; transition: width 0.6s cubic-bezier(0.34,1.56,0.64,1); display: flex; align-items: center; padding: 0 10px; }
+  .topfood-bar span { font-size: 11px; font-weight: 600; white-space: nowrap; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+  .topfood-count { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); width: 30px; text-align: right; flex-shrink: 0; }
+
+  /* Budget Translator */
+  .budget-suggestions { display: flex; flex-direction: column; gap: 8px; }
+  .budget-item { display: flex; align-items: center; gap: 12px; background: rgba(0,0,0,0.15); border-radius: 10px; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.04); }
+  .budget-item .budget-icon { font-size: 20px; flex-shrink: 0; }
+  .budget-item .budget-text { font-size: 12px; color: var(--ink-dim); flex: 1; }
+  .budget-item .budget-text strong { color: var(--ink); font-family: var(--mono); }
+
+  /* Weekly Report Card */
+  .report-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 12px; }
+  .report-metric { text-align: center; background: rgba(0,0,0,0.2); border-radius: 10px; padding: 14px 8px; }
+  .report-metric .rm-val { font-family: var(--sans); font-size: 24px; font-weight: 800; color: #fff; }
+  .report-metric .rm-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-faint); margin-top: 4px; }
+  .report-best-worst { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .report-bw { background: rgba(0,0,0,0.15); border-radius: 8px; padding: 10px 12px; }
+  .report-bw .rbw-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-faint); margin-bottom: 4px; }
+  .report-bw .rbw-val { font-family: var(--mono); font-size: 12px; color: var(--ink); }
 </style>
 </head>
 <body>
@@ -254,6 +333,18 @@
     <span class="big num" id="kcalNow">0</span>
     <span class="status" id="kcalStatus">empty</span>
   </div>
+  <!-- Ghost Mode: pace overlay -->
+  <div class="ghost-wrap" id="ghostWrap" style="display:none">
+    <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:var(--ink-faint);margin-bottom:6px">Pace vs. yesterday</div>
+    <div class="ghost-bar-track">
+      <div class="ghost-bar-ghost" id="ghostBar"></div>
+      <div class="ghost-bar-fill" id="ghostFill" style="width:0%"></div>
+    </div>
+    <div class="ghost-labels">
+      <span id="ghostLabel">—</span>
+      <span id="ghostPct">—</span>
+    </div>
+  </div>
 </div>
 
 <!-- MACRO STATS -->
@@ -275,6 +366,26 @@
       <div class="v"><span id="fNow">0</span><small>g · <span id="fPct">0</span>% kcal</small></div>
       <div class="bar" id="fBarWrap" style="display:none"><div id="fBar" style="width:0%;background:var(--accent)"></div></div>
     </div>
+  </div>
+  <!-- Donut Chart -->
+  <div id="donutWrap" style="margin-top:16px;border-top:1px solid rgba(255,255,255,0.06);padding-top:16px"></div>
+</div>
+
+<!-- INTELLIGENCE DASHBOARD -->
+<div class="panel intel-section">
+  <div class="panel-title">Intelligence · rolling averages</div>
+  <div class="avg-grid" id="avgGrid">
+    <div class="avg-card"><div class="avg-label">7-Day Avg Kcal</div><div class="avg-val" id="avg7k">—</div><div class="avg-sub" id="avg7kSub"></div></div>
+    <div class="avg-card"><div class="avg-label">7-Day Avg Protein</div><div class="avg-val" id="avg7p">—</div><div class="avg-sub" id="avg7pSub"></div></div>
+    <div class="avg-card"><div class="avg-label">30-Day Avg Kcal</div><div class="avg-val" id="avg30k">—</div><div class="avg-sub" id="avg30kSub"></div></div>
+    <div class="avg-card"><div class="avg-label">30-Day Avg Protein</div><div class="avg-val" id="avg30p">—</div><div class="avg-sub" id="avg30pSub"></div></div>
+  </div>
+</div>
+
+<div class="panel intel-section">
+  <div class="panel-title">Remaining budget · what you can still eat</div>
+  <div class="budget-suggestions" id="budgetSuggestions">
+    <div class="budget-item"><span class="budget-icon">🍽️</span><div class="budget-text">Log food to see suggestions</div></div>
   </div>
 </div>
 
@@ -333,6 +444,25 @@
   <div class="panel-title">Fridge closer · boiled rice + chicken to hit <span id="solverTitle">1700</span></div>
   <div class="solver-out" id="solverOut">Log something to compute.</div>
   <div class="tactical" id="tactical"></div>
+</div>
+
+<!-- HISTORY & INSIGHTS -->
+<div class="panel intel-section">
+  <div class="panel-title">Compliance heatmap · last 8 weeks</div>
+  <div class="heatmap-wrap">
+    <div class="heatmap-days"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+    <div class="heatmap-grid" id="heatmapGrid"></div>
+  </div>
+</div>
+
+<div class="panel intel-section">
+  <div class="panel-title">Weekly report card</div>
+  <div id="weeklyReport"><div class="empty">Need at least 2 days of data.</div></div>
+</div>
+
+<div class="panel intel-section">
+  <div class="panel-title">Most logged foods</div>
+  <div class="topfoods-list" id="topFoodsList"><div class="empty">No history yet.</div></div>
 </div>
 
 <!-- HISTORY -->
@@ -594,6 +724,14 @@ function render() {
   refreshTargetLabels();
   renderHistory();
   renderFrequents();
+  // Intelligence dashboard
+  renderDonut();
+  renderGhost();
+  renderAverages();
+  renderBudget();
+  renderHeatmap();
+  renderWeeklyReport();
+  renderTopFoods();
 }
 
 // ---- HISTORY PANEL ----
@@ -684,6 +822,327 @@ function renderFrequents(){
       document.getElementById('grams').focus();
     };
   });
+}
+
+// ---- INTELLIGENCE DASHBOARD ----
+
+// 1. DONUT CHART: SVG pie of P/F/C kcal breakdown
+function renderDonut() {
+  const wrap = document.getElementById('donutWrap');
+  const t = totals();
+  const pKcal = t.p * 4, fKcal = t.f * 9, cKcal = t.c * 4;
+  const total = pKcal + fKcal + cKcal;
+  if (total < 1) { wrap.innerHTML = ''; return; }
+
+  const data = [
+    { label: 'Protein', val: pKcal, color: '#10b981', pct: Math.round(pKcal/total*100) },
+    { label: 'Fat',     val: fKcal, color: '#f59e0b', pct: Math.round(fKcal/total*100) },
+    { label: 'Carbs',   val: cKcal, color: '#3b82f6', pct: Math.round(cKcal/total*100) },
+  ];
+
+  const r = 54, cx = 64, cy = 64, sw = 14;
+  let cumAngle = -90;
+  const arcs = data.map(d => {
+    const angle = (d.val / total) * 360;
+    const startRad = cumAngle * Math.PI / 180;
+    const endRad = (cumAngle + angle) * Math.PI / 180;
+    cumAngle += angle;
+    const x1 = cx + r * Math.cos(startRad), y1 = cy + r * Math.sin(startRad);
+    const x2 = cx + r * Math.cos(endRad),   y2 = cy + r * Math.sin(endRad);
+    const large = angle > 180 ? 1 : 0;
+    return `<path d="M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2}" fill="none" stroke="${d.color}" stroke-width="${sw}" stroke-linecap="round" opacity="0.9"/>`;
+  });
+
+  const legend = data.map(d =>
+    `<div class="donut-legend-item">
+      <div class="donut-legend-dot" style="background:${d.color}"></div>
+      <div><span class="donut-legend-val">${Math.round(d.val)}</span> <span class="donut-legend-pct">${d.pct}%</span><br><span style="font-size:11px;color:var(--ink-faint)">${d.label}</span></div>
+    </div>`).join('');
+
+  wrap.innerHTML = `<div class="donut-wrap">
+    <svg class="donut-svg" width="128" height="128" viewBox="0 0 128 128">
+      ${arcs.join('')}
+      <text x="${cx}" y="${cy-2}" text-anchor="middle" class="donut-center">${Math.round(total)}</text>
+      <text x="${cx}" y="${cy+12}" text-anchor="middle" class="donut-center-sub">kcal</text>
+    </svg>
+    <div class="donut-legend">${legend}</div>
+  </div>`;
+}
+
+// 2. GHOST MODE: compare today's pace vs yesterday
+function renderGhost() {
+  const wrap = document.getElementById('ghostWrap');
+  const ghostFill = document.getElementById('ghostFill');
+  const ghostBar = document.getElementById('ghostBar');
+  const ghostLabel = document.getElementById('ghostLabel');
+  const ghostPct = document.getElementById('ghostPct');
+
+  const days = allDays(false);
+  if (!days.length) { wrap.style.display = 'none'; return; }
+
+  // Find yesterday (most recent past day)
+  const yesterday = days[0];
+  const yTotals = totalsOf(yesterday.ledger);
+  const tTotals = totals();
+
+  if (yTotals.kcal < 1) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+
+  const yPct = Math.min(100, (yTotals.kcal / CEIL) * 100);
+  const tPct = Math.min(100, (tTotals.kcal / CEIL) * 100);
+
+  ghostBar.style.width = yPct + '%';
+  ghostFill.style.width = tPct + '%';
+  ghostFill.style.background = tTotals.kcal <= CEIL ? 'var(--accent-bg)' : 'var(--bad-bg)';
+
+  const diff = tTotals.kcal - yTotals.kcal;
+  const diffAbs = Math.abs(Math.round(diff));
+  if (diff > 0) {
+    ghostLabel.innerHTML = `<span class="behind">+${diffAbs} kcal ahead of yesterday</span>`;
+  } else if (diff < 0) {
+    ghostLabel.innerHTML = `<span class="ahead">${diffAbs} kcal behind yesterday</span>`;
+  } else {
+    ghostLabel.textContent = 'Same as yesterday';
+  }
+  ghostPct.textContent = `${Math.round(tPct)}% of ceiling`;
+}
+
+// 3. ROLLING AVERAGES
+function renderAverages() {
+  const all = allDays(false);
+  if (ledger.length) all.unshift({ date: dateStr(), ledger });
+  if (all.length < 2) return;
+
+  const calcAvg = (arr) => {
+    const tots = arr.map(d => totalsOf(d.ledger));
+    return {
+      kcal: tots.reduce((s,t) => s+t.kcal, 0) / tots.length,
+      p: tots.reduce((s,t) => s+t.p, 0) / tots.length,
+      ok: tots.filter(dayOk).length,
+      total: tots.length
+    };
+  };
+
+  const week = calcAvg(all.slice(0, Math.min(7, all.length)));
+  const month = all.length >= 2 ? calcAvg(all.slice(0, Math.min(30, all.length))) : null;
+
+  const trendIcon = (val, target, isFloor) => {
+    if (isFloor) {
+      return val >= target ? '<span class="avg-trend up">✓ On track</span>' : '<span class="avg-trend down">Below target</span>';
+    }
+    return val <= target ? '<span class="avg-trend up">✓ In range</span>' : '<span class="avg-trend down">Over ceiling</span>';
+  };
+
+  document.getElementById('avg7k').textContent = Math.round(week.kcal);
+  document.getElementById('avg7kSub').innerHTML = `${week.ok}/${week.total} days in corridor ${trendIcon(week.kcal, CEIL, false)}`;
+  document.getElementById('avg7p').textContent = Math.round(week.p) + 'g';
+  document.getElementById('avg7pSub').innerHTML = `vs ${Math.round(P_TARGET)}g floor ${trendIcon(week.p, P_TARGET, true)}`;
+
+  if (month) {
+    document.getElementById('avg30k').textContent = Math.round(month.kcal);
+    document.getElementById('avg30kSub').innerHTML = `${month.ok}/${month.total} days in corridor`;
+    document.getElementById('avg30p').textContent = Math.round(month.p) + 'g';
+    document.getElementById('avg30pSub').innerHTML = `vs ${Math.round(P_TARGET)}g floor`;
+  }
+}
+
+// 4. BUDGET TRANSLATOR
+function renderBudget() {
+  const wrap = document.getElementById('budgetSuggestions');
+  const t = totals();
+  const remKcal = FLOOR - t.kcal;
+  const remP = Math.max(0, P_TARGET - t.p);
+
+  if (t.kcal < 1) {
+    wrap.innerHTML = '<div class="budget-item"><span class="budget-icon">🍽️</span><div class="budget-text">Log food to see what fits your remaining budget</div></div>';
+    return;
+  }
+
+  if (remKcal <= 0) {
+    const headroom = CEIL - t.kcal;
+    if (headroom > 0) {
+      wrap.innerHTML = `<div class="budget-item"><span class="budget-icon">✅</span><div class="budget-text">Floor reached! You have <strong>${Math.round(headroom)} kcal</strong> of ceiling headroom${remP > 0 ? ` — still need <strong>${remP.toFixed(0)}g protein</strong>` : ''}</div></div>`;
+    } else {
+      wrap.innerHTML = `<div class="budget-item"><span class="budget-icon">🚫</span><div class="budget-text">Ceiling breached by <strong>${Math.round(-headroom)} kcal</strong>. Consider closing the day.</div></div>`;
+    }
+    return;
+  }
+
+  // Solve 2-food combos: for each pair (A, B), solve:
+  //   A.kcal/100 * gA + B.kcal/100 * gB = remKcal
+  //   A.p/100   * gA + B.p/100   * gB = remP (or best-effort if remP is 0)
+  const foodIcon = (name) => {
+    const n = name.toLowerCase();
+    return n.includes('chicken') ? '🍗' : n.includes('egg') ? '🥚' :
+           n.includes('rice') ? '🍚' : n.includes('milk') ? '🥛' : '🍽️';
+  };
+
+  const foods = Object.entries(foodBase);
+  const combos = [];
+
+  for (let i = 0; i < foods.length; i++) {
+    for (let j = i + 1; j < foods.length; j++) {
+      const [nameA, a] = foods[i], [nameB, b] = foods[j];
+      const ak = a.kcal / 100, ap = a.p / 100;
+      const bk = b.kcal / 100, bp = b.p / 100;
+      const det = ak * bp - bk * ap;
+      if (Math.abs(det) < 0.001) continue; // linearly dependent, skip
+
+      // Solve: ak*gA + bk*gB = remKcal, ap*gA + bp*gB = remP
+      const targetP = Math.max(remP, remKcal * 0.05); // at least some protein
+      const gA = (remKcal * bp - bk * targetP) / det;
+      const gB = (ak * targetP - remKcal * ap) / det;
+
+      if (gA < 20 || gB < 20) continue; // both must be reasonable servings
+      if (gA > 1500 || gB > 1500) continue; // nothing absurd
+
+      const totalKcal = ak * gA + bk * gB;
+      const totalP = ap * gA + bp * gB;
+
+      combos.push({
+        nameA, nameB, gA: Math.round(gA), gB: Math.round(gB),
+        kcal: Math.round(totalKcal), p: Math.round(totalP),
+        // Score: prefer combos where both portions are moderate (penalize lopsided combos)
+        score: Math.abs(gA - gB) + (totalP < remP ? 500 : 0)
+      });
+    }
+  }
+
+  combos.sort((a, b) => a.score - b.score);
+  const top = combos.slice(0, 4);
+
+  if (!top.length) {
+    wrap.innerHTML = `<div class="budget-item"><span class="budget-icon">🍽️</span><div class="budget-text"><strong>${Math.round(remKcal)} kcal</strong> remaining — no balanced combo found in your food database</div></div>`;
+    return;
+  }
+
+  const html = top.map(c =>
+    `<div class="budget-item">
+      <span class="budget-icon">${foodIcon(c.nameA)}</span>
+      <div class="budget-text"><strong>${c.gA}g ${c.nameA}</strong> + <strong>${c.gB}g ${c.nameB}</strong><br>
+        <span style="color:var(--ink-faint)">→ ${c.kcal} kcal · ${c.p}g protein</span>
+      </div>
+    </div>`).join('');
+
+  wrap.innerHTML = `<div style="font-size:11px;color:var(--ink-faint);margin-bottom:8px">${Math.round(remKcal)} kcal remaining · ${remP.toFixed(0)}g protein needed</div>` + html;
+}
+
+// 5. HEATMAP
+function renderHeatmap() {
+  const grid = document.getElementById('heatmapGrid');
+  const today = new Date();
+  const todayStr = dateStr();
+
+  // Build lookup of all days
+  const dayMap = {};
+  allDays(true).forEach(d => { dayMap[d.date] = totalsOf(d.ledger); });
+  // Include live today
+  if (ledger.length) dayMap[todayStr] = totals();
+
+  // Generate 8 weeks (56 days) ending on today's week's Sunday
+  const dow = today.getDay(); // 0=Sun
+  const endOffset = dow === 0 ? 0 : 7 - dow; // days to next Sunday
+  const cells = [];
+
+  for (let i = 55 + endOffset; i >= 0 + endOffset; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i + endOffset);
+    const ds = d.toISOString().slice(0, 10);
+    const isFuture = ds > todayStr;
+    const t = dayMap[ds];
+
+    let cls = 'heatmap-cell';
+    let tip = ds;
+
+    if (isFuture) {
+      cls += ' future';
+    } else if (!t) {
+      cls += ' lv0';
+      tip += ' · no data';
+    } else {
+      const inC = t.kcal >= FLOOR && t.kcal <= CEIL;
+      const pOk = t.p >= P_TARGET;
+      if (t.kcal > CEIL) {
+        cls += ' breach';
+        tip += ` · ${Math.round(t.kcal)} kcal ⚠️ breach`;
+      } else if (inC && pOk) {
+        cls += ' lv4';
+        tip += ` · ${Math.round(t.kcal)} kcal ✓ perfect`;
+      } else if (inC) {
+        cls += ' lv3';
+        tip += ` · ${Math.round(t.kcal)} kcal · P short`;
+      } else if (t.kcal >= FLOOR * 0.85) {
+        cls += ' lv2';
+        tip += ` · ${Math.round(t.kcal)} kcal · close`;
+      } else {
+        cls += ' lv1';
+        tip += ` · ${Math.round(t.kcal)} kcal · under`;
+      }
+    }
+
+    cells.push(`<div class="${cls}"><span class="hm-tip">${tip}</span></div>`);
+  }
+
+  grid.innerHTML = cells.join('');
+}
+
+// 6. WEEKLY REPORT CARD
+function renderWeeklyReport() {
+  const wrap = document.getElementById('weeklyReport');
+  const all = allDays(false);
+  if (ledger.length) all.unshift({ date: dateStr(), ledger });
+  if (all.length < 2) { wrap.innerHTML = '<div class="empty">Need at least 2 days of data.</div>'; return; }
+
+  const week = all.slice(0, Math.min(7, all.length));
+  const tots = week.map(d => ({ date: d.date, ...totalsOf(d.ledger) }));
+  const avgK = tots.reduce((s,t) => s+t.kcal, 0) / tots.length;
+  const avgP = tots.reduce((s,t) => s+t.p, 0) / tots.length;
+  const okDays = tots.filter(dayOk).length;
+
+  // Best and worst days
+  const sorted = [...tots].sort((a,b) => {
+    const aOk = dayOk(a) ? 1 : 0;
+    const bOk = dayOk(b) ? 1 : 0;
+    return bOk - aOk || Math.abs(a.kcal - FLOOR) - Math.abs(b.kcal - FLOOR);
+  });
+  const best = sorted[0];
+  const worst = sorted[sorted.length - 1];
+
+  wrap.innerHTML = `
+    <div class="report-grid">
+      <div class="report-metric"><div class="rm-val">${Math.round(avgK)}</div><div class="rm-label">Avg Kcal</div></div>
+      <div class="report-metric"><div class="rm-val">${Math.round(avgP)}g</div><div class="rm-label">Avg Protein</div></div>
+      <div class="report-metric"><div class="rm-val" style="color:${okDays >= tots.length * 0.7 ? 'var(--ok)' : 'var(--warn)'}">${okDays}/${tots.length}</div><div class="rm-label">Days ✓</div></div>
+    </div>
+    <div class="report-best-worst">
+      <div class="report-bw"><div class="rbw-label">🏆 Best day</div><div class="rbw-val">${best.date}<br>${Math.round(best.kcal)} kcal · ${best.p.toFixed(0)}g P</div></div>
+      <div class="report-bw"><div class="rbw-label">⚠️ Worst day</div><div class="rbw-val">${worst.date}<br>${Math.round(worst.kcal)} kcal · ${worst.p.toFixed(0)}g P</div></div>
+    </div>`;
+}
+
+// 7. TOP FOODS BAR CHART
+function renderTopFoods() {
+  const wrap = document.getElementById('topFoodsList');
+  const count = {};
+  allDays(true).forEach(d => d.ledger.forEach(e => {
+    if (!e.name) return;
+    count[e.name] = (count[e.name] || 0) + 1;
+  }));
+
+  const top = Object.entries(count).sort((a,b) => b[1] - a[1]).slice(0, 8);
+  if (!top.length) { wrap.innerHTML = '<div class="empty">No history yet.</div>'; return; }
+
+  const maxCount = top[0][1];
+  const colors = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16'];
+
+  wrap.innerHTML = top.map(([name, cnt], i) => {
+    const pct = Math.max(15, (cnt / maxCount) * 100);
+    return `<div class="topfood-item">
+      <span class="topfood-rank">${i+1}</span>
+      <div class="topfood-bar-wrap"><div class="topfood-bar" style="width:${pct}%;background:${colors[i % colors.length]}"><span>${name}</span></div></div>
+      <span class="topfood-count">×${cnt}</span>
+    </div>`;
+  }).join('');
 }
 
 // ---- FOOD PICKER ----
