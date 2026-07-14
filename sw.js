@@ -1,7 +1,7 @@
 // Service worker for Ledger PWA.
 // Scope is /macros-tracker/ — all cached paths are relative to this file's location,
 // so they resolve correctly under the repo subpath without hardcoding the origin.
-const CACHE = 'ledger-v23';
+const CACHE = 'ledger-v24';
 const SHELL = [
   './',
   './index.html',
@@ -25,8 +25,8 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  // Never cache API traffic (USDA / Gemini later) — always hit network, fail loud.
-  if (url.hostname.includes('api.') || url.hostname.includes('googleapis') || url.hostname.includes('nal.usda.gov')) {
+  // Never cache API traffic (USDA / Gemini / Supabase sync) — always hit network, fail loud.
+  if (url.hostname.includes('api.') || url.hostname.includes('googleapis') || url.hostname.includes('nal.usda.gov') || url.hostname.includes('supabase')) {
     return; // let it go to network normally
   }
   // App shell: cache-first, fall back to network, update cache on success.

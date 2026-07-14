@@ -58,6 +58,12 @@
     padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 11px; }
   .photo-chip img { height: 40px; width: 40px; object-fit: cover; border-radius: 6px; }
   .photo-chip .del { margin-left: auto; }
+  .sync-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; align-self: center; }
+  .sync-dot.off { background: rgba(255,255,255,0.15); }
+  .sync-dot.ok { background: var(--ok); }
+  .sync-dot.pending { background: var(--warn); animation: syncPulse 1.2s ease infinite; }
+  .sync-dot.err { background: var(--bad); }
+  @keyframes syncPulse { 50% { opacity: 0.35; } }
   #gear { cursor: pointer; color: var(--ink-dim); font-size: 15px; user-select: none; }
   #gear:hover { color: var(--ink); }
   .sub { font-size: 11px; color: var(--ink-faint); margin-bottom: 18px; text-transform: uppercase; letter-spacing: 0.08em; }
@@ -301,6 +307,7 @@
 <header>
   <h1>LEDGER</h1>
   <div class="head-right">
+    <span id="syncDot" class="sync-dot off" title="Sync off — configure in ⚙ Settings"></span>
     <span class="date num" id="today"></span>
     <span id="gear" title="Settings">&#9881;</span>
   </div>
@@ -328,6 +335,18 @@
     <button class="ghost" id="loadModelsBtn">Load models</button>
   </div>
   <div class="tactical" id="keyStatus" style="margin-top:10px;margin-bottom:14px">Add your free USDA + Gemini keys to enable search and AI parsing.</div>
+  <div class="panel-title">Sync · same passphrase on any device = same account</div>
+  <label>Supabase project URL</label>
+  <input type="text" id="supaUrl" placeholder="https://xxxx.supabase.co" autocomplete="off" style="margin-bottom:10px">
+  <label>Supabase anon key</label>
+  <input type="password" id="supaKey" placeholder="eyJ… (the public anon key)" autocomplete="off" style="margin-bottom:10px">
+  <label>Sync passphrase</label>
+  <input type="password" id="syncPass" placeholder="any phrase you'll remember — it IS the account" autocomplete="off" style="margin-bottom:10px">
+  <div class="footer-actions" style="margin-bottom:12px">
+    <button id="saveSync">Save sync</button>
+    <button class="ghost" id="syncNowBtn">Sync now</button>
+  </div>
+  <div class="tactical" id="syncStatus" style="margin-top:10px;margin-bottom:14px">Logs and targets sync encrypted — the server never sees readable data. API keys never sync. See SYNC_SETUP.md in the repo for the one-time Supabase setup.</div>
   <div class="panel-title">Targets · protocol defaults shown — edit deliberately</div>
   <div class="targets-grid">
     <div><label>Calorie floor (kcal)</label><input type="number" id="tFloor" min="0" step="10"></div>
@@ -614,10 +633,12 @@ function loadTargets(){
 }
 function saveTargets(){
   try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR,ceil:CEIL,pCfg:P_CFG,cCap:C_CAP,fCap:F_CAP})); } catch(e){}
+  stampTargets(); scheduleSync();              // a genuine local edit — wins LWW until someone edits later
 }
 function savePens(){
   try { localStorage.setItem('ledger_pen', JSON.stringify({
     k: Math.round((INFLATE-1)*100), p: Math.round((1-DEDUCT)*100), oilK: OIL_KCAL, oilF: OIL_FAT })); } catch(e){}
+  stampTargets(); scheduleSync();
 }
 function refreshTargetLabels(){
   const set=(id,v)=>{const el=document.getElementById(id); if(el) el.textContent=v;};
@@ -652,7 +673,8 @@ let pending = [];                            // AI-parsed items awaiting review
 let _prevLedgerLen = 0;                      // for flashing newly-added ledger rows
 
 // ---- KEYS (localStorage; never exported) ----
-const LS = { usda:'ledger_usda_key', gem:'ledger_gemini_key', model:'ledger_gemini_model' };
+const LS = { usda:'ledger_usda_key', gem:'ledger_gemini_key', model:'ledger_gemini_model',
+             supaUrl:'ledger_supa_url', supaKey:'ledger_supa_key', pass:'ledger_sync_pass' };
 // Shared default USDA key so the app works out of the box. Deliberately public: USDA
 // keys are free, unbilled, and per-key throttled (1,000 req/hr → 429). A personal key
 // in Settings overrides it and gets its own quota lane.
@@ -1707,6 +1729,21 @@ document.getElementById('saveKeys').onclick = ()=>{
     (hasUSDA()&&hasGemini()) ? 'good' : null);
 };
 
+document.getElementById('saveSync').onclick = ()=>{
+  setKey(LS.supaUrl, document.getElementById('supaUrl').value.trim());
+  setKey(LS.supaKey, document.getElementById('supaKey').value.trim());
+  setKey(LS.pass,    document.getElementById('syncPass').value);
+  syncCreds = null;                            // passphrase may have changed — re-derive
+  const st = document.getElementById('syncStatus');
+  if (syncConfigured()){ setStatus(st, 'Saved — syncing…', 'good'); syncNow(); }
+  else { setSyncDot('off'); setStatus(st, 'Sync off — all three fields are needed to enable it.'); }
+};
+document.getElementById('syncNowBtn').onclick = ()=>{
+  const st = document.getElementById('syncStatus');
+  if (!syncConfigured()){ setStatus(st, 'Fill in the three fields and Save sync first.', 'bad'); return; }
+  setStatus(st, 'Syncing…'); syncNow();
+};
+
 // Discover which models this key can actually use, and pick a valid one.
 document.getElementById('loadModelsBtn').onclick = async ()=>{
   const st = document.getElementById('keyStatus');
@@ -1956,7 +1993,10 @@ let VIEW_DATE = ACTIVE_DATE;
 function nextDay(ds){ const [y,m,d]=ds.split('-').map(Number); const dt=new Date(Date.UTC(y,m-1,d)); dt.setUTCDate(dt.getUTCDate()+1); return dt.toISOString().slice(0,10); }
 // Persistence: no-op-safe. In a real host these use localStorage; in-sandbox they may throw.
 // Keyed on VIEW_DATE so edits land on whichever day is on screen (usually the live day).
-function save(){ try{ localStorage.setItem('ledger_'+VIEW_DATE, JSON.stringify(ledger)); }catch(e){} }
+function save(){
+  try{ localStorage.setItem('ledger_'+VIEW_DATE, JSON.stringify(ledger)); }catch(e){}
+  stampSyncMeta(VIEW_DATE); scheduleSync();    // mark this day edited now; sync (if configured) follows
+}
 function load(){ ledger=[]; try{ const r=localStorage.getItem('ledger_'+VIEW_DATE); if(r)ledger=JSON.parse(r);}catch(e){} }
 
 // Retarget the screen to a different day (heatmap/history click) or back to the live day.
@@ -1995,6 +2035,142 @@ function updateDayLabel(){
   document.getElementById('closeDayBtn').style.display = past ? 'none' : '';
 }
 
+// ---- SYNC · Supabase + WebCrypto -------------------------------------------
+// Identity is a passphrase: PBKDF2 derives 512 bits — half becomes the row id
+// (unguessable), half an AES-GCM key. Same passphrase anywhere = same account.
+// The server only ever stores ciphertext. Merge is per-day last-write-wins
+// (LedgerCore.mergeSyncStates); every sync is pull→merge→push so a push can
+// never clobber a day it hasn't seen. All failures degrade to offline-only.
+const SYNC_META_KEY = 'ledger_sync_meta';
+let syncCreds = null;                          // cached {id, key} for the current passphrase
+let syncBusy = false, syncQueued = false, syncTimer = null;
+
+function syncConfigured(){ return !!(getKey(LS.supaUrl) && getKey(LS.supaKey) && getKey(LS.pass)); }
+function setSyncDot(state, tip){
+  const el = document.getElementById('syncDot');
+  el.className = 'sync-dot ' + state;
+  el.title = tip || {off:'Sync off — configure in ⚙ Settings', ok:'Synced', pending:'Syncing…', err:'Sync error'}[state];
+}
+function syncMeta(){ try{ return JSON.parse(localStorage.getItem(SYNC_META_KEY)||'{}'); }catch(e){ return {}; } }
+function stampSyncMeta(date){
+  try{ const m = syncMeta(); m[date] = new Date().toISOString(); localStorage.setItem(SYNC_META_KEY, JSON.stringify(m)); }catch(e){}
+}
+function targetsStamp(){ return getKey('ledger_targets_updated'); }
+function stampTargets(){ setKey('ledger_targets_updated', new Date().toISOString()); }
+
+async function syncKeys(){
+  if (syncCreds) return syncCreds;
+  const enc = new TextEncoder();
+  const mat = await crypto.subtle.importKey('raw', enc.encode(getKey(LS.pass)), 'PBKDF2', false, ['deriveBits']);
+  const bits = new Uint8Array(await crypto.subtle.deriveBits(
+    {name:'PBKDF2', salt: enc.encode('ledger-sync-v1'), iterations: 200000, hash:'SHA-256'}, mat, 512));
+  const id = Array.from(bits.slice(0,32)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  const key = await crypto.subtle.importKey('raw', bits.slice(32), 'AES-GCM', false, ['encrypt','decrypt']);
+  return (syncCreds = {id, key});
+}
+// btoa via chunks — String.fromCharCode(...bigArray) overflows the stack on large blobs.
+function bufToB64(buf){
+  const u = new Uint8Array(buf); let s = '';
+  for (let i=0; i<u.length; i+=0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i+0x8000));
+  return btoa(s);
+}
+function b64ToBuf(s){
+  const bin = atob(s); const u = new Uint8Array(bin.length);
+  for (let i=0; i<bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+async function syncEncrypt(obj){
+  const {key} = await syncKeys();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, new TextEncoder().encode(JSON.stringify(obj))));
+  const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12);
+  return bufToB64(out.buffer);
+}
+async function syncDecrypt(b64s){
+  const {key} = await syncKeys();
+  const u = b64ToBuf(b64s);
+  const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv: u.slice(0,12)}, key, u.slice(12));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+// Every stored day, INCLUDING empty ones — a cleared day is data and must propagate.
+function collectDays(){
+  const days = {};
+  try {
+    for (let i=0; i<localStorage.length; i++){
+      const k = localStorage.key(i);
+      const m = k && k.match(/^ledger_(\d{4}-\d{2}-\d{2})$/);
+      if (!m) continue;
+      try { const l = JSON.parse(localStorage.getItem(k)); if (Array.isArray(l)) days[m[1]] = l; } catch(e){}
+    }
+  } catch(e){}
+  days[VIEW_DATE] = ledger;                    // on-screen state wins over its stored copy
+  return days;
+}
+function supaFetch(path, opts){
+  const url = getKey(LS.supaUrl).replace(/\/+$/,'') + path;
+  const k = getKey(LS.supaKey);
+  return fetch(url, Object.assign({}, opts, {
+    headers: Object.assign({apikey:k, Authorization:'Bearer '+k, 'Content-Type':'application/json'}, (opts&&opts.headers)||{})
+  }));
+}
+// One full cycle: pull remote → merge per-day → apply locally → push the merge back.
+async function syncNow(){
+  if (!syncConfigured()){ setSyncDot('off'); return; }
+  if (syncBusy){ syncQueued = true; return; }
+  syncBusy = true; setSyncDot('pending');
+  try {
+    const {id} = await syncKeys();
+    const r = await supaFetch(`/rest/v1/sync?id=eq.${id}&select=blob`);
+    if (!r.ok) throw new Error('pull '+r.status);
+    const rows = await r.json();
+    let remote = null;
+    if (rows.length){
+      try { remote = await syncDecrypt(rows[0].blob); }
+      catch(e){ throw new Error('cannot decrypt — passphrase collision or corrupt blob'); }
+    }
+    const merged = LedgerCore.mergeSyncStates({days: collectDays(), meta: syncMeta()}, remote || {days:{}, meta:{}});
+    Object.keys(merged.days).forEach(d=>{
+      try { localStorage.setItem('ledger_'+d, JSON.stringify(merged.days[d])); } catch(e){}
+    });
+    try { localStorage.setItem(SYNC_META_KEY, JSON.stringify(merged.meta)); } catch(e){}
+    if (remote && remote.targets && (remote.tUpdated||'') > targetsStamp()){
+      try {
+        localStorage.setItem('ledger_targets', JSON.stringify(remote.targets));
+        if (remote.pen) localStorage.setItem('ledger_pen', JSON.stringify(remote.pen));
+        setKey('ledger_targets_updated', remote.tUpdated);
+        loadTargets(); fillTargetInputs();
+      } catch(e){}
+    }
+    load(); updateDayLabel(); render();        // reflect whatever the merge decided for the on-screen day
+    const state = { v:1, days: merged.days, meta: merged.meta,
+      targets: {floor:FLOOR, ceil:CEIL, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP},
+      pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
+      tUpdated: targetsStamp() };
+    const blob = await syncEncrypt(state);
+    const p = await supaFetch('/rest/v1/sync', {
+      method:'POST', headers:{Prefer:'resolution=merge-duplicates'},
+      body: JSON.stringify([{id, blob, updated_at: new Date().toISOString()}])
+    });
+    if (!p.ok) throw new Error('push '+p.status);
+    setSyncDot('ok');
+  } catch(e){
+    setSyncDot('err', 'Sync error: ' + e.message);
+  } finally {
+    syncBusy = false;
+    if (syncQueued){ syncQueued = false; syncNow(); }
+  }
+}
+function scheduleSync(){
+  if (!syncConfigured()) return;
+  setSyncDot('pending');
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncNow, 3000);       // debounce bursts of edits into one cycle
+}
+document.addEventListener('visibilitychange', ()=>{
+  if (!document.hidden) { syncNow(); return; }           // tab back in focus → pick up other devices' edits
+  if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; syncNow(); }  // leaving with edits pending → flush now
+});
+
 // Import: merge a previously exported ledger back in (durability backstop against eviction).
 document.getElementById('importBtn').onclick = ()=> document.getElementById('importFile').click();
 document.getElementById('importFile').onchange = (ev)=>{
@@ -2018,6 +2194,7 @@ document.getElementById('importFile').onchange = (ev)=>{
         dates.forEach(d=>{
           const l = rebuild(data.days[d]);
           try { localStorage.setItem('ledger_'+d, JSON.stringify(l)); } catch(e){}
+          stampSyncMeta(d);                    // imported now = edited now, for sync LWW
           if (d === VIEW_DATE) ledger = l;
         });
         if (data.targets){
@@ -2068,6 +2245,9 @@ function loadKeys(){
   document.getElementById('usdaKey').value   = getKey(LS.usda);
   document.getElementById('geminiKey').value = getKey(LS.gem);
   document.getElementById('geminiModel').value = getKey(LS.model) || 'gemini-3.1-flash-lite';
+  document.getElementById('supaUrl').value   = getKey(LS.supaUrl);
+  document.getElementById('supaKey').value   = getKey(LS.supaKey);
+  document.getElementById('syncPass').value  = getKey(LS.pass);
   refreshKeyUI();
 }
 
@@ -2083,6 +2263,7 @@ document.getElementById('closeDayBtn').onclick = closeDay;
 document.getElementById('backToTodayBtn').onclick = ()=> viewDay(ACTIVE_DATE);
 updateDayLabel();
 loadTargets(); fillTargetInputs(); loadKeys(); initFoods(); load(); render(); requestPersistence();
+if (syncConfigured()) syncNow(); else setSyncDot('off');   // boot pull+push (no-op when unconfigured)
 </script>
 </body>
 </html>

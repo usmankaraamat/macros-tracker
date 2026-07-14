@@ -152,6 +152,38 @@ group('rankFoods — junk demotion, token boost, kcal plausibility');
   check('no prior → USDA order kept on score tie', r5[0].name==='Oil, plantain', `got ${r5[0].name}`);
 })();
 
+// ---- mergeSyncStates: per-day last-write-wins ----
+group('mergeSyncStates — day-level merge');
+(function(){
+  const A=[{name:'egg'}], B=[{name:'rice'}];
+  // Disjoint days both survive.
+  const m1 = LedgerCore.mergeSyncStates(
+    {days:{'2026-07-13':A}, meta:{'2026-07-13':'t1'}},
+    {days:{'2026-07-14':B}, meta:{'2026-07-14':'t2'}});
+  check('disjoint days union', !!(m1.days['2026-07-13'] && m1.days['2026-07-14']), '');
+  // Same day: newer stamp wins.
+  const m2 = LedgerCore.mergeSyncStates(
+    {days:{'2026-07-14':A}, meta:{'2026-07-14':'2026-07-14T10:00:00Z'}},
+    {days:{'2026-07-14':B}, meta:{'2026-07-14':'2026-07-14T12:00:00Z'}});
+  check('same day → newer editor wins', m2.days['2026-07-14'][0].name==='rice', `got ${m2.days['2026-07-14'][0].name}`);
+  check('  → winning stamp kept', m2.meta['2026-07-14']==='2026-07-14T12:00:00Z', '');
+  // Day with no stamp loses to a stamped edit.
+  const m3 = LedgerCore.mergeSyncStates(
+    {days:{'2026-07-14':A}, meta:{}},
+    {days:{'2026-07-14':B}, meta:{'2026-07-14':'t'}});
+  check('unstamped day loses to stamped', m3.days['2026-07-14'][0].name==='rice', '');
+  // Newer stamp WITHOUT data falls back to the side that has the day.
+  const m4 = LedgerCore.mergeSyncStates(
+    {days:{'2026-07-14':A}, meta:{'2026-07-14':'t1'}},
+    {days:{}, meta:{'2026-07-14':'t9'}});
+  check('stale stamp without data does not drop the day', m4.days['2026-07-14'][0].name==='egg', '');
+  // Cleared day (empty array) is data, not absence — it propagates.
+  const m5 = LedgerCore.mergeSyncStates(
+    {days:{'2026-07-14':[]}, meta:{'2026-07-14':'t9'}},
+    {days:{'2026-07-14':B}, meta:{'2026-07-14':'t1'}});
+  check('reset day propagates as empty', Array.isArray(m5.days['2026-07-14']) && m5.days['2026-07-14'].length===0, '');
+})();
+
 // ---- ternary math ----
 group('ternary — barycentric plot');
 (function(){

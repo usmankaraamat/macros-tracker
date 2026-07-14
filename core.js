@@ -166,6 +166,25 @@
       .map(x => x.f);
   }
 
+  // ---- Sync merge: last-write-wins per DAY ----------------------------------
+  // A sync state is {days:{'YYYY-MM-DD':[entries]}, meta:{'YYYY-MM-DD':isoStamp}}.
+  // Per-day (not per-blob) LWW makes "phone logs lunch, PC logs dinner on another
+  // day" trivially safe; a same-day conflict resolves to the most recent editor.
+  // Days with no meta stamp count as oldest, and a day deleted on one side but
+  // edited later on the other survives. Returns fresh objects; inputs untouched.
+  function mergeSyncStates(local, remote) {
+    const days = {}, meta = {};
+    const stamp = (s, d) => (s.meta && s.meta[d]) || '';
+    const dates = new Set(
+      Object.keys((local && local.days) || {}).concat(Object.keys((remote && remote.days) || {})));
+    dates.forEach(d => {
+      let win = stamp(remote, d) > stamp(local, d) ? remote : local;
+      if (!(win.days && win.days[d])) win = win === remote ? local : remote;  // stale stamp without data
+      if (win.days && win.days[d]) { days[d] = win.days[d]; meta[d] = stamp(win, d); }
+    });
+    return { days, meta };
+  }
+
   // ---- Ternary meal engineering (barycentric) ------------------------------
   // Three foods balanced against a strict calorie target. A point in the triangle
   // has barycentric weights w=[wA,wB,wC], w>=0, sum 1 — the fraction of the calorie
@@ -245,6 +264,6 @@
 
   return {
     nutrientsFrom, resolvePTarget, capGrams, computeEntry,
-    solveFridge, budgetCombos, scoreFood, rankFoods, ternary
+    solveFridge, budgetCombos, scoreFood, rankFoods, mergeSyncStates, ternary
   };
 });
