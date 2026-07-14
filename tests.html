@@ -131,6 +131,27 @@ group('budgetCombos — pair solver');
   check('  → not protein-penalised (score < 500)', c.score < 500, `score ${c.score.toFixed(1)}`);
 })();
 
+// ---- rankFoods: USDA candidate ranking ----
+group('rankFoods — junk demotion, token boost, kcal plausibility');
+(function(){
+  const mk = (name,kcal)=>({name, base:{kcal, p:0, f:0, c:0}});
+  // Junk demotion: dehydrated powder loses to the plain raw food even when USDA lists it first.
+  const r1 = C.rankFoods([mk('Bananas, dehydrated, or banana powder',346), mk('Bananas, raw',89)], 'banana');
+  check('raw banana beats dehydrated powder', r1[0].name==='Bananas, raw', `got ${r1[0].name}`);
+  // Token boost: candidate containing every query word beats a keyword cousin.
+  const r2 = C.rankFoods([mk('Wheat flour, whole-grain',340), mk('Wheat flour, white, all-purpose, enriched',364)], 'all purpose flour');
+  check('all-query-words match outranks keyword cousin', r2[0].name.includes('all-purpose'), `got ${r2[0].name}`);
+  // kcal plausibility: with an AI prior of ~880 kcal/100g, a 100 kcal "oil" sinks.
+  const r3 = C.rankFoods([mk('Oil, plantain',100), mk('Oil, sunflower',884)], 'oil', 880);
+  check('kcal prior sinks implausible candidate', r3[0].name==='Oil, sunflower', `got ${r3[0].name}`);
+  // …but a mild deviation (165 vs est 200) must NOT override name quality.
+  const r4 = C.rankFoods([mk('Chicken, breaded, fried',290), mk('Chicken, breast, raw',165)], 'chicken breast', 200);
+  check('mild kcal deviation does not override name quality', r4[0].name==='Chicken, breast, raw', `got ${r4[0].name}`);
+  // No prior + tied scores → USDA's original relevance order is preserved.
+  const r5 = C.rankFoods([mk('Oil, plantain',100), mk('Oil, sunflower',884)], 'oil');
+  check('no prior → USDA order kept on score tie', r5[0].name==='Oil, plantain', `got ${r5[0].name}`);
+})();
+
 // ---- ternary math ----
 group('ternary — barycentric plot');
 (function(){

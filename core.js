@@ -131,6 +131,41 @@
     return combos;
   }
 
+  // ---- USDA candidate ranking ----------------------------------------------
+  // USDA relevance often floats processed/composite entries to the top for a generic
+  // query ("banana" → dehydrated powder; "white rice" → "Beans and white rice"). Down-rank
+  // those so the default match is the plain food; the user can still override in the picker.
+  const JUNK = ['dehydrated', 'powder', 'dried', ' juice', 'nectar', 'concentrate', 'baby', 'infant',
+    'breaded', 'chips', 'paste', 'butter', ' oil', 'flour', 'lunchmeat', ' roll', 'pudding', 'split',
+    'sauce', 'gravy', 'soup', 'flavored', 'salted', 'sweetened', 'smoked', ' and ', ' with '];
+  function scoreFood(name, ql) {
+    const d = ' ' + name.toLowerCase() + ' ';
+    let s = 0;
+    JUNK.forEach(tok => { if (d.includes(tok) && !ql.includes(tok.trim())) s -= 12; });
+    if (/\braw\b/.test(d)) s += 6;
+    if (/\bnfs\b/.test(d)) s += 4;                 // "not further specified" = the generic form
+    s -= Math.max(0, name.split(/[ ,]+/).filter(Boolean).length - 3);  // prefer concise entries
+    // Every query word present in the candidate name = a real match on what was asked
+    // for, not a keyword cousin ("cooking oil" must beat "Oil, plantain").
+    const words = ql.split(/[^a-z]+/).filter(w => w.length > 2);
+    if (words.length && words.every(w => d.includes(w))) s += 8;
+    return s;
+  }
+  // estKcal (optional) = a trusted per-100g calorie prior, e.g. the AI's estimate for the
+  // ingredient. Candidates whose energy density is wildly off that prior get down-ranked
+  // on a log scale: 100 vs 880 kcal is punished hard, 165 vs 200 barely at all.
+  function rankFoods(foods, query, estKcal) {
+    const ql = ' ' + (query || '').toLowerCase() + ' ';
+    return foods.map((f, i) => {
+      let s = scoreFood(f.name, ql);
+      const k = f.base && f.base.kcal;
+      if (estKcal > 0 && k > 0) s -= Math.min(24, 8 * Math.abs(Math.log(k / estKcal)));
+      return { f, s, i };
+    })
+      .sort((a, b) => b.s - a.s || a.i - b.i)      // best score first; USDA relevance breaks ties
+      .map(x => x.f);
+  }
+
   // ---- Ternary meal engineering (barycentric) ------------------------------
   // Three foods balanced against a strict calorie target. A point in the triangle
   // has barycentric weights w=[wA,wB,wC], w>=0, sum 1 — the fraction of the calorie
@@ -210,6 +245,6 @@
 
   return {
     nutrientsFrom, resolvePTarget, capGrams, computeEntry,
-    solveFridge, budgetCombos, ternary
+    solveFridge, budgetCombos, scoreFood, rankFoods, ternary
   };
 });

@@ -313,7 +313,7 @@
 <div class="panel" id="settingsPanel" style="display:none">
   <div class="panel-title">Settings · API keys — stored in this browser only, never uploaded</div>
   <label>USDA FoodData Central key</label>
-  <input type="password" id="usdaKey" placeholder="api.data.gov key" autocomplete="off" style="margin-bottom:10px">
+  <input type="password" id="usdaKey" placeholder="optional — a shared key is built in; paste your own for a private quota" autocomplete="off" style="margin-bottom:10px">
   <label>Gemini API key</label>
   <input type="password" id="geminiKey" placeholder="AIza…" autocomplete="off" style="margin-bottom:10px">
   <label>Gemini model</label>
@@ -640,9 +640,14 @@ let _prevLedgerLen = 0;                      // for flashing newly-added ledger 
 
 // ---- KEYS (localStorage; never exported) ----
 const LS = { usda:'ledger_usda_key', gem:'ledger_gemini_key', model:'ledger_gemini_model' };
+// Shared default USDA key so the app works out of the box. Deliberately public: USDA
+// keys are free, unbilled, and per-key throttled (1,000 req/hr → 429). A personal key
+// in Settings overrides it and gets its own quota lane.
+const USDA_DEFAULT_KEY = '32EXShdn5fDWQz84KCuGPgNRnLwR5cbN6WxxFuPh';
 function getKey(k){ try { return localStorage.getItem(k) || ''; } catch(e){ return ''; } }
 function setKey(k,v){ try { v ? localStorage.setItem(k,v) : localStorage.removeItem(k); } catch(e){} }
-function hasUSDA(){ return !!getKey(LS.usda); }
+function usdaKey(){ return getKey(LS.usda) || USDA_DEFAULT_KEY; }
+function hasUSDA(){ return !!usdaKey(); }
 function hasGemini(){ return !!getKey(LS.gem); }
 function geminiModel(){ return getKey(LS.model) || 'gemini-3.1-flash-lite'; }
 
@@ -1380,14 +1385,17 @@ function registerFood(name, base, source){
 // Per-100g nutrients keyed by USDA nutrient number: 208 kcal, 203 protein,
 // 204 fat, 205 carb, 301 calcium(mg), 305 phosphorus(mg).
 function nutrientsFrom(food){ return LedgerCore.nutrientsFrom(food); }
-async function usdaSearch(query){
+// estKcal (optional): per-100g calorie prior for plausibility ranking — pass the AI's
+// estimate so keyword cousins with absurd energy density ("cooking oil" → plantain oil
+// at 100 kcal/100g) sink below the real thing.
+async function usdaSearch(query, estKcal){
   if (!hasUSDA()) throw new Error('No USDA key — add one in ⚙ Settings.');
   const q = (query||'').trim();
   if (!q) return [];
   // POST with a JSON body — the documented form. Passing dataType as an array here
   // avoids the URL-encoding quirks that make the GET query 400 on spaces/parens.
   const url = 'https://api.nal.usda.gov/fdc/v1/foods/search?api_key='
-    + encodeURIComponent(getKey(LS.usda));
+    + encodeURIComponent(usdaKey());
   const r = await fetch(url, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
@@ -1396,32 +1404,14 @@ async function usdaSearch(query){
       pageSize: 10
     })
   });
+  if (r.status === 429) throw new Error(getKey(LS.usda)
+    ? 'USDA API 429 — your key is rate-limited this hour, try later.'
+    : 'USDA API 429 — the shared key is rate-limited this hour. Get a free personal key at fdc.nal.usda.gov/api-key-signup and paste it in ⚙ Settings.');
   if (!r.ok) throw new Error('USDA API ' + r.status
     + (r.status===403 ? ' — key rejected' : r.status===400 ? ' — bad request' : ''));
   const d = await r.json();
   const foods = (d.foods||[]).map(f => ({ id:f.fdcId, name:f.description, base:nutrientsFrom(f) }));
-  return rankFoods(foods, q);
-}
-// USDA relevance often floats processed/composite entries to the top for a generic
-// query ("banana" → dehydrated powder; "white rice" → "Beans and white rice"). Down-rank
-// those so the default match is the plain food; the user can still override in the picker.
-const JUNK = ['dehydrated','powder','dried',' juice','nectar','concentrate','baby','infant',
-  'breaded','chips','paste','butter',' oil','flour','lunchmeat',' roll','pudding','split',
-  'sauce','gravy','soup','flavored','salted','sweetened','smoked',' and ',' with '];
-function scoreFood(name, ql){
-  const d = ' ' + name.toLowerCase() + ' ';
-  let s = 0;
-  JUNK.forEach(tok => { if (d.includes(tok) && !ql.includes(tok.trim())) s -= 12; });
-  if (/\braw\b/.test(d)) s += 6;
-  if (/\bnfs\b/.test(d)) s += 4;                 // "not further specified" = the generic form
-  s -= Math.max(0, name.split(/[ ,]+/).filter(Boolean).length - 3);  // prefer concise entries
-  return s;
-}
-function rankFoods(foods, query){
-  const ql = ' ' + (query||'').toLowerCase() + ' ';
-  return foods.map((f,i)=>({f, s:scoreFood(f.name, ql), i}))
-    .sort((a,b)=> b.s - a.s || a.i - b.i)      // best score first; USDA relevance breaks ties
-    .map(x=>x.f);
+  return LedgerCore.rankFoods(foods, q, estKcal);
 }
 
 // ---- Gemini model discovery ----
@@ -1596,7 +1586,7 @@ async function researchPending(i){
   const btn = document.querySelector(`[data-research="${i}"]`);
   if (btn){ btn.disabled = true; btn.innerHTML = '<span class="spin"></span>'; }
   try {
-    const cands = (await usdaSearch(q)).slice(0,6);
+    const cands = (await usdaSearch(q, pending[i].estBase && pending[i].estBase.kcal)).slice(0,6);
     if (cands.length){ pending[i].candidates = cands; pending[i].sel = 'u0'; pending[i].name = q; }
     else if (btn){ btn.disabled = false; btn.textContent = '∅'; return; }
   } catch(e){ if (btn){ btn.disabled = false; btn.textContent = '!'; } return; }
@@ -1681,7 +1671,7 @@ document.getElementById('gear').onclick = ()=>{
 function refreshKeyUI(){
   const st = document.getElementById('keyStatus');
   const bits = [];
-  bits.push(hasUSDA() ? 'USDA ✓' : 'USDA — not set');
+  bits.push(getKey(LS.usda) ? 'USDA ✓ (your key)' : 'USDA ✓ (shared key)');
   bits.push(hasGemini() ? 'Gemini ✓' : 'Gemini — not set');
   st.textContent = bits.join('  ·  ') + (hasUSDA()&&hasGemini() ? '  · all systems go.' : '  · features disabled until set.');
   document.getElementById('usdaBtn').disabled = !hasUSDA();
@@ -1763,7 +1753,7 @@ document.getElementById('parseBtn').onclick = async ()=>{
         ? {kcal:+it.est.kcal||0, p:+it.est.p||0, f:+it.est.f||0, c:+it.est.c||0} : null;
       let candidates = [];
       if (hasUSDA() && it.name){
-        try { candidates = (await usdaSearch(it.name)).slice(0,6); }
+        try { candidates = (await usdaSearch(it.name, estBase && estBase.kcal)).slice(0,6); }
         catch(e){ /* fall back to AI estimate */ }
       }
       pending.push({
