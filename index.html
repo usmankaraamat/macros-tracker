@@ -54,6 +54,10 @@
     background: var(--warn-bg); border: 1px solid var(--warn); border-radius: 8px;
     padding: 8px 12px; margin-bottom: 14px; font-size: 12px; color: var(--warn); }
   .past-banner button { flex: none; }
+  .photo-chip { display: flex; align-items: center; gap: 10px; margin-top: 8px;
+    padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 11px; }
+  .photo-chip img { height: 40px; width: 40px; object-fit: cover; border-radius: 6px; }
+  .photo-chip .del { margin-left: auto; }
   #gear { cursor: pointer; color: var(--ink-dim); font-size: 15px; user-select: none; }
   #gear:hover { color: var(--ink); }
   .sub { font-size: 11px; color: var(--ink-faint); margin-bottom: 18px; text-transform: uppercase; letter-spacing: 0.08em; }
@@ -434,8 +438,17 @@
 <!-- AI MEAL PARSE -->
 <div class="panel">
   <div class="panel-title">Describe a meal · AI parse (Gemini → USDA)</div>
-  <textarea id="nlInput" rows="2" placeholder="e.g. two boiled eggs, a glass of skimmed milk, and 150g grilled chicken breast"></textarea>
-  <button id="parseBtn" style="margin-top:10px">Parse meal</button>
+  <textarea id="nlInput" rows="2" placeholder="e.g. two boiled eggs, a glass of skimmed milk, and 150g grilled chicken breast — or snap a photo and add notes"></textarea>
+  <div id="photoChip" class="photo-chip" style="display:none">
+    <img id="photoThumb" alt="meal photo">
+    <span id="photoName" class="ink-dim"></span>
+    <span class="del" id="photoClear" title="remove photo">✕</span>
+  </div>
+  <div style="display:flex;gap:8px;margin-top:10px">
+    <button id="parseBtn" style="flex:1">Parse meal</button>
+    <button class="ghost" id="photoBtn" title="Photo of the meal — sent to Gemini under your key" style="flex:none">📷</button>
+  </div>
+  <input type="file" id="photoFile" accept="image/*" capture="environment" style="display:none">
   <div class="tactical" id="parseStatus" style="margin-top:8px;display:none"></div>
   <div id="pending" style="margin-top:10px"></div>
 </div>
@@ -1443,21 +1456,28 @@ function pickModel(list){
 // dishes are decomposed into base ingredients (USDA only has clean data for simple
 // foods); partOf groups a dish's components in review. est is a fallback used only
 // when USDA has no match — flagged so it never masquerades as authoritative.
-function geminiGenerate(model, prompt){
+function geminiGenerate(model, prompt, imageB64){
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/'
     + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(getKey(LS.gem));
+  // Image (when present) goes first so the text reads as instructions about it.
+  const parts = imageB64 ? [{inline_data:{mime_type:'image/jpeg', data:imageB64}}] : [];
+  parts.push({text: prompt});
   return fetch(url, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
-      contents:[{parts:[{text:prompt}]}],
+      contents:[{parts}],
       generationConfig:{ responseMimeType:'application/json', temperature:0 }
     })
   });
 }
-async function geminiParse(text){
+async function geminiParse(text, imageB64){
   if (!hasGemini()) throw new Error('No Gemini key — add one in ⚙ Settings.');
+  const photoClause = imageB64
+    ? `A photo of the meal is attached. Identify every food visible in it and estimate each portion's grams from visual cues (plate size, utensils, typical serving volumes). The text below adds context or corrections — when it states an amount or names a food, the text wins over your visual guess. If the text is empty, work from the photo alone.\n`
+    : '';
   const prompt =
 `You convert a meal description into structured food items for a macro tracker.
+${photoClause}
 Break composite or prepared dishes (samosa, biryani, sandwich, burger, pizza slice, curry, paratha, wrap, etc.) into their base single-ingredient components — the nutrient database only has reliable data for simple ingredients, not assembled dishes. Each component gets its own estimated grams; the components of one dish should sum to roughly that dish's total weight. When a dish is fried or oily, add a "cooking oil" component for the absorbed fat. Leave naturally single-ingredient foods (an egg, an apple, grilled chicken, rice, milk) as ONE item — never split those.
 Return JSON: {"items":[{"name":<short generic single-ingredient name good for a USDA database search>,`+
 `"partOf":<the dish this component came from, or "" if it was logged as a plain food>,`+
@@ -1468,7 +1488,7 @@ Return JSON: {"items":[{"name":<short generic single-ingredient name good for a 
 "est" is your best per-100g estimate, used only as a fallback. Output JSON only, no prose.
 Meal: """${text}"""`;
   let model = geminiModel();
-  let r = await geminiGenerate(model, prompt);
+  let r = await geminiGenerate(model, prompt, imageB64);
   // 404/400 → configured model not available for this key; auto-detect and retry once.
   if (r.status === 404 || r.status === 400) {
     const alt = pickModel(await listGeminiModels());
@@ -1476,7 +1496,7 @@ Meal: """${text}"""`;
     setKey(LS.model, alt);
     const mf = document.getElementById('geminiModel'); if (mf) mf.value = alt;
     model = alt;
-    r = await geminiGenerate(model, prompt);
+    r = await geminiGenerate(model, prompt, imageB64);
   }
   if (!r.ok){ const t = await r.text().catch(()=> ''); throw new Error('Gemini API '+r.status+' '+t.slice(0,140)); }
   const d = await r.json();
@@ -1737,15 +1757,54 @@ document.getElementById('usdaBtn').onclick = async ()=>{
   } catch(err){ out.innerHTML = `<div class="tactical bad">${err.message}</div>`; }
 };
 
+// ---- Meal photo: downscaled client-side, sent to Gemini alongside the text ----
+let mealPhotoB64 = null;                       // base64 JPEG body (no data: prefix), or null
+function setMealPhoto(b64, label){
+  mealPhotoB64 = b64;
+  const chip = document.getElementById('photoChip');
+  chip.style.display = b64 ? 'flex' : 'none';
+  if (b64){
+    document.getElementById('photoThumb').src = 'data:image/jpeg;base64,' + b64;
+    document.getElementById('photoName').textContent = label || 'meal photo';
+  }
+}
+// Longest edge ≤1024px, JPEG q0.8 — small enough to inline, detailed enough to count rotis.
+// Round-tripping through canvas also strips EXIF/location metadata before upload.
+function shrinkImage(file){
+  return new Promise((res, rej)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, 1024 / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.width * scale); cv.height = Math.round(img.height * scale);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      res(cv.toDataURL('image/jpeg', 0.8).split(',')[1]);
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); rej(new Error('Could not read that image.')); };
+    img.src = url;
+  });
+}
+document.getElementById('photoBtn').onclick = ()=> document.getElementById('photoFile').click();
+document.getElementById('photoClear').onclick = ()=> setMealPhoto(null);
+document.getElementById('photoFile').onchange = async (ev)=>{
+  const file = ev.target.files[0]; ev.target.value = '';
+  if (!file) return;
+  const status = document.getElementById('parseStatus');
+  try { setMealPhoto(await shrinkImage(file), file.name); setStatus(status, 'Photo attached — add notes if you like, then Parse meal.'); }
+  catch(e){ setStatus(status, e.message, 'bad'); }
+};
+
 // AI meal parse → resolve each item against USDA, else keep the AI estimate.
 document.getElementById('parseBtn').onclick = async ()=>{
   const text = document.getElementById('nlInput').value.trim();
   const status = document.getElementById('parseStatus');
-  if (!text){ return; }
-  busy(status, 'Parsing with Gemini…');
+  if (!text && !mealPhotoB64){ return; }
+  busy(status, mealPhotoB64 ? 'Reading photo with Gemini…' : 'Parsing with Gemini…');
   const btn = document.getElementById('parseBtn'); btn.disabled = true;
   try {
-    const items = await geminiParse(text);
+    const items = await geminiParse(text, mealPhotoB64);
     busy(status, `Parsed ${items.length} item(s). Resolving nutrients via USDA…`);
     pending = [];
     for (const it of items){
@@ -1769,6 +1828,7 @@ document.getElementById('parseBtn').onclick = async ()=>{
     }
     const nUsda = pending.filter(p=>p.sel!=='est').length;
     setStatus(status, `${pending.length} item(s) ready · ${nUsda} matched to USDA, ${pending.length-nUsda} AI-estimated. Check each match in the dropdown, then add.`);
+    setMealPhoto(null);                        // consumed — don't leak into the next parse
     renderPending();
   } catch(err){
     setStatus(status, err.message, 'bad');
