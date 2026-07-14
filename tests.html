@@ -152,6 +152,20 @@ group('rankFoods — junk demotion, token boost, kcal plausibility');
   check('no prior → USDA order kept on score tie', r5[0].name==='Oil, plantain', `got ${r5[0].name}`);
 })();
 
+// ---- proteinFix: close a protein gap within a kcal budget ----
+group('proteinFix — cheapest protein sources that fit');
+(function(){
+  const foods = [['Rice',{kcal:130,p:2.7}], ['Egg',{kcal:155,p:12.6}], ['Chicken',{kcal:165,p:31}]];
+  const fix = C.proteinFix(foods, 30, 300);
+  check('only realistic fits survive (chicken)', fix.length===1 && fix[0].name==='Chicken', `got ${fix.map(o=>o.name)}`);
+  check('  → ~97g chicken', approx(fix[0].grams, 97, 1), `got ${fix[0].grams}`);
+  check('  → ~160 kcal cost', approx(fix[0].kcal, 160, 1), `got ${fix[0].kcal}`);
+  const fix2 = C.proteinFix(foods, 30, 400);
+  check('bigger budget admits egg, chicken still first', fix2.length===2 && fix2[0].name==='Chicken' && fix2[1].name==='Egg', `got ${fix2.map(o=>o.name)}`);
+  check('rice never qualifies (absurd grams)', !fix2.some(o=>o.name==='Rice'), '');
+  check('no gap → no options', C.proteinFix(foods, 0, 400).length===0, '');
+})();
+
 // ---- mergeSyncStates: per-day last-write-wins ----
 group('mergeSyncStates — day-level merge');
 (function(){

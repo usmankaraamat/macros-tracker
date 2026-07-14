@@ -60,6 +60,8 @@
   .digest-card.meh  { background: var(--warn-bg); border: 1px solid var(--warn); color: var(--warn); }
   .tpl-chip { border-color: var(--accent); }
   .tpl-chip .del { margin-left: 6px; }
+  .pfix-head { color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em;
+    font-size: 10px; margin: 10px 0 4px; }
   .photo-chip { display: flex; align-items: center; gap: 10px; margin-top: 8px;
     padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 11px; }
   .photo-chip img { height: 40px; width: 40px; object-fit: cover; border-radius: 6px; }
@@ -1125,6 +1127,24 @@ function renderAverages() {
 }
 
 // 4. BUDGET TRANSLATOR
+const foodIcon = (name) => {
+  const n = name.toLowerCase();
+  return n.includes('chicken') ? '🍗' : n.includes('egg') ? '🥚' :
+         n.includes('rice') ? '🍚' : n.includes('milk') ? '🥛' : '🍽️';
+};
+// The 9pm emergency: still short on protein — what single food closes the gap
+// within the remaining ceiling headroom, at the smallest calorie cost?
+function proteinFixHTML(t, remP){
+  const budget = CEIL - t.kcal;
+  if (remP <= 0.5 || budget <= 0) return '';
+  const opts = LedgerCore.proteinFix(Object.entries(foodBase), remP, budget).slice(0, 4);
+  if (!opts.length)
+    return `<div class="budget-item"><span class="budget-icon">🚨</span><div class="budget-text">No single food in your database closes <strong>${remP.toFixed(0)}g protein</strong> within the <strong>${Math.round(budget)} kcal</strong> headroom — split it across the day or accept the gap.</div></div>`;
+  return `<div class="pfix-head">Protein fix · ${remP.toFixed(0)}g needed · ${Math.round(budget)} kcal headroom</div>` +
+    opts.map(o =>
+      `<div class="budget-item"><span class="budget-icon">${foodIcon(o.name)}</span><div class="budget-text"><strong>${o.grams}g ${o.name}</strong> → +${remP.toFixed(0)}g P for <strong>${o.kcal} kcal</strong></div></div>`
+    ).join('');
+}
 function renderBudget() {
   const wrap = document.getElementById('budgetSuggestions');
   const t = totals();
@@ -1139,7 +1159,8 @@ function renderBudget() {
   if (remKcal <= 0) {
     const headroom = CEIL - t.kcal;
     if (headroom > 0) {
-      wrap.innerHTML = `<div class="budget-item"><span class="budget-icon">✅</span><div class="budget-text">Floor reached! You have <strong>${Math.round(headroom)} kcal</strong> of ceiling headroom${remP > 0 ? ` — still need <strong>${remP.toFixed(0)}g protein</strong>` : ''}</div></div>`;
+      wrap.innerHTML = `<div class="budget-item"><span class="budget-icon">✅</span><div class="budget-text">Floor reached! You have <strong>${Math.round(headroom)} kcal</strong> of ceiling headroom${remP > 0 ? ` — still need <strong>${remP.toFixed(0)}g protein</strong>` : ''}</div></div>`
+        + proteinFixHTML(t, remP);
     } else {
       wrap.innerHTML = `<div class="budget-item"><span class="budget-icon">🚫</span><div class="budget-text">Ceiling breached by <strong>${Math.round(-headroom)} kcal</strong>. Consider closing the day.</div></div>`;
     }
@@ -1149,12 +1170,6 @@ function renderBudget() {
   // Solve 2-food combos: for each pair (A, B), solve:
   //   A.kcal/100 * gA + B.kcal/100 * gB = remKcal
   //   A.p/100   * gA + B.p/100   * gB = remP (or best-effort if remP is 0)
-  const foodIcon = (name) => {
-    const n = name.toLowerCase();
-    return n.includes('chicken') ? '🍗' : n.includes('egg') ? '🥚' :
-           n.includes('rice') ? '🍚' : n.includes('milk') ? '🥛' : '🍽️';
-  };
-
   const combos = LedgerCore.budgetCombos(Object.entries(foodBase), remKcal, remP);
 
   const staples = [];

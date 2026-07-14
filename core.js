@@ -166,6 +166,24 @@
       .map(x => x.f);
   }
 
+  // ---- Protein fix: cheapest way to close a protein gap ----------------------
+  // foods = [[name, {kcal,p}], ...] per-100g. Returns single-food options that
+  // deliver pGap grams of protein, sorted by calorie cost, filtered to what fits
+  // the remaining kcal budget and a plausible single serving. The 9pm question:
+  // "I still need 30g protein and only have 250 kcal of ceiling left — what works?"
+  function proteinFix(foods, pGap, kcalBudget) {
+    if (!(pGap > 0)) return [];
+    return foods.map(([name, f]) => {
+      if (!(f.p > 1)) return null;                        // not a protein source
+      const grams = pGap / f.p * 100;
+      const kcal = grams * f.kcal / 100;
+      return { name, grams: Math.round(grams), kcal: Math.round(kcal),
+               density: f.kcal > 0 ? f.p / f.kcal : Infinity };  // g protein per kcal
+      })
+      .filter(o => o && o.kcal <= kcalBudget + 0.5 && o.grams <= 700)
+      .sort((a, b) => a.kcal - b.kcal);
+  }
+
   // ---- Sync merge: last-write-wins per DAY ----------------------------------
   // A sync state is {days:{'YYYY-MM-DD':[entries]}, meta:{'YYYY-MM-DD':isoStamp}}.
   // Per-day (not per-blob) LWW makes "phone logs lunch, PC logs dinner on another
@@ -264,6 +282,6 @@
 
   return {
     nutrientsFrom, resolvePTarget, capGrams, computeEntry,
-    solveFridge, budgetCombos, scoreFood, rankFoods, mergeSyncStates, ternary
+    solveFridge, budgetCombos, scoreFood, rankFoods, proteinFix, mergeSyncStates, ternary
   };
 });
