@@ -338,17 +338,23 @@
   </div>
   <div class="tactical" id="keyStatus" style="margin-top:10px;margin-bottom:14px">Add your free USDA + Gemini keys to enable search and AI parsing.</div>
   <div class="panel-title">Sync · same passphrase on any device = same account</div>
-  <label>Supabase project URL</label>
-  <input type="text" id="supaUrl" placeholder="https://xxxx.supabase.co" autocomplete="off" style="margin-bottom:10px">
-  <label>Supabase anon key</label>
-  <input type="password" id="supaKey" placeholder="eyJ… (the public anon key)" autocomplete="off" style="margin-bottom:10px">
   <label>Sync passphrase</label>
   <input type="password" id="syncPass" placeholder="any phrase you'll remember — it IS the account" autocomplete="off" style="margin-bottom:10px">
   <div class="footer-actions" style="margin-bottom:12px">
     <button id="saveSync">Save sync</button>
     <button class="ghost" id="syncNowBtn">Sync now</button>
   </div>
-  <div class="tactical" id="syncStatus" style="margin-top:10px;margin-bottom:14px">Logs and targets sync encrypted — the server never sees readable data. API keys never sync. See SYNC_SETUP.md in the repo for the one-time Supabase setup.</div>
+  <details style="margin-bottom:12px">
+    <summary>Advanced · use your own Supabase backend</summary>
+    <div style="margin-top:10px">
+      <label>Supabase project URL — blank = built-in</label>
+      <input type="text" id="supaUrl" placeholder="https://xxxx.supabase.co" autocomplete="off" style="margin-bottom:10px">
+      <label>Supabase anon / publishable key — blank = built-in</label>
+      <input type="password" id="supaKey" placeholder="sb_publishable_… or eyJ…" autocomplete="off" style="margin-bottom:10px">
+      <div class="tactical">See SYNC_SETUP.md in the repo for the one-time project setup.</div>
+    </div>
+  </details>
+  <div class="tactical" id="syncStatus" style="margin-top:10px;margin-bottom:14px">Set a passphrase to sync across devices. Logs and targets sync encrypted — the server never sees readable data. API keys never sync.</div>
   <div class="panel-title">Targets · protocol defaults shown — edit deliberately</div>
   <div class="targets-grid">
     <div><label>Calorie floor (kcal)</label><input type="number" id="tFloor" min="0" step="10"></div>
@@ -683,6 +689,11 @@ const LS = { usda:'ledger_usda_key', gem:'ledger_gemini_key', model:'ledger_gemi
 // keys are free, unbilled, and per-key throttled (1,000 req/hr → 429). A personal key
 // in Settings overrides it and gets its own quota lane.
 const USDA_DEFAULT_KEY = '32EXShdn5fDWQz84KCuGPgNRnLwR5cbN6WxxFuPh';
+// Built-in sync backend. The publishable key is public by design (anon role only);
+// rows are unguessable 256-bit ids holding client-side-encrypted blobs, so the only
+// per-user secret is the passphrase. Settings can override both for self-hosted forks.
+const SUPA_DEFAULT_URL = 'https://rekcgerktrykotwzppkz.supabase.co';
+const SUPA_DEFAULT_KEY = 'sb_publishable_adWOcEpQyprhtOBpjSLS7A_sYW58wkX';
 function getKey(k){ try { return localStorage.getItem(k) || ''; } catch(e){ return ''; } }
 function setKey(k,v){ try { v ? localStorage.setItem(k,v) : localStorage.removeItem(k); } catch(e){} }
 function usdaKey(){ return getKey(LS.usda) || USDA_DEFAULT_KEY; }
@@ -1788,11 +1799,11 @@ document.getElementById('saveSync').onclick = ()=>{
   syncCreds = null;                            // passphrase may have changed — re-derive
   const st = document.getElementById('syncStatus');
   if (syncConfigured()){ setStatus(st, 'Saved — syncing…', 'good'); syncNow(); }
-  else { setSyncDot('off'); setStatus(st, 'Sync off — all three fields are needed to enable it.'); }
+  else { setSyncDot('off'); setStatus(st, 'Sync off — set a passphrase to enable it.'); }
 };
 document.getElementById('syncNowBtn').onclick = ()=>{
   const st = document.getElementById('syncStatus');
-  if (!syncConfigured()){ setStatus(st, 'Fill in the three fields and Save sync first.', 'bad'); return; }
+  if (!syncConfigured()){ setStatus(st, 'Set a passphrase and Save sync first.', 'bad'); return; }
   setStatus(st, 'Syncing…'); syncNow();
 };
 
@@ -2097,7 +2108,10 @@ const SYNC_META_KEY = 'ledger_sync_meta';
 let syncCreds = null;                          // cached {id, key} for the current passphrase
 let syncBusy = false, syncQueued = false, syncTimer = null;
 
-function syncConfigured(){ return !!(getKey(LS.supaUrl) && getKey(LS.supaKey) && getKey(LS.pass)); }
+function supaUrl(){ return getKey(LS.supaUrl) || SUPA_DEFAULT_URL; }
+function supaAnonKey(){ return getKey(LS.supaKey) || SUPA_DEFAULT_KEY; }
+// The backend is built in, so the passphrase alone turns sync on.
+function syncConfigured(){ return !!(supaUrl() && supaAnonKey() && getKey(LS.pass)); }
 function setSyncDot(state, tip){
   const el = document.getElementById('syncDot');
   el.className = 'sync-dot ' + state;
@@ -2159,10 +2173,14 @@ function collectDays(){
   return days;
 }
 function supaFetch(path, opts){
-  const url = getKey(LS.supaUrl).replace(/\/+$/,'') + path;
-  const k = getKey(LS.supaKey);
+  const url = supaUrl().replace(/\/+$/,'') + path;
+  const k = supaAnonKey();
+  // New-format publishable keys (sb_…) go in apikey only; legacy anon keys are JWTs
+  // and PostgREST wants them in Authorization too.
+  const h = {apikey:k, 'Content-Type':'application/json'};
+  if (!k.startsWith('sb_')) h.Authorization = 'Bearer '+k;
   return fetch(url, Object.assign({}, opts, {
-    headers: Object.assign({apikey:k, Authorization:'Bearer '+k, 'Content-Type':'application/json'}, (opts&&opts.headers)||{})
+    headers: Object.assign(h, (opts&&opts.headers)||{})
   }));
 }
 // One full cycle: pull remote → merge per-day → apply locally → push the merge back.

@@ -1,12 +1,16 @@
-# Ledger sync — one-time Supabase setup (~5 minutes)
+# Ledger sync — Supabase backend setup
 
-Sync lets the same account (identified by a passphrase, nothing else) share its
-ledger across any number of devices. Data is encrypted **in the browser** with a
-key derived from the passphrase — Supabase only ever stores ciphertext, and the
-row id is an unguessable hash. API keys are never synced.
+**Normal users don't need this page.** A backend is built into the app — just set
+a **sync passphrase** in ⚙ Settings on each device and you're synced. Same
+passphrase = same account; each passphrase is its own isolated, encrypted account.
 
-You set this up **once**; everyone who uses your Ledger deployment shares the
-same Supabase project but each passphrase is its own isolated, encrypted account.
+Sync data is encrypted **in the browser** with a key derived from the passphrase —
+Supabase only ever stores ciphertext, and the row id is an unguessable hash.
+API keys are never synced.
+
+The steps below are only for **self-hosting your own backend** (a fork, or if you
+want your data on your own Supabase project — enter its URL/key under
+*Settings → Sync → Advanced*).
 
 ## 1. Create the project
 
@@ -37,13 +41,14 @@ create policy "anon update" on public.sync for update using (true);
 
 **Project Settings → API**:
 - **Project URL** — looks like `https://abcdefgh.supabase.co`
-- **anon / public key** — the long `eyJ…` token (this one is designed to be public)
+- **publishable key** (`sb_publishable_…`) or legacy **anon key** (`eyJ…`) —
+  both are designed to be public; the app handles either format
 
 ## 4. Configure Ledger
 
-On **each device**: ⚙ Settings → *Sync* → paste the URL + anon key, choose a
-**passphrase**, hit **Save sync**. Same passphrase on another device = same
-account. Different passphrase = completely separate account (that's how a
+On **each device**: ⚙ Settings → *Sync* → *Advanced* → paste your URL + key,
+set your **passphrase**, hit **Save sync**. Same passphrase on another device =
+same account. Different passphrase = completely separate account (that's how a
 friend shares your deployment without sharing your data).
 
 The dot next to the date in the header shows sync state:
