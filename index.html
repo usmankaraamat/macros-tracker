@@ -330,6 +330,8 @@
   <label>Gemini model</label>
   <input type="text" id="geminiModel" list="modelList" placeholder="gemini-3.1-flash-lite" style="margin-bottom:8px">
   <datalist id="modelList"></datalist>
+  <label>OpenRouter key — optional fallback when Gemini fails or is missing</label>
+  <input type="password" id="orKey" placeholder="sk-or-… (free models are rotated automatically)" autocomplete="off" style="margin-bottom:10px">
   <div class="footer-actions" style="margin-bottom:12px">
     <button id="saveKeys">Save keys</button>
     <button class="ghost" id="loadModelsBtn">Load models</button>
@@ -394,7 +396,8 @@
     <div class="tactical" style="margin-top:8px">
       <b>USDA:</b> <a href="https://fdc.nal.usda.gov/api-key-signup.html" target="_blank" rel="noopener">fdc.nal.usda.gov/api-key-signup.html</a> — instant, free, unlimited-ish.<br>
       <b>Gemini:</b> <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> — create a key, free tier is generous.<br>
-      Keys live in localStorage on this device. Export never includes them.
+      <b>OpenRouter (optional):</b> <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a> — fallback when Gemini fails; free models, rotated automatically.<br>
+      Keys live in localStorage on this device. Export and sync never include them.
     </div>
   </details>
 </div>
@@ -674,6 +677,7 @@ let _prevLedgerLen = 0;                      // for flashing newly-added ledger 
 
 // ---- KEYS (localStorage; never exported) ----
 const LS = { usda:'ledger_usda_key', gem:'ledger_gemini_key', model:'ledger_gemini_model',
+             or:'ledger_openrouter_key',
              supaUrl:'ledger_supa_url', supaKey:'ledger_supa_key', pass:'ledger_sync_pass' };
 // Shared default USDA key so the app works out of the box. Deliberately public: USDA
 // keys are free, unbilled, and per-key throttled (1,000 req/hr → 429). A personal key
@@ -684,6 +688,8 @@ function setKey(k,v){ try { v ? localStorage.setItem(k,v) : localStorage.removeI
 function usdaKey(){ return getKey(LS.usda) || USDA_DEFAULT_KEY; }
 function hasUSDA(){ return !!usdaKey(); }
 function hasGemini(){ return !!getKey(LS.gem); }
+function hasOR(){ return !!getKey(LS.or); }
+function hasAI(){ return hasGemini() || hasOR(); }
 function geminiModel(){ return getKey(LS.model) || 'gemini-3.1-flash-lite'; }
 
 // ---- CORE: compute one entry's contribution with penalties applied ----
@@ -1492,8 +1498,38 @@ function geminiGenerate(model, prompt, imageB64){
     })
   });
 }
-async function geminiParse(text, imageB64){
-  if (!hasGemini()) throw new Error('No Gemini key — add one in ⚙ Settings.');
+// ---- OpenRouter fallback (per-user key; free vision models, rotated on limits) ----
+const OR_MODELS = ['google/gemini-2.0-flash-exp:free',
+                   'qwen/qwen2.5-vl-72b-instruct:free',
+                   'meta-llama/llama-3.2-11b-vision-instruct:free'];
+async function openrouterGenerate(prompt, imageB64){
+  let lastErr;
+  for (const m of OR_MODELS){
+    try {
+      const content = imageB64
+        ? [{type:'image_url', image_url:{url:'data:image/jpeg;base64,'+imageB64}}, {type:'text', text:prompt}]
+        : prompt;
+      const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method:'POST',
+        headers:{Authorization:'Bearer '+getKey(LS.or), 'Content-Type':'application/json'},
+        body: JSON.stringify({ model:m, messages:[{role:'user', content}],
+          response_format:{type:'json_object'}, temperature:0 })
+      });
+      // Rate-limited or model gone/unsupported → try the next free model.
+      if (r.status===429 || r.status===404 || r.status===400){ lastErr = new Error('OpenRouter '+r.status+' on '+m); continue; }
+      if (!r.ok){ const t = await r.text().catch(()=> ''); throw new Error('OpenRouter '+r.status+' '+t.slice(0,120)); }
+      const d = await r.json();
+      const txt = d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content || '';
+      if (!txt){ lastErr = new Error('empty response from '+m); continue; }
+      return { txt, via: 'OpenRouter · '+m };
+    } catch(e){ lastErr = e; }
+  }
+  throw lastErr || new Error('All OpenRouter models failed.');
+}
+
+let AI_VIA = '';                               // which provider/model handled the last parse
+async function aiParse(text, imageB64){
+  if (!hasAI()) throw new Error('No AI key — add a Gemini or OpenRouter key in ⚙ Settings.');
   const photoClause = imageB64
     ? `A photo of the meal is attached. Identify every food visible in it and estimate each portion's grams from visual cues (plate size, utensils, typical serving volumes). The text below adds context or corrections — when it states an amount or names a food, the text wins over your visual guess. If the text is empty, work from the photo alone.\n`
     : '';
@@ -1509,22 +1545,36 @@ Return JSON: {"items":[{"name":<short generic single-ingredient name good for a 
 `"est":{"kcal":<per 100g>,"p":<protein g per 100g>,"f":<fat g per 100g>,"c":<carb g per 100g>}}]}.
 "est" is your best per-100g estimate, used only as a fallback. Output JSON only, no prose.
 Meal: """${text}"""`;
-  let model = geminiModel();
-  let r = await geminiGenerate(model, prompt, imageB64);
-  // 404/400 → configured model not available for this key; auto-detect and retry once.
-  if (r.status === 404 || r.status === 400) {
-    const alt = pickModel(await listGeminiModels());
-    if (!alt) throw new Error('No Gemini models support generateContent for this key.');
-    setKey(LS.model, alt);
-    const mf = document.getElementById('geminiModel'); if (mf) mf.value = alt;
-    model = alt;
-    r = await geminiGenerate(model, prompt, imageB64);
+
+  let txt = '', gemErr = null;
+  if (hasGemini()){
+    try {
+      let model = geminiModel();
+      let r = await geminiGenerate(model, prompt, imageB64);
+      // 404/400 → configured model not available for this key; auto-detect and retry once.
+      if (r.status === 404 || r.status === 400) {
+        const alt = pickModel(await listGeminiModels());
+        if (!alt) throw new Error('No Gemini models support generateContent for this key.');
+        setKey(LS.model, alt);
+        const mf = document.getElementById('geminiModel'); if (mf) mf.value = alt;
+        model = alt;
+        r = await geminiGenerate(model, prompt, imageB64);
+      }
+      if (!r.ok){ const t = await r.text().catch(()=> ''); throw new Error('Gemini API '+r.status+' '+t.slice(0,140)); }
+      const d = await r.json();
+      txt = d.candidates && d.candidates[0] && d.candidates[0].content
+        && d.candidates[0].content.parts && d.candidates[0].content.parts[0].text || '';
+      if (!txt) throw new Error('Gemini returned no content (blocked or empty).');
+      AI_VIA = 'Gemini · ' + model;
+    } catch(e){ gemErr = e; txt = ''; }
   }
-  if (!r.ok){ const t = await r.text().catch(()=> ''); throw new Error('Gemini API '+r.status+' '+t.slice(0,140)); }
-  const d = await r.json();
-  const txt = d.candidates && d.candidates[0] && d.candidates[0].content
-    && d.candidates[0].content.parts && d.candidates[0].content.parts[0].text || '';
-  if (!txt) throw new Error('Gemini returned no content (blocked or empty).');
+  if (!txt && hasOR()){
+    const o = await openrouterGenerate(prompt, imageB64);   // throws if all models fail
+    txt = o.txt; AI_VIA = o.via;
+  }
+  if (!txt) throw gemErr || new Error('No AI provider available.');
+
+  // Free models are flaky with strict JSON mode — regex extraction is the safety net.
   let parsed;
   try { parsed = JSON.parse(txt); }
   catch(e){ const m = txt.match(/[\[{][\s\S]*[\]}]/); if(!m) throw new Error('Could not parse AI JSON.'); parsed = JSON.parse(m[0]); }
@@ -1715,18 +1765,20 @@ function refreshKeyUI(){
   const bits = [];
   bits.push(getKey(LS.usda) ? 'USDA ✓ (your key)' : 'USDA ✓ (shared key)');
   bits.push(hasGemini() ? 'Gemini ✓' : 'Gemini — not set');
-  st.textContent = bits.join('  ·  ') + (hasUSDA()&&hasGemini() ? '  · all systems go.' : '  · features disabled until set.');
+  if (hasOR()) bits.push('OpenRouter ✓');
+  st.textContent = bits.join('  ·  ') + (hasUSDA()&&hasAI() ? '  · all systems go.' : '  · AI parse disabled until a Gemini or OpenRouter key is set.');
   document.getElementById('usdaBtn').disabled = !hasUSDA();
-  document.getElementById('parseBtn').disabled = !hasGemini();
+  document.getElementById('parseBtn').disabled = !hasAI();
 }
 document.getElementById('saveKeys').onclick = ()=>{
   setKey(LS.usda,  document.getElementById('usdaKey').value.trim());
   setKey(LS.gem,   document.getElementById('geminiKey').value.trim());
   setKey(LS.model, document.getElementById('geminiModel').value.trim());
+  setKey(LS.or,    document.getElementById('orKey').value.trim());
   refreshKeyUI();
   setStatus(document.getElementById('keyStatus'),
-    'Saved. ' + (hasUSDA()&&hasGemini() ? 'All systems go.' : 'Some keys still missing.'),
-    (hasUSDA()&&hasGemini()) ? 'good' : null);
+    'Saved. ' + (hasUSDA()&&hasAI() ? 'All systems go.' : 'Some keys still missing.'),
+    (hasUSDA()&&hasAI()) ? 'good' : null);
 };
 
 document.getElementById('saveSync').onclick = ()=>{
@@ -1838,10 +1890,10 @@ document.getElementById('parseBtn').onclick = async ()=>{
   const text = document.getElementById('nlInput').value.trim();
   const status = document.getElementById('parseStatus');
   if (!text && !mealPhotoB64){ return; }
-  busy(status, mealPhotoB64 ? 'Reading photo with Gemini…' : 'Parsing with Gemini…');
+  busy(status, mealPhotoB64 ? 'Reading photo with AI…' : 'Parsing with AI…');
   const btn = document.getElementById('parseBtn'); btn.disabled = true;
   try {
-    const items = await geminiParse(text, mealPhotoB64);
+    const items = await aiParse(text, mealPhotoB64);
     busy(status, `Parsed ${items.length} item(s). Resolving nutrients via USDA…`);
     pending = [];
     for (const it of items){
@@ -1864,13 +1916,13 @@ document.getElementById('parseBtn').onclick = async ()=>{
       });
     }
     const nUsda = pending.filter(p=>p.sel!=='est').length;
-    setStatus(status, `${pending.length} item(s) ready · ${nUsda} matched to USDA, ${pending.length-nUsda} AI-estimated. Check each match in the dropdown, then add.`);
+    setStatus(status, `${pending.length} item(s) ready via ${AI_VIA} · ${nUsda} matched to USDA, ${pending.length-nUsda} AI-estimated. Check each match in the dropdown, then add.`);
     setMealPhoto(null);                        // consumed — don't leak into the next parse
     renderPending();
   } catch(err){
     setStatus(status, err.message, 'bad');
     pending = []; renderPending();
-  } finally { btn.disabled = !hasGemini(); }
+  } finally { btn.disabled = !hasAI(); }
 };
 
 document.getElementById('addBtn').onclick = ()=>{
@@ -2245,6 +2297,7 @@ function loadKeys(){
   document.getElementById('usdaKey').value   = getKey(LS.usda);
   document.getElementById('geminiKey').value = getKey(LS.gem);
   document.getElementById('geminiModel').value = getKey(LS.model) || 'gemini-3.1-flash-lite';
+  document.getElementById('orKey').value     = getKey(LS.or);
   document.getElementById('supaUrl').value   = getKey(LS.supaUrl);
   document.getElementById('supaKey').value   = getKey(LS.supaKey);
   document.getElementById('syncPass').value  = getKey(LS.pass);
