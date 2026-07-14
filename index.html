@@ -589,6 +589,22 @@
   </div>
 </details>
 
+<!-- WEIGHT: the corridor's outcome check -->
+<div class="panel intel-section">
+  <div class="panel-title">Weight · is the corridor working?</div>
+  <div class="row" style="grid-template-columns:1fr 76px">
+    <div>
+      <label>Weight on <span id="wDate">today</span> (kg)</label>
+      <input type="number" id="wIn" min="0" step="0.1" placeholder="e.g. 78.4">
+    </div>
+    <div style="display:flex;align-items:flex-end">
+      <button id="wSaveBtn" style="height:38px">Log</button>
+    </div>
+  </div>
+  <div id="wChart" style="margin-top:10px"></div>
+  <div class="tactical" id="wStats" style="display:none;margin-top:8px"></div>
+</div>
+
 <div class="panel intel-section">
   <div class="panel-title">Weekly report card</div>
   <div id="weeklyReport"><div class="empty">Need at least 2 days of data.</div></div>
@@ -849,6 +865,7 @@ function render() {
   renderHeatmap();
   renderWeeklyReport();
   renderTopFoods();
+  renderWeight();
   renderTernary();
 }
 
@@ -1001,6 +1018,68 @@ function renderTemplates(){
       save(); render();
     };
   });
+}
+
+// ---- WEIGHT: daily weigh-in, trend, and corridor cross-check ----------------
+// Stored as {date: kg} with per-date stamps so it merges across devices exactly
+// like ledger days (reuses mergeSyncStates in the sync cycle).
+function weightsMap(){ try{ return JSON.parse(localStorage.getItem('ledger_weights')||'{}'); }catch(e){ return {}; } }
+function weightsMeta(){ try{ return JSON.parse(localStorage.getItem('ledger_weights_meta')||'{}'); }catch(e){ return {}; } }
+function saveWeights(map, meta){
+  try{ localStorage.setItem('ledger_weights', JSON.stringify(map));
+       localStorage.setItem('ledger_weights_meta', JSON.stringify(meta)); }catch(e){}
+}
+document.getElementById('wSaveBtn').onclick = ()=>{
+  const v = parseFloat(document.getElementById('wIn').value);
+  if (!v || v <= 0){ document.getElementById('wIn').focus(); return; }
+  const map = weightsMap(), meta = weightsMeta();
+  map[VIEW_DATE] = v; meta[VIEW_DATE] = new Date().toISOString();
+  saveWeights(map, meta); scheduleSync(); renderWeight();
+};
+document.getElementById('wIn').addEventListener('keydown', e=>{ if (e.key==='Enter') document.getElementById('wSaveBtn').click(); });
+function renderWeight(){
+  document.getElementById('wDate').textContent = VIEW_DATE===ACTIVE_DATE ? 'today' : VIEW_DATE;
+  const map = weightsMap();
+  const inEl = document.getElementById('wIn');
+  if (document.activeElement !== inEl) inEl.value = map[VIEW_DATE] || '';
+  const entries = Object.keys(map).sort().map(d=>({date:d, kg:+map[d]})).filter(e=>e.kg>0);
+  const chart = document.getElementById('wChart'), stats = document.getElementById('wStats');
+  if (entries.length < 2){
+    chart.innerHTML = '';
+    stats.style.display = 'block';
+    stats.textContent = entries.length ? 'One weigh-in logged — a second gives you a trend.'
+                                       : 'Log a morning weight to see whether the corridor is actually moving it.';
+    return;
+  }
+  const pts = entries.slice(-30);
+  // Chart: same idiom as the kcal sparkline — inline SVG, no deps.
+  const W=300, H=70, padT=8, padB=14, padL=4, padR=34;
+  const uW=W-padL-padR, uH=H-padT-padB;
+  const t0=Date.parse(pts[0].date), t1=Date.parse(pts[pts.length-1].date);
+  const kMin=Math.min(...pts.map(p=>p.kg)), kMax=Math.max(...pts.map(p=>p.kg));
+  const yPad=Math.max(0.3,(kMax-kMin)*0.15);
+  const X=d=> padL + (t1===t0 ? uW/2 : uW*(Date.parse(d)-t0)/(t1-t0));
+  const Y=k=> padT + uH*(1-(k-kMin+yPad)/((kMax-kMin)+2*yPad));
+  const path=pts.map((p,i)=>`${i?'L':'M'}${X(p.date).toFixed(1)},${Y(p.kg).toFixed(1)}`).join(' ');
+  const dots=pts.map(p=>`<circle cx="${X(p.date).toFixed(1)}" cy="${Y(p.kg).toFixed(1)}" r="2" fill="var(--accent)"/>`).join('');
+  const last=pts[pts.length-1];
+  chart.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block">
+    <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"/>${dots}
+    <text x="${W-2}" y="${Y(last.kg)+3}" text-anchor="end" font-size="9" fill="var(--ink-dim)" font-family="var(--mono)">${last.kg}kg</text>
+    <text x="${padL}" y="${H-2}" font-size="8" fill="var(--ink-faint)" font-family="var(--mono)">${pts[0].date}</text>
+    <text x="${W-2}" y="${H-2}" text-anchor="end" font-size="8" fill="var(--ink-faint)" font-family="var(--mono)">${last.date}</text>
+  </svg>`;
+  // Rate over the last ~3 weeks + kcal average over the same window = the verdict.
+  const recent = entries.filter(e => (Date.parse(last.date)-Date.parse(e.date))/86400000 <= 21);
+  const tr = LedgerCore.weightTrend(recent.length>=2 ? recent : entries);
+  stats.style.display = 'block';
+  if (!tr){ stats.textContent = 'Need weigh-ins on different days for a trend.'; return; }
+  const days7 = allDays(true).slice(0,7);
+  const avgK = days7.length ? days7.reduce((s,d)=>s+totalsOf(d.ledger).kcal,0)/days7.length : 0;
+  const rate = tr.ratePerWeek;
+  const dir = Math.abs(rate)<0.05 ? 'holding steady' : (rate<0 ? `losing ${Math.abs(rate).toFixed(2)} kg/wk` : `gaining ${rate.toFixed(2)} kg/wk`);
+  stats.innerHTML = `<b>${dir}</b> (last ${recent.length>=2?recent.length:entries.length} weigh-ins)`
+    + (avgK ? ` · corridor avg ${Math.round(avgK)} kcal over last ${days7.length} logged day${days7.length>1?'s':''}` : '');
 }
 
 // ---- INTELLIGENCE DASHBOARD ----
@@ -2115,6 +2194,7 @@ document.getElementById('exportBtn').onclick = ()=>{
   const payload = { exported: dateStr(), version: 2,
     targets: {floor:FLOOR,ceil:CEIL,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP},
     pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
+    weights: weightsMap(), templates: templates(),
     days, date: ACTIVE_DATE, ledger, totals: totals() };   // date/ledger kept for v1 compat
   const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
   const url = URL.createObjectURL(blob); const a=document.createElement('a');
@@ -2331,12 +2411,18 @@ async function syncNow(){
         renderTemplates();
       } catch(e){}
     }
+    // Weights merge per-date like ledger days (values are kg numbers, same LWW rules).
+    const wm = LedgerCore.mergeSyncStates(
+      {days: weightsMap(), meta: weightsMeta()},
+      {days: (remote && remote.weights) || {}, meta: (remote && remote.wMeta) || {}});
+    saveWeights(wm.days, wm.meta);
     load(); updateDayLabel(); render();        // reflect whatever the merge decided for the on-screen day
     const state = { v:1, days: merged.days, meta: merged.meta,
       targets: {floor:FLOOR, ceil:CEIL, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP},
       pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
       tUpdated: targetsStamp(),
-      templates: templates(), tplUpdated: tplStamp() };
+      templates: templates(), tplUpdated: tplStamp(),
+      weights: wm.days, wMeta: wm.meta };
     const blob = await syncEncrypt(state);
     const p = await supaFetch('/rest/v1/sync', {
       method:'POST', headers:{Prefer:'resolution=merge-duplicates'},
@@ -2405,6 +2491,16 @@ document.getElementById('importFile').onchange = (ev)=>{
           savePens();
         }
         fillTargetInputs();
+        if (data.weights && typeof data.weights === 'object'){
+          const map = Object.assign({}, data.weights, weightsMap());   // restore fills gaps; local wins on clash
+          const meta = weightsMeta(); const now = new Date().toISOString();
+          Object.keys(data.weights).forEach(d=>{ if(!meta[d]) meta[d]=now; });
+          saveWeights(map, meta);
+        }
+        if (Array.isArray(data.templates) && data.templates.length){
+          const names = new Set(templates().map(t=>t.name));
+          saveTemplates(templates().concat(data.templates.filter(t=>t && t.name && !names.has(t.name))));
+        }
       } else if (data.ledger && Array.isArray(data.ledger)) {
         // v1 single-day export.
         if (ledger.length && !confirm(`Replace current ${ledger.length} entries with ${data.ledger.length} imported?`)) return;

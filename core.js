@@ -184,6 +184,23 @@
       .sort((a, b) => a.kcal - b.kcal);
   }
 
+  // ---- Weight trend: kg/week from dated weigh-ins ----------------------------
+  // entries = [{date:'YYYY-MM-DD', kg}] in ascending date order (gaps fine).
+  // Least-squares slope over days ×7 → kg/week; the corridor's outcome check.
+  // Null when there's nothing to fit (fewer than 2 points, or a single day).
+  function weightTrend(entries) {
+    if (!entries || entries.length < 2) return null;
+    const t0 = Date.parse(entries[0].date + 'T00:00:00Z');
+    const pts = entries.map(e => ({ x: (Date.parse(e.date + 'T00:00:00Z') - t0) / 86400000, y: e.kg }));
+    const n = pts.length;
+    const mx = pts.reduce((s, p) => s + p.x, 0) / n;
+    const my = pts.reduce((s, p) => s + p.y, 0) / n;
+    const den = pts.reduce((s, p) => s + (p.x - mx) * (p.x - mx), 0);
+    if (den === 0) return null;
+    const slope = pts.reduce((s, p) => s + (p.x - mx) * (p.y - my), 0) / den;
+    return { ratePerWeek: slope * 7, latest: entries[n - 1].kg };
+  }
+
   // ---- Sync merge: last-write-wins per DAY ----------------------------------
   // A sync state is {days:{'YYYY-MM-DD':[entries]}, meta:{'YYYY-MM-DD':isoStamp}}.
   // Per-day (not per-blob) LWW makes "phone logs lunch, PC logs dinner on another
@@ -282,6 +299,7 @@
 
   return {
     nutrientsFrom, resolvePTarget, capGrams, computeEntry,
-    solveFridge, budgetCombos, scoreFood, rankFoods, proteinFix, mergeSyncStates, ternary
+    solveFridge, budgetCombos, scoreFood, rankFoods, proteinFix, weightTrend,
+    mergeSyncStates, ternary
   };
 });

@@ -166,6 +166,18 @@ group('proteinFix — cheapest protein sources that fit');
   check('no gap → no options', C.proteinFix(foods, 0, 400).length===0, '');
 })();
 
+// ---- weightTrend: kg/week least-squares fit ----
+group('weightTrend — weekly rate from weigh-ins');
+(function(){
+  const w = C.weightTrend([{date:'2026-07-01',kg:80},{date:'2026-07-08',kg:79.5},{date:'2026-07-15',kg:79}]);
+  check('perfect −0.5 kg/wk line', approx(w.ratePerWeek, -0.5, 0.001), `got ${w.ratePerWeek.toFixed(3)}`);
+  check('  → latest = 79', w.latest===79, '');
+  const g = C.weightTrend([{date:'2026-07-01',kg:70},{date:'2026-07-15',kg:70.6}]);
+  check('gaining reads positive (+0.3/wk)', approx(g.ratePerWeek, 0.3, 0.001), `got ${g.ratePerWeek.toFixed(3)}`);
+  check('single entry → null', C.weightTrend([{date:'2026-07-01',kg:80}])===null, '');
+  check('same-day duplicates → null (no span)', C.weightTrend([{date:'2026-07-01',kg:80},{date:'2026-07-01',kg:81}])===null, '');
+})();
+
 // ---- mergeSyncStates: per-day last-write-wins ----
 group('mergeSyncStates — day-level merge');
 (function(){
