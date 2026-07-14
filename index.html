@@ -54,6 +54,10 @@
     background: var(--warn-bg); border: 1px solid var(--warn); border-radius: 8px;
     padding: 8px 12px; margin-bottom: 14px; font-size: 12px; color: var(--warn); }
   .past-banner button { flex: none; }
+  .digest-card { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 12px; }
+  .digest-card.good { background: var(--ok-bg); border: 1px solid var(--ok); color: var(--ok); }
+  .digest-card.meh  { background: var(--warn-bg); border: 1px solid var(--warn); color: var(--warn); }
   .photo-chip { display: flex; align-items: center; gap: 10px; margin-top: 8px;
     padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 11px; }
   .photo-chip img { height: 40px; width: 40px; object-fit: cover; border-radius: 6px; }
@@ -313,6 +317,12 @@
   </div>
 </header>
 <div class="sub">macro tracker · works offline</div>
+
+<!-- End-of-day verdict, shown once after Close day. -->
+<div class="digest-card" id="digestCard" style="display:none">
+  <span class="dg-main"></span>
+  <span class="del" id="digestClose" title="dismiss">✕</span>
+</div>
 
 <!-- Shown while a past day is on screen — every add/edit lands on that day, not today. -->
 <div class="past-banner" id="pastBanner" style="display:none">
@@ -2079,11 +2089,41 @@ function closeDay(){
   const nd = [dateStr(), nextDay(ACTIVE_DATE)].sort().pop();   // max of the two dates
   if (!confirm(`Close ${open}? ${ledger.length} item(s), ${Math.round(t.kcal)} kcal logged.\nA fresh day (${nd}) starts and this one moves to history.`)) return;
   save();                                    // seal the day being closed
+  const digest = dayDigest(open, t);         // verdict computed BEFORE the ledger swaps out
   ACTIVE_DATE = VIEW_DATE = nd;
   try{ localStorage.setItem('ledger_active_date', ACTIVE_DATE); }catch(e){}
   load();                                    // load anything already stored for the new day (usually empty)
   updateDayLabel(); render();
+  showDigest(digest);
 }
+// The end-of-day verdict: where the closed day landed, and the running streak.
+// Closing the day is the ritual moment — reward it with a reading, not silence.
+function dayDigest(date, t){
+  const kcalV = t.kcal > CEIL ? `ceiling breach +${Math.round(t.kcal-CEIL)}`
+              : t.kcal >= FLOOR ? 'landed in corridor'
+              : `${Math.round(FLOOR-t.kcal)} kcal below floor`;
+  const pShort = Math.max(0, P_TARGET - t.p);
+  const pV = pShort <= 0.5 ? `protein ${t.p.toFixed(0)}g ✓` : `protein ${t.p.toFixed(0)}g — ${pShort.toFixed(0)}g short`;
+  // Streak of ok days ending at the closed day (allDays already has it saved).
+  const byDate = {}; allDays(true).forEach(d=>{ byDate[d.date] = totalsOf(d.ledger); });
+  byDate[date] = t;
+  let streak = 0;
+  for (let d = date; byDate[d]; d = prevDayStr(d)){
+    if (dayOk(byDate[d])) streak++; else break;
+  }
+  const ok = t.kcal >= FLOOR && t.kcal <= CEIL && pShort <= 0.5;
+  return { date, ok, kcal: Math.round(t.kcal), kcalV, pV, streak };
+}
+function prevDayStr(ds){ const [y,m,d]=ds.split('-').map(Number); const dt=new Date(Date.UTC(y,m-1,d)); dt.setUTCDate(dt.getUTCDate()-1); return dt.toISOString().slice(0,10); }
+function showDigest(g){
+  const el = document.getElementById('digestCard');
+  el.style.display = 'flex';
+  el.className = 'digest-card ' + (g.ok ? 'good' : 'meh');
+  el.querySelector('.dg-main').innerHTML =
+    `<b>${g.date} closed ${g.ok ? '✓' : '·'}</b> ${g.kcal} kcal — ${g.kcalV} · ${g.pV}` +
+    (g.streak > 1 ? ` · <b>streak ${g.streak}</b> 🔥` : g.ok ? ' · streak starts here' : '');
+}
+document.getElementById('digestClose').onclick = ()=>{ document.getElementById('digestCard').style.display='none'; };
 // Header date reflects the day on screen. When the live day trails the wall clock it is
 // still "open" from an earlier calendar date — flag that so the state isn't a surprise.
 // When a PAST day is being viewed, show a banner so edits don't silently hit history.
