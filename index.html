@@ -93,6 +93,7 @@
   .corridor-readout { display: flex; justify-content: space-between; margin-top: 2px; }
   .corridor-readout .big { font-family: var(--mono); font-size: 22px; font-weight: 600; }
   .corridor-readout .status { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; align-self: flex-end; padding-bottom: 3px; }
+  .corridor-readout .remain { font-size: 11px; color: var(--ink-dim); margin-top: 1px; }
 
   .grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 16px; animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
   .grid-3 { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
@@ -436,7 +437,10 @@
     <div class="corridor-label" id="ceilLabel">1900</div>
   </div>
   <div class="corridor-readout">
-    <span class="big num" id="kcalNow">0</span>
+    <div>
+      <span class="big num" id="kcalNow">0</span>
+      <div class="remain num" id="kcalRemain"></div>
+    </div>
     <span class="status" id="kcalStatus">empty</span>
   </div>
   <!-- Ghost Mode: pace overlay -->
@@ -800,6 +804,11 @@ function render() {
   document.getElementById('cursor').style.left = pct(t.kcal)+'%';
   document.getElementById('kcalNow').textContent = Math.round(t.kcal);
   const st = document.getElementById('kcalStatus'); st.textContent = sc.s; st.style.color = sc.c;
+  // Remaining line: distance to the floor, then to the ceiling once the floor is met.
+  const rem = document.getElementById('kcalRemain');
+  if (t.kcal < FLOOR)      rem.textContent = `${Math.round(FLOOR - t.kcal)} to floor`;
+  else if (t.kcal <= CEIL) rem.textContent = `${Math.round(CEIL - t.kcal)} to ceiling`;
+  else                     rem.textContent = `${Math.round(t.kcal - CEIL)} over ceiling`;
 
   const set = (id,v)=>document.getElementById(id).textContent=v;
   set('pNow', t.p.toFixed(1)); set('pRem', Math.max(0,P_TARGET-t.p).toFixed(1));
@@ -1120,7 +1129,7 @@ function renderDonut() {
   wrap.innerHTML = `<div class="donut-wrap">
     <svg class="donut-svg" width="128" height="128" viewBox="0 0 128 128">
       ${arcs.join('')}
-      <text x="${cx}" y="${cy-2}" text-anchor="middle" class="donut-center">${Math.round(total)}</text>
+      <text x="${cx}" y="${cy-2}" text-anchor="middle" class="donut-center">${Math.round(t.kcal)}</text>
       <text x="${cx}" y="${cy+12}" text-anchor="middle" class="donut-center-sub">kcal</text>
     </svg>
     <div class="donut-legend">${legend}</div>

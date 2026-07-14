@@ -1,7 +1,7 @@
 // Service worker for Ledger PWA.
 // Scope is /macros-tracker/ — all cached paths are relative to this file's location,
 // so they resolve correctly under the repo subpath without hardcoding the origin.
-const CACHE = 'ledger-v31';
+const CACHE = 'ledger-v32';
 const SHELL = [
   './',
   './index.html',
