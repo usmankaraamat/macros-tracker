@@ -58,6 +58,8 @@
     border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 12px; }
   .digest-card.good { background: var(--ok-bg); border: 1px solid var(--ok); color: var(--ok); }
   .digest-card.meh  { background: var(--warn-bg); border: 1px solid var(--warn); color: var(--warn); }
+  .tpl-chip { border-color: var(--accent); }
+  .tpl-chip .del { margin-left: 6px; }
   .photo-chip { display: flex; align-items: center; gap: 10px; margin-top: 8px;
     padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 11px; }
   .photo-chip img { height: 40px; width: 40px; object-fit: cover; border-radius: 6px; }
@@ -494,6 +496,7 @@
 <!-- INPUT -->
 <div class="panel">
   <div class="panel-title">Log item · manual</div>
+  <div class="chips" id="tplChips" style="display:none"></div>
   <div class="chips" id="freqChips" style="display:none"></div>
   <div class="row" style="grid-template-columns:1fr 76px">
     <div>
@@ -525,7 +528,10 @@
 
 <!-- LEDGER TABLE -->
 <div class="panel">
-  <div class="panel-title">Today's entries</div>
+  <div class="panel-title" style="display:flex;justify-content:space-between;align-items:baseline">
+    <span>Today's entries</span>
+    <button class="sm ghost" id="saveTplBtn" title="Save these entries as a one-tap usual meal">save as usual</button>
+  </div>
   <table>
     <thead><tr><th>Item</th><th>kcal</th><th>P</th><th>F</th><th>C</th></tr></thead>
     <tbody id="ledgerBody"><tr><td colspan="5" class="empty">nothing logged</td></tr></tbody>
@@ -939,6 +945,58 @@ function renderFrequents(){
       document.getElementById('isCurry').checked = !!e.isCurry;
       document.getElementById('halfOil').checked = !!e.halfOil;
       document.getElementById('grams').focus();
+    };
+  });
+}
+
+// ---- MEAL TEMPLATES ("usuals"): a named bundle of entries, logged in one tap ----
+// Stored raw (name/grams/flags/base/source) and re-run through computeEntry on
+// apply, so penalty settings current at log time are honoured — same as import.
+function templates(){ try{ return JSON.parse(localStorage.getItem('ledger_templates')||'[]'); }catch(e){ return []; } }
+function tplStamp(){ return getKey('ledger_tpl_updated'); }
+function saveTemplates(list){
+  try{ localStorage.setItem('ledger_templates', JSON.stringify(list)); }catch(e){}
+  setKey('ledger_tpl_updated', new Date().toISOString());
+  scheduleSync(); renderTemplates();
+}
+document.getElementById('saveTplBtn').onclick = ()=>{
+  if (!ledger.length){ alert('Nothing logged to save.'); return; }
+  const name = (prompt(`Save these ${ledger.length} entries as a usual meal.\nName it (e.g. "usual breakfast"):`)||'').trim();
+  if (!name) return;
+  const items = ledger.map(e=>({ name:e.name, grams:e.grams, weighed:e.weighed,
+    isCurry:e.isCurry, halfOil:e.halfOil, base:e.base||getBase(e.name), source:e.source }));
+  const list = templates().filter(t=>t.name!==name);   // same name = overwrite
+  list.push({name, items});
+  saveTemplates(list);
+};
+function renderTemplates(){
+  const wrap = document.getElementById('tplChips');
+  const list = templates();
+  if (!list.length){ wrap.style.display='none'; wrap.innerHTML=''; return; }
+  wrap.style.display='flex';
+  wrap.innerHTML = list.map((t,i)=>{
+    const kcal = Math.round(t.items.reduce((s,e)=> s + (e.base ? computeEntry(e.name,e.grams,e.weighed,e.isCurry,e.halfOil,e.base,e.source).kcal : 0), 0));
+    return `<span class="chip tpl-chip" data-tpl="${i}">★ ${t.name} <small>${t.items.length} items · ${kcal} kcal</small>`+
+           `<span class="del" data-tpldel="${i}" title="delete usual">✕</span></span>`;
+  }).join('');
+  wrap.querySelectorAll('[data-tpldel]').forEach(x=>{
+    x.onclick = (ev)=>{
+      ev.stopPropagation();
+      const t = templates()[+x.dataset.tpldel];
+      if (t && confirm(`Delete usual "${t.name}"?`)) saveTemplates(templates().filter(v=>v.name!==t.name));
+    };
+  });
+  wrap.querySelectorAll('[data-tpl]').forEach(ch=>{
+    ch.onclick = ()=>{
+      const t = templates()[+ch.dataset.tpl];
+      if (!t || !confirm(`Log "${t.name}" (${t.items.length} items) to ${VIEW_DATE===ACTIVE_DATE?'today':VIEW_DATE}?`)) return;
+      t.items.forEach(e=>{
+        const base = e.base || DB[e.name];
+        if (!base) return;
+        if (e.base) registerFood(e.name, e.base, e.source);
+        ledger.push(computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source));
+      });
+      save(); render();
     };
   });
 }
@@ -2251,11 +2309,19 @@ async function syncNow(){
         loadTargets(); fillTargetInputs();
       } catch(e){}
     }
+    if (remote && Array.isArray(remote.templates) && (remote.tplUpdated||'') > tplStamp()){
+      try {
+        localStorage.setItem('ledger_templates', JSON.stringify(remote.templates));
+        setKey('ledger_tpl_updated', remote.tplUpdated);
+        renderTemplates();
+      } catch(e){}
+    }
     load(); updateDayLabel(); render();        // reflect whatever the merge decided for the on-screen day
     const state = { v:1, days: merged.days, meta: merged.meta,
       targets: {floor:FLOOR, ceil:CEIL, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP},
       pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
-      tUpdated: targetsStamp() };
+      tUpdated: targetsStamp(),
+      templates: templates(), tplUpdated: tplStamp() };
     const blob = await syncEncrypt(state);
     const p = await supaFetch('/rest/v1/sync', {
       method:'POST', headers:{Prefer:'resolution=merge-duplicates'},
@@ -2373,7 +2439,7 @@ function requestPersistence(){
 document.getElementById('closeDayBtn').onclick = closeDay;
 document.getElementById('backToTodayBtn').onclick = ()=> viewDay(ACTIVE_DATE);
 updateDayLabel();
-loadTargets(); fillTargetInputs(); loadKeys(); initFoods(); load(); render(); requestPersistence();
+loadTargets(); fillTargetInputs(); loadKeys(); initFoods(); load(); render(); renderTemplates(); requestPersistence();
 if (syncConfigured()) syncNow(); else setSyncDot('off');   // boot pull+push (no-op when unconfigured)
 </script>
 </body>
