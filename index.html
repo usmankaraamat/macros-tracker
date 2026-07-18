@@ -2443,12 +2443,15 @@ async function syncNow(){
   syncBusy = true; setSyncDot('pending');
   try {
     const {id} = await syncKeys();
-    const r = await supaFetch(`/rest/v1/sync?id=eq.${id}&select=blob`);
+    // Reads/writes go through SECURITY DEFINER RPCs (sync_get/sync_put) — anon has no
+    // direct table access, so an attacker can't enumerate every row's ciphertext; you
+    // can only fetch/write a row whose (unguessable) id you already hold.
+    const r = await supaFetch('/rest/v1/rpc/sync_get', {method:'POST', body: JSON.stringify({p_id:id})});
     if (!r.ok) throw new Error('pull '+r.status);
-    const rows = await r.json();
+    const remoteBlob = await r.json();            // scalar text: the stored blob, or null
     let remote = null;
-    if (rows.length){
-      try { remote = await syncDecrypt(rows[0].blob); }
+    if (remoteBlob){
+      try { remote = await syncDecrypt(remoteBlob); }
       catch(e){ throw new Error('cannot decrypt — passphrase collision or corrupt blob'); }
     }
     const merged = LedgerCore.mergeSyncStates({days: collectDays(), meta: syncMeta()}, remote || {days:{}, meta:{}});
@@ -2484,9 +2487,8 @@ async function syncNow(){
       templates: templates(), tplUpdated: tplStamp(),
       weights: wm.days, wMeta: wm.meta };
     const blob = await syncEncrypt(state);
-    const p = await supaFetch('/rest/v1/sync', {
-      method:'POST', headers:{Prefer:'resolution=merge-duplicates'},
-      body: JSON.stringify([{id, blob, updated_at: new Date().toISOString()}])
+    const p = await supaFetch('/rest/v1/rpc/sync_put', {
+      method:'POST', body: JSON.stringify({p_id: id, p_blob: blob})   // upsert; server stamps updated_at
     });
     if (!p.ok) throw new Error('push '+p.status);
     setSyncDot('ok');
