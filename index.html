@@ -158,6 +158,8 @@
   .pend-top .pname { font-size: 12px; }
   .pend-top input[type=number] { padding: 5px 8px; font-size: 12px; }
   .pend-tog { display: flex; gap: 14px; margin-top: 6px; padding-left: 24px; }
+  .pend-macros { font-size: 10px; color: var(--ink-dim); margin-top: 5px; padding-left: 24px; letter-spacing: .02em; }
+  .pend-macros.zero { color: var(--ink-faint); }
   .pend-group { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: 8px; margin-bottom: 8px; background: rgba(59,130,246,0.04); }
   .pend-group .pend-item { margin-bottom: 6px; }
   .pend-group .pend-item:last-child { margin-bottom: 0; }
@@ -1801,6 +1803,26 @@ function pendingTotals(){
     return t;
   }, {kcal:0,p:0,f:0,c:0,n:0});
 }
+// One pending item's own macro contribution at its current grams/selection — the same
+// computeEntry the ledger and the overall summary use, so the per-item line reconciles
+// with the total. Shown even when the item is unchecked (its would-be contribution).
+function pendItemMacroStr(p){
+  const g = +p.grams || 0;
+  if (!g || g <= 0) return '—';
+  const r = pendResolve(p);
+  const e = computeEntry(p.name, g, p.weighed, p.isCurry, false, r.base, r.source);
+  return `${Math.round(e.kcal)} kcal · ${e.p.toFixed(1)}P · ${e.f.toFixed(1)}F · ${e.c.toFixed(1)}C`;
+}
+// Refresh just the per-item macro lines (grams typing keeps focus, so no full rebuild).
+function updatePendItemMacros(){
+  pending.forEach((p,i)=>{
+    const el = document.getElementById('pm'+i);
+    if (!el) return;
+    const g = +p.grams || 0;
+    el.textContent = pendItemMacroStr(p);
+    el.classList.toggle('zero', !(g > 0) || !p.include);
+  });
+}
 function pendSummaryHTML(){
   const t = pendingTotals();
   if (!t.n) return `<div class="pend-summary"><span class="ink-dim">Nothing selected.</span></div>`;
@@ -1839,6 +1861,7 @@ function renderPendItem(p, i){
       <input type="number" id="pg${i}" value="${Math.round(p.grams)}" min="0" step="1" title="grams">
     </div>
     ${picker}
+    <div class="pend-macros num ${(+p.grams>0 && p.include)?'':'zero'}" id="pm${i}">${pendItemMacroStr(p)}</div>
     <div class="pend-research">
       <input type="text" id="pq${i}" value="${qv}" placeholder="wrong match? type a better USDA term">
       <button class="sm ghost" data-research="${i}" title="Search USDA for this term">&#8635;</button>
@@ -1906,7 +1929,7 @@ function renderPending(){
   // Live totals: typing grams updates just the summary (keeps focus); a discrete toggle
   // or candidate swap rebuilds the list. The re-search term box is exempt from rebuilds
   // so an in-progress query isn't wiped when it loses focus.
-  wrap.oninput  = ev => { if (ev.target.id && ev.target.id.startsWith('pq')) return; syncPendingFromDOM(); updatePendSummary(); };
+  wrap.oninput  = ev => { if (ev.target.id && ev.target.id.startsWith('pq')) return; syncPendingFromDOM(); updatePendItemMacros(); updatePendSummary(); };
   wrap.onchange = ev => { if (ev.target.id && ev.target.id.startsWith('pq')) return; syncPendingFromDOM(); renderPending(); };
 }
 function commitPending(){
