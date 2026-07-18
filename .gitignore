@@ -5,3 +5,12 @@ BUILD.md
 .env
 .env.*
 !.env.example
+.claude
+.claude/*
+chats
+chats/*
+CLAUDE.md
+STATUS.md
+SYNC_SETUP.md
+BACKEND_SETUP.md
+server.ps1
