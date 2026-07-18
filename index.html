@@ -776,6 +776,18 @@ function allDays(includeToday){
   return days.sort((a,b)=> a.date<b.date ? 1 : -1);   // newest first
 }
 
+// Days for rolling stats: every stored day EXCEPT the open (live) day. The open day is
+// still changing as the user eats, so counting it makes the averages fluctuate all day.
+// A *past* day being edited on-screen is overlaid with its live in-memory ledger.
+function closedDays(){
+  const days = allDays(true).filter(d => d.date !== ACTIVE_DATE);
+  if (ledger.length && VIEW_DATE !== ACTIVE_DATE){
+    const i = days.findIndex(d => d.date === VIEW_DATE);
+    if (i >= 0) days[i] = {date: VIEW_DATE, ledger}; else days.push({date: VIEW_DATE, ledger});
+  }
+  return days.sort((a,b)=> a.date<b.date ? 1 : -1);   // newest first
+}
+
 // ---- SOLVER: rice(r) + chicken(k) grams to LAND at FLOOR kcal, protein as a floor ----
 // kcal-to-floor is an equality (land at 1700, don't overshoot toward ceiling).
 // protein-to-120 is a FLOOR (>= fine, overshoot allowed) — this distinction matters:
@@ -884,10 +896,9 @@ function render() {
 function dayOk(t){ return t.kcal >= FLOOR && t.kcal <= CEIL && t.p >= P_TARGET; }
 function renderHistSummary(){
   const el = document.getElementById('histSummary');
-  // Most recent logged days incl. today, newest first.
-  const all = allDays(false);
-  if (ledger.length) all.unshift({date: VIEW_DATE, ledger});
-  all.sort((a,b)=> a.date<b.date ? 1 : -1);               // keep newest-first after the overlay
+  // Most recent CLOSED days (the open day is excluded so its running total doesn't
+  // swing the average as the user eats), newest first.
+  const all = closedDays();
   if (!all.length){ el.style.display='none'; return; }
   const week = all.slice(0,7).map(d=>totalsOf(d.ledger));
   const avgK = week.reduce((s,t)=>s+t.kcal,0)/week.length;
@@ -1178,9 +1189,7 @@ function renderGhost() {
 
 // 3. ROLLING AVERAGES
 function renderAverages() {
-  const all = allDays(false);
-  if (ledger.length) all.unshift({ date: VIEW_DATE, ledger });
-  all.sort((a,b)=> a.date<b.date ? 1 : -1);               // newest first after the overlay
+  const all = closedDays();          // open day excluded — averages cover completed days only
   if (all.length < 2) return;
 
   const calcAvg = (arr) => {
