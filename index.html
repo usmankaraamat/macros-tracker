@@ -588,7 +588,7 @@
 
 <!-- INSIGHTS (collapsed by default) -->
 <details class="panel intel-section">
-  <summary class="panel-title" style="cursor:pointer;margin-bottom:0">Compliance heatmap · last 8 weeks ▸</summary>
+  <summary class="panel-title" style="cursor:pointer;margin-bottom:0">Compliance heatmap · last 16 weeks ▸</summary>
   <div class="heatmap-wrap" style="margin-top:12px">
     <div class="heatmap-days"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
     <div class="heatmap-grid" id="heatmapGrid"></div>
@@ -1301,12 +1301,14 @@ function renderHeatmap() {
   // Overlay the live in-memory state under whichever day is on screen.
   if (ledger.length) dayMap[VIEW_DATE] = totals();
 
-  // Generate 8 weeks (56 days) ending on today's week's Sunday
+  // Generate HEATMAP_WEEKS weeks ending on today's week's Sunday. Widened to 16 so the
+  // full imported history (~2.5 months of Gemini logs) is visible, not just recent weeks.
+  const HEATMAP_WEEKS = 16;
   const dow = today.getDay(); // 0=Sun
   const endOffset = dow === 0 ? 0 : 7 - dow; // days to next Sunday
   const cells = [];
 
-  for (let i = 55 + endOffset; i >= 0 + endOffset; i--) {
+  for (let i = (HEATMAP_WEEKS * 7 - 1) + endOffset; i >= 0 + endOffset; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i + endOffset);
     const ds = d.toISOString().slice(0, 10);
@@ -2359,6 +2361,11 @@ async function syncKeys(){
   const key = await crypto.subtle.importKey('raw', bits.slice(32), 'AES-GCM', false, ['encrypt','decrypt']);
   return (syncCreds = {id, key});
 }
+// Hex SHA-256 of a string — used to bind a backup to a sync account (owner gate).
+async function sha256hex(str){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
 // btoa via chunks — String.fromCharCode(...bigArray) overflows the stack on large blobs.
 function bufToB64(buf){
   const u = new Uint8Array(buf); let s = '';
@@ -2485,9 +2492,16 @@ document.getElementById('importBtn').onclick = ()=> document.getElementById('imp
 document.getElementById('importFile').onchange = (ev)=>{
   const file = ev.target.files[0]; if(!file) return;
   const reader = new FileReader();
-  reader.onload = ()=>{
+  reader.onload = async ()=>{
     try {
       const data = JSON.parse(reader.result);
+      // Account-bound backup: if it carries an owner hash, only the sync account whose
+      // passphrase hashes to it may import (gates a personal backup to its owner).
+      if (data.owner) {
+        const pass = getKey(LS.pass);
+        if (!pass) { alert('This backup is bound to a sync account. Set that account’s passphrase in ⚙ Settings before importing.'); ev.target.value=''; return; }
+        if (await sha256hex(pass) !== data.owner) { alert('This backup belongs to a different sync account — it can only be imported on the account that created it.'); ev.target.value=''; return; }
+      }
       // Recompute from stored raw fields + carried base so imported entries stay consistent.
       const rebuild = l => l.map(e => {
         const base = e.base || DB[e.name];
