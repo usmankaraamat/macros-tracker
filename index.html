@@ -751,6 +751,14 @@ function computeEntry(name, grams, weighed, isCurry, halfOil, base, source) {
     {inflate:INFLATE, deduct:DEDUCT, oilK:OIL_KCAL, oilF:OIL_FAT});
 }
 
+// Escape untrusted text (food/template/dish names from AI, USDA, imports, sync) before
+// it goes into any innerHTML/SVG string. Names are the one field an attacker can shape,
+// and localStorage holds the sync passphrase + API keys, so an unescaped name is a
+// credential-theft XSS. Works for both HTML and SVG text contexts.
+function escapeHtml(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 function totalsOf(l) {
   return l.reduce((t,e)=>({
     kcal:t.kcal+e.kcal, p:t.p+e.p, f:t.f+e.f, c:t.c+(e.c||0), ca:t.ca+e.ca, ph:t.ph+e.ph
@@ -853,7 +861,7 @@ function render() {
   else body.innerHTML = ledger.map((e,i)=>{
     const badge = (e.source && e.source!=='DB')
       ? `<span class="badge ${e.source==='USDA'?'usda':'est'}">${e.source}</span> ` : '';
-    return `<tr><td>${badge}${e.name} <small style="color:var(--ink-faint)">${e.grams}g</small>`+
+    return `<tr><td>${badge}${escapeHtml(e.name)} <small style="color:var(--ink-faint)">${e.grams}g</small>`+
       `<span class="del" data-i="${i}" title="remove">✕</span>`+
       `<span class="del edit" data-i="${i}" title="edit grams">✎</span>`+
       `${e.flags.length?`<span class="flags">${e.flags.join(' · ')}</span>`:''}</td>`+
@@ -922,7 +930,7 @@ function renderHistory(){
                : t.kcal > CEIL ? '<span style="color:var(--bad)">✗</span>'
                : '<span style="color:var(--warn)">△</span>';
     const rows = d.ledger.map(e=>
-      `<tr><td>${e.name} <small style="color:var(--ink-faint)">${e.grams}g</small></td>`+
+      `<tr><td>${escapeHtml(e.name)} <small style="color:var(--ink-faint)">${e.grams}g</small></td>`+
       `<td>${Math.round(e.kcal)}</td><td>${(e.p||0).toFixed(1)}</td><td>${(e.f||0).toFixed(1)}</td><td>${(e.c||0).toFixed(1)}</td></tr>`).join('');
     return `<details class="hist-day">
       <summary><span class="hd-date">${d.date}</span>
@@ -1017,7 +1025,7 @@ function renderTemplates(){
   wrap.style.display='flex';
   wrap.innerHTML = list.map((t,i)=>{
     const kcal = Math.round(t.items.reduce((s,e)=> s + (e.base ? computeEntry(e.name,e.grams,e.weighed,e.isCurry,e.halfOil,e.base,e.source).kcal : 0), 0));
-    return `<span class="chip tpl-chip" data-tpl="${i}">★ ${t.name} <small>${t.items.length} items · ${kcal} kcal</small>`+
+    return `<span class="chip tpl-chip" data-tpl="${i}">★ ${escapeHtml(t.name)} <small>${t.items.length} items · ${kcal} kcal</small>`+
            `<span class="del" data-tpldel="${i}" title="delete usual">✕</span></span>`;
   }).join('');
   wrap.querySelectorAll('[data-tpldel]').forEach(x=>{
@@ -1241,7 +1249,7 @@ function proteinFixHTML(t, remP){
     return `<div class="budget-item"><span class="budget-icon">🚨</span><div class="budget-text">No single food in your database closes <strong>${remP.toFixed(0)}g protein</strong> within the <strong>${Math.round(budget)} kcal</strong> headroom — split it across the day or accept the gap.</div></div>`;
   return `<div class="pfix-head">Protein fix · ${remP.toFixed(0)}g needed · ${Math.round(budget)} kcal headroom</div>` +
     opts.map(o =>
-      `<div class="budget-item"><span class="budget-icon">${foodIcon(o.name)}</span><div class="budget-text"><strong>${o.grams}g ${o.name}</strong> → +${remP.toFixed(0)}g P for <strong>${o.kcal} kcal</strong></div></div>`
+      `<div class="budget-item"><span class="budget-icon">${foodIcon(o.name)}</span><div class="budget-text"><strong>${o.grams}g ${escapeHtml(o.name)}</strong> → +${remP.toFixed(0)}g P for <strong>${o.kcal} kcal</strong></div></div>`
     ).join('');
 }
 function renderBudget() {
@@ -1290,7 +1298,7 @@ function renderBudget() {
   const html = top.map(c =>
     `<div class="budget-item">
       <span class="budget-icon">${foodIcon(c.nameA)}</span>
-      <div class="budget-text"><strong>${c.gA}g ${c.nameA}</strong> + <strong>${c.gB}g ${c.nameB}</strong><br>
+      <div class="budget-text"><strong>${c.gA}g ${escapeHtml(c.nameA)}</strong> + <strong>${c.gB}g ${escapeHtml(c.nameB)}</strong><br>
         <span style="color:var(--ink-faint)">→ ${c.kcal} kcal · ${c.p}g protein</span>
       </div>
     </div>`).join('');
@@ -1447,7 +1455,7 @@ function renderTopFoods() {
     const pct = Math.max(15, (cnt / maxCount) * 100);
     return `<div class="topfood-item">
       <span class="topfood-rank">${i+1}</span>
-      <div class="topfood-bar-wrap"><div class="topfood-bar" style="width:${pct}%;background:${colors[i % colors.length]}"><span>${name}</span></div></div>
+      <div class="topfood-bar-wrap"><div class="topfood-bar" style="width:${pct}%;background:${colors[i % colors.length]}"><span>${escapeHtml(name)}</span></div></div>
       <span class="topfood-count">×${cnt}</span>
     </div>`;
   }).join('');
@@ -1519,7 +1527,7 @@ function renderTernary(){
     const anchor = i===0?'middle':i===1?'end':'start';
     const dx = i===0?0:i===1?-6:6, dy = i===0?-9:14;
     const nm = tState.foods[i].length>14 ? tState.foods[i].slice(0,13)+'…' : tState.foods[i];
-    return `<text x="${v[0]+dx}" y="${v[1]+dy}" text-anchor="${anchor}" class="tern-vtx-label" fill="${TCOL[i]}">${nm}</text>`;
+    return `<text x="${v[0]+dx}" y="${v[1]+dy}" text-anchor="${anchor}" class="tern-vtx-label" fill="${TCOL[i]}">${escapeHtml(nm)}</text>`;
   }).join('');
   const knobXY = T.cartesianFromBary(tState.w, TV);
   const knob = `<circle id="ternKnob" cx="${knobXY[0]}" cy="${knobXY[1]}" r="8" class="tern-knob"/>`;
@@ -1858,7 +1866,7 @@ function renderPendItem(p, i){
   const badge = `<span class="badge ${r.source==='USDA'?'usda':'est'}">${r.source}</span>`;
   const kc = Math.round(r.base.kcal||0);
   const opts = p.candidates.map((c,idx)=>
-    `<option value="u${idx}" ${p.sel==='u'+idx?'selected':''}>${c.name} · ${Math.round(c.base.kcal)} kcal/100g</option>`).join('')
+    `<option value="u${idx}" ${p.sel==='u'+idx?'selected':''}>${escapeHtml(c.name)} · ${Math.round(c.base.kcal)} kcal/100g</option>`).join('')
     + (p.estBase ? `<option value="est" ${p.sel==='est'?'selected':''}>AI estimate · ${Math.round(p.estBase.kcal)} kcal/100g</option>` : '');
   const picker = (p.candidates.length || p.estBase)
     ? `<select id="pf${i}" style="margin-top:6px;font-size:11px">${opts}</select>` : '';
@@ -1868,7 +1876,7 @@ function renderPendItem(p, i){
   return `<div class="pend-item">
     <div class="pend-top">
       <input type="checkbox" id="ps${i}" ${p.include?'checked':''} style="width:auto">
-      <span class="pname">${badge} ${p.name} <span style="color:var(--ink-dim);font-family:var(--mono);font-size:10px">${kc} kcal/100g</span></span>
+      <span class="pname">${badge} ${escapeHtml(p.name)} <span style="color:var(--ink-dim);font-family:var(--mono);font-size:10px">${kc} kcal/100g</span></span>
       <input type="number" id="pg${i}" value="${Math.round(p.grams)}" min="0" step="1" title="grams">
     </div>
     ${picker}
@@ -1918,7 +1926,7 @@ function renderPending(){
     if (!b.dish) return items;
     const gTotal = b.idxs.reduce((s,i)=> s + (pending[i].include ? (+pending[i].grams||0) : 0), 0);
     return `<div class="pend-group">
-      <div class="pend-group-head">🍽️ ${b.dish}
+      <div class="pend-group-head">🍽️ ${escapeHtml(b.dish)}
         <span class="pgh-meta">${b.idxs.length} ingredient${b.idxs.length>1?'s':''} · ${Math.round(gTotal)}g</span></div>
       ${items}
     </div>`;
@@ -2046,7 +2054,7 @@ document.getElementById('usdaBtn').onclick = async ()=>{
     if (!results.length){ out.innerHTML='<div class="tactical">No matches.</div>'; return; }
     out.innerHTML = results.map((r,i)=>
       `<div class="result">
-         <div><div class="rname">${r.name}</div>
+         <div><div class="rname">${escapeHtml(r.name)}</div>
            <div class="rmeta">${Math.round(r.base.kcal)} kcal · P ${r.base.p.toFixed(1)} · F ${r.base.f.toFixed(1)} /100g</div></div>
          <button class="sm" data-i="${i}">Use</button>
        </div>`).join('');
@@ -2055,7 +2063,7 @@ document.getElementById('usdaBtn').onclick = async ()=>{
         const r = results[+btn.dataset.i];
         registerFood(r.name, r.base, 'USDA');
         document.getElementById('food').value = r.name;
-        out.innerHTML = `<div class="tactical good">Loaded “${r.name}”. Set grams below and add.</div>`;
+        out.innerHTML = `<div class="tactical good">Loaded “${escapeHtml(r.name)}”. Set grams below and add.</div>`;
         document.getElementById('grams').focus();
       };
     });
@@ -2230,7 +2238,7 @@ document.getElementById('resetPens').onclick = ()=>{
 document.getElementById('resetBtn').onclick = ()=>{ if(confirm(`Clear all entries for ${VIEW_DATE===ACTIVE_DATE?'today':VIEW_DATE}?`)){ledger=[];save();render();} };
 // Export EVERY logged day (plus targets) — this is the durable backup, so it must
 // carry the whole history, not just today.
-document.getElementById('exportBtn').onclick = ()=>{
+document.getElementById('exportBtn').onclick = async ()=>{
   const days = {};
   allDays(true).forEach(d => { days[d.date] = d.ledger; });
   days[VIEW_DATE] = ledger;                       // the on-screen day's live state wins
@@ -2239,6 +2247,10 @@ document.getElementById('exportBtn').onclick = ()=>{
     pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
     weights: weightsMap(), templates: templates(),
     days, date: ACTIVE_DATE, ledger, totals: totals() };   // date/ledger kept for v1 compat
+  // Bind the backup to this sync account when one is set, so a shared/leaked export can
+  // only be re-imported on the owning passphrase (import refuses a mismatched owner).
+  const pass = getKey(LS.pass);
+  if (pass) payload.owner = await sha256hex(pass);
   const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
   const url = URL.createObjectURL(blob); const a=document.createElement('a');
   a.href=url; a.download=`ledger_${ACTIVE_DATE}.json`; a.click(); URL.revokeObjectURL(url);
