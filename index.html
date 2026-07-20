@@ -312,6 +312,57 @@
   .spark-wrap { margin-bottom:14px; }
   .spark-wrap svg { width:100%; height:auto; display:block; }
   .spark-cap { font-size:9px; text-transform:uppercase; letter-spacing:0.1em; color:var(--ink-faint); margin-bottom:6px; }
+
+  /* ---- BOTTOM NAV + TAB VIEWS ---- */
+  body { padding-bottom: 88px; }   /* clear the fixed nav */
+  .tabview { animation: fadeInUp 0.4s cubic-bezier(0.16,1,0.3,1) both; }
+  .tabnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    display: flex; gap: 4px; max-width: 640px; margin: 0 auto;
+    background: rgba(10,13,20,0.9); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-top: 1px solid var(--line);
+    padding: 7px 10px calc(7px + env(safe-area-inset-bottom)); }
+  .tabnav button { background: none; border: none; box-shadow: none; text-shadow: none;
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    color: var(--ink-faint); font-weight: 600; font-size: 9px; text-transform: uppercase;
+    letter-spacing: 0.06em; padding: 6px 0; border-radius: 10px; transition: color 0.2s, background 0.2s; }
+  .tabnav button .ico { font-size: 19px; line-height: 1; }
+  .tabnav button:hover { transform: none; box-shadow: none; color: var(--ink-dim); background: var(--panel-2); }
+  .tabnav button.active { color: var(--accent); }
+  .tabnav button.active .ico { filter: drop-shadow(0 0 6px var(--accent-glow)); }
+
+  /* ---- STICKY HERO CORRIDOR (Today tab) ---- */
+  #tabToday .corridor-panel { position: sticky; top: 6px; z-index: 20;
+    background: rgba(13,18,30,0.94); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+
+  /* projection cursor: where the corridor will land if the pending grams are added */
+  .corridor-cursor.proj { background: rgba(255,255,255,0.5); box-shadow: 0 0 8px 1px rgba(255,255,255,0.3);
+    width: 3px; opacity: 0.85; }
+
+  /* ---- OMNI ADD-FOOD PANEL ---- */
+  .omni-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .omni-actions .omni-primary { flex: 1; }
+  .omni-chip { flex: none; width: auto; background: transparent; border: 1px solid var(--line);
+    color: var(--ink-dim); box-shadow: none; text-shadow: none; font-size: 12px; padding: 10px 14px; }
+  .omni-chip:hover { background: var(--panel-2); color: var(--ink); box-shadow: none; }
+  .omni-chip.on { border-color: var(--accent); color: var(--ink); background: rgba(59,130,246,0.1); }
+
+  /* pill toggle replaces the tiny weighed checkbox */
+  .pill-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;
+    font-size: 12px; font-weight: 600; color: var(--ink-dim); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px; margin: 0;
+    transition: all 0.15s ease; }
+  .pill:hover { color: var(--ink); }
+  .pill:has(input:checked) { color: var(--ok); border-color: var(--ok); background: rgba(16,185,129,0.12); }
+
+  /* one-tap chips in the empty ledger */
+  .empty-chips { display: flex; flex-direction: column; gap: 8px; padding: 8px 4px 4px; }
+  .empty-chips .ec-hint { font-size: 11px; color: var(--ink-faint); font-style: italic; text-align: center; }
+  .empty-chips .ec-row { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+  .ec-chip { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 12px; padding: 5px 12px; cursor: pointer; transition: all 0.15s; }
+  .ec-chip:hover { border-color: var(--accent); color: var(--ink); transform: translateY(-1px); }
+  .ec-chip small { color: var(--ink-faint); }
 </style>
 </head>
 <body>
@@ -425,10 +476,12 @@
   </details>
 </div>
 
+<main id="tabToday" class="tabview">
 <!-- CORRIDOR -->
-<div class="panel">
+<div class="panel corridor-panel">
   <div class="panel-title">Caloric corridor · <span id="floorTitle">1700</span> floor / <span id="ceilTitle">1900</span> ceiling</div>
   <div class="corridor-wrap">
+    <div class="corridor-cursor proj" id="projCursor" style="left:0%;display:none" title="where you'll land if you add this"></div>
     <div class="corridor-cursor" id="cursor" style="left:0%"></div>
     <div class="corridor-track"><div class="corridor-fill" id="fill" style="width:0%"></div></div>
     <div class="corridor-marker" style="left:0%"></div>
@@ -483,55 +536,53 @@
   <div id="donutWrap" style="margin-top:16px;border-top:1px solid rgba(255,255,255,0.06);padding-top:16px"></div>
 </div>
 
-<!-- AI MEAL PARSE -->
-<div class="panel">
-  <div class="panel-title">Describe a meal · AI parse (Gemini → USDA)</div>
-  <textarea id="nlInput" rows="2" placeholder="e.g. two boiled eggs, a glass of skimmed milk, and 150g grilled chicken breast — or snap a photo and add notes"></textarea>
+<!-- OMNI ADD-FOOD -->
+<div class="panel" id="addPanel">
+  <div class="panel-title">Add food</div>
+  <div class="chips" id="tplChips" style="display:none"></div>
+  <div class="chips" id="freqChips" style="display:none"></div>
+  <textarea id="nlInput" rows="2" placeholder="Describe a meal — e.g. two boiled eggs, a glass of skimmed milk, 150g grilled chicken. Or snap a photo and add notes."></textarea>
   <div id="photoChip" class="photo-chip" style="display:none">
     <img id="photoThumb" alt="meal photo">
     <span id="photoName" class="ink-dim"></span>
     <span class="del" id="photoClear" title="remove photo">✕</span>
   </div>
-  <div style="display:flex;gap:8px;margin-top:10px">
-    <button id="parseBtn" style="flex:1">Parse meal</button>
-    <button class="ghost" id="photoBtn" title="Photo of the meal — sent to the AI under your key" style="flex:none;width:42px;min-width:42px;padding:10px 0">📷</button>
-  </div>
   <input type="file" id="photoFile" accept="image/*" capture="environment" style="display:none">
+  <div class="omni-actions">
+    <button id="parseBtn" class="omni-primary">Parse meal</button>
+    <button class="omni-chip" id="photoBtn" title="Photo of the meal — sent to the AI under your key">📷 Photo</button>
+    <button class="omni-chip" id="manualToggle" title="Log a food by manual USDA search">🔍 Manual</button>
+  </div>
   <div class="tactical" id="parseStatus" style="margin-top:8px;display:none"></div>
   <div id="pending" style="margin-top:10px"></div>
-</div>
 
-<!-- INPUT -->
-<div class="panel">
-  <div class="panel-title">Log item · manual</div>
-  <div class="chips" id="tplChips" style="display:none"></div>
-  <div class="chips" id="freqChips" style="display:none"></div>
-  <div class="row" style="grid-template-columns:1fr 76px">
-    <div>
-      <label>Search foods (USDA)</label>
-      <input type="text" id="usdaSearch" placeholder="e.g. greek yogurt">
+  <!-- Manual USDA logging — revealed on demand -->
+  <div id="manualBlock" style="display:none;margin-top:14px;border-top:1px solid var(--line);padding-top:14px">
+    <div class="row" style="grid-template-columns:1fr 76px">
+      <div>
+        <label>Search foods (USDA)</label>
+        <input type="text" id="usdaSearch" placeholder="e.g. greek yogurt">
+      </div>
+      <div style="display:flex;align-items:flex-end">
+        <button id="usdaBtn" style="height:38px">Find</button>
+      </div>
     </div>
-    <div style="display:flex;align-items:flex-end">
-      <button id="usdaBtn" style="height:38px">Find</button>
+    <div id="searchResults" style="margin-bottom:10px"></div>
+    <div class="row">
+      <div>
+        <label>Food</label>
+        <select id="food"></select>
+      </div>
+      <div>
+        <label>Grams</label>
+        <input type="number" id="grams" placeholder="0" min="0" step="1">
+      </div>
     </div>
+    <div class="pill-row">
+      <label class="pill"><input type="checkbox" id="weighed" checked hidden> ⚖ Weighed &amp; exact</label>
+    </div>
+    <button id="addBtn">Add to ledger</button>
   </div>
-  <div id="searchResults" style="margin-bottom:10px"></div>
-  <div class="row">
-    <div>
-      <label>Food</label>
-      <select id="food"></select>
-    </div>
-    <div>
-      <label>Grams</label>
-      <input type="number" id="grams" placeholder="0" min="0" step="1">
-    </div>
-  </div>
-  <div class="checks">
-    <label class="chk"><input type="checkbox" id="weighed" checked> weighed &amp; exact</label>
-    <label class="chk"><input type="checkbox" id="isCurry"> curry / gravy</label>
-    <label class="chk"><input type="checkbox" id="halfOil"> 0.5× oil tax</label>
-  </div>
-  <button id="addBtn">Add to ledger</button>
 </div>
 
 <!-- LEDGER TABLE -->
@@ -546,6 +597,9 @@
   </table>
 </div>
 
+</main><!-- /tabToday -->
+
+<main id="tabEngineer" class="tabview" style="display:none">
 <!-- BUDGET TRANSLATOR (replaces fridge closer) -->
 <div class="panel intel-section">
   <div class="panel-title">Meal combos to close the gap · <span id="solverTitle">1700</span> kcal target</div>
@@ -575,6 +629,9 @@
   <div class="tern-msg" id="ternMsg" style="margin-top:8px"></div>
 </div>
 
+</main><!-- /tabEngineer -->
+
+<main id="tabInsights" class="tabview" style="display:none">
 <!-- INTELLIGENCE DASHBOARD -->
 <div class="panel intel-section">
   <div class="panel-title">Intelligence · rolling averages</div>
@@ -629,20 +686,32 @@
     <div id="histList"><div class="empty">No previous days yet.</div></div>
   </div>
 </details>
+</main><!-- /tabInsights -->
 
-<div class="footer-actions" style="grid-template-columns:1fr 1fr;margin-bottom:8px">
-  <button class="ghost" id="closeDayBtn" title="Seal today and start a fresh day">Close day &rarr;</button>
-  <button class="ghost" id="resetBtn">Reset</button>
-</div>
-<div class="footer-actions" style="grid-template-columns:1fr 1fr">
-  <button class="ghost" id="exportBtn">Export</button>
-  <button class="ghost" id="importBtn">Import</button>
+<!-- Maintenance actions — shown only on the Today tab -->
+<div id="todayOnly">
+  <div class="footer-actions" style="grid-template-columns:1fr 1fr;margin-bottom:8px">
+    <button class="ghost" id="closeDayBtn" title="Seal today and start a fresh day">Close day &rarr;</button>
+    <button class="ghost" id="resetBtn">Reset</button>
+  </div>
+  <div class="footer-actions" style="grid-template-columns:1fr 1fr">
+    <button class="ghost" id="exportBtn">Export</button>
+    <button class="ghost" id="importBtn">Import</button>
+  </div>
+  <p style="font-size:10px;color:var(--ink-faint);text-align:center;margin-top:10px">
+    Data lives on this device — Export is your backup.
+  </p>
 </div>
 <input type="file" id="importFile" accept="application/json" style="display:none">
-<p style="font-size:10px;color:var(--ink-faint);text-align:center;margin-top:10px">
-  Data lives on this device — Export is your backup.
-</p>
-<div id="toast" style="display:none;position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--accent);color:#06121a;font-size:12px;font-weight:600;padding:9px 16px;border-radius:20px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.5);z-index:50">
+
+<!-- BOTTOM NAVIGATION -->
+<nav class="tabnav">
+  <button data-tab="today" class="active"><span class="ico">🏠</span>Today</button>
+  <button data-tab="engineer"><span class="ico">⚙️</span>Engineer</button>
+  <button data-tab="insights"><span class="ico">📊</span>Insights</button>
+</nav>
+
+<div id="toast" style="display:none;position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:var(--accent);color:#06121a;font-size:12px;font-weight:600;padding:9px 16px;border-radius:20px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.5);z-index:50">
   Update ready — tap to reload
 </div>
 
@@ -857,7 +926,7 @@ function render() {
 
   // ledger table
   const body = document.getElementById('ledgerBody');
-  if (!ledger.length) { body.innerHTML='<tr><td colspan="5" class="empty">nothing logged</td></tr>'; }
+  if (!ledger.length) { body.innerHTML=`<tr><td colspan="5" style="padding:0">${emptyLedgerCell()}</td></tr>`; wireEmptyLedgerChips(); }
   else body.innerHTML = ledger.map((e,i)=>{
     const badge = (e.source && e.source!=='DB')
       ? `<span class="badge ${e.source==='USDA'?'usda':'est'}">${e.source}</span> ` : '';
@@ -988,12 +1057,45 @@ function renderFrequents(){
       const e = last[ch.dataset.n];
       const base = e.base || DB[e.name];
       if (base && !foodBase[e.name]) registerFood(e.name, base, e.source);
+      openManual();
       document.getElementById('food').value = e.name;
       document.getElementById('grams').value = e.grams;
       document.getElementById('weighed').checked = !!e.weighed;
-      document.getElementById('isCurry').checked = !!e.isCurry;
-      document.getElementById('halfOil').checked = !!e.halfOil;
+      updateProjection();
       document.getElementById('grams').focus();
+    };
+  });
+}
+
+// ---- EMPTY-STATE ONE-TAP CHIPS: the fastest path to logging a repeat meal ----
+// Most tracking is the same foods daily; when the ledger is empty, surface the
+// most-logged items as chips that log in a single tap at their last-used grams.
+let _emptyTop = [];
+function topFrequents(n){
+  const count = {}, last = {};
+  allDays(true).forEach(d => d.ledger.forEach(e=>{
+    if (!e.name) return;
+    count[e.name] = (count[e.name]||0) + 1;
+    if (!last[e.name]) last[e.name] = e;   // days are newest-first → first sighting is most recent
+  }));
+  return Object.keys(count).sort((a,b)=>count[b]-count[a]).slice(0,n).map(name=>({name, e:last[name]}));
+}
+function emptyLedgerCell(){
+  _emptyTop = topFrequents(6);
+  if (!_emptyTop.length) return '<div class="empty">nothing logged</div>';
+  const chips = _emptyTop.map((f,i)=>
+    `<span class="ec-chip" data-q="${i}">${escapeHtml(f.e.name)} <small>${f.e.grams}g</small></span>`).join('');
+  return `<div class="empty-chips"><div class="ec-hint">nothing logged — tap a usual to log it instantly</div><div class="ec-row">${chips}</div></div>`;
+}
+function wireEmptyLedgerChips(){
+  document.querySelectorAll('#ledgerBody .ec-chip').forEach(ch=>{
+    ch.onclick = ()=>{
+      const f = _emptyTop[+ch.dataset.q]; if (!f) return;
+      const e = f.e, base = e.base || DB[e.name];
+      if (!base) return;
+      if (base && !foodBase[e.name]) registerFood(e.name, base, e.source);
+      ledger.push(computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source));
+      haptic(); save(); render();
     };
   });
 }
@@ -1739,7 +1841,9 @@ async function aiParse(text, imageB64){
   const prompt =
 `You convert a meal description into structured food items for a macro tracker.
 ${photoClause}
-Break composite or prepared dishes (samosa, biryani, sandwich, burger, pizza slice, curry, paratha, wrap, etc.) into their base single-ingredient components — the nutrient database only has reliable data for simple ingredients, not assembled dishes. Each component gets its own estimated grams; the components of one dish should sum to roughly that dish's total weight. When a dish is fried or oily, add a "cooking oil" component for the absorbed fat. Leave naturally single-ingredient foods (an egg, an apple, grilled chicken, rice, milk) as ONE item — never split those.
+Break composite or prepared dishes (samosa, biryani, sandwich, burger, pizza slice, curry, paratha, wrap, etc.) into their base single-ingredient components — the nutrient database only has reliable data for simple ingredients, not assembled dishes. Each component gets its own estimated grams; the components of one dish should sum to roughly that dish's total weight. When a dish is fried or oily, add a "cooking oil" component for the absorbed fat.
+Leave naturally single-ingredient foods (an egg, an apple, grilled chicken, rice, milk) as ONE item — never split those. Also keep everyday breads and flatbreads that the database stores as finished items — chapati, roti, naan, tortilla, pita, plain bread, idli, dosa — as ONE item under their common name (e.g. "chapati", "roti"); do NOT split those into flour and water.
+Never output water, ice, plain black coffee or unsweetened tea, or any other zero-calorie liquid as an item — they carry no macros and only distort the totals.
 Return JSON: {"items":[{"name":<short generic single-ingredient name good for a USDA database search>,`+
 `"partOf":<the dish this component came from, or "" if it was logged as a plain food>,`+
 `"grams":<number, estimate a realistic portion if none is stated>,`+
@@ -1783,7 +1887,16 @@ Meal: """${text}"""`;
   catch(e){ const m = txt.match(/[\[{][\s\S]*[\]}]/); if(!m) throw new Error('Could not parse AI JSON.'); parsed = JSON.parse(m[0]); }
   const items = Array.isArray(parsed) ? parsed : (parsed.items || []);
   if (!items.length) throw new Error('No foods recognised.');
-  return items;
+  // Safety net: some models still emit a plain-water/ice component despite the prompt.
+  // It carries no macros yet USDA matches "water" to a spurious ~40 kcal entry — drop it.
+  const cleaned = items.filter(it => {
+    const n = String(it && it.name || '').trim().toLowerCase();
+    const estK = it && it.est && +it.est.kcal;
+    const zeroLiquid = /^(water|ice|iced water|plain water|tap water|cold water|hot water)$/.test(n)
+      || (/\bwater\b/.test(n) && (!estK || estK < 5));   // "rose water" etc. with ~0 kcal
+    return !zeroLiquid;
+  });
+  return cleaned.length ? cleaned : items;
 }
 
 // ---- PENDING (AI review) ----
@@ -2064,6 +2177,7 @@ document.getElementById('usdaBtn').onclick = async ()=>{
         registerFood(r.name, r.base, 'USDA');
         document.getElementById('food').value = r.name;
         out.innerHTML = `<div class="tactical good">Loaded “${escapeHtml(r.name)}”. Set grams below and add.</div>`;
+        updateProjection();
         document.getElementById('grams').focus();
       };
     });
@@ -2135,7 +2249,9 @@ document.getElementById('parseBtn').onclick = async ()=>{
         weighed: !!it.weighed,
         isCurry: !!it.isCurry,
         candidates, estBase,
-        sel: candidates.length ? 'u0' : 'est',   // 'u<index>' picks a USDA match; 'est' the AI estimate
+        // Default to the best plausible USDA match; fall back to the AI estimate when the
+        // top match's calories are wildly off the estimate (USDA returned the wrong food).
+        sel: LedgerCore.defaultSelection(candidates, estBase && estBase.kcal),
         include: true
       });
     }
@@ -2153,13 +2269,13 @@ document.getElementById('addBtn').onclick = ()=>{
   const name = document.getElementById('food').value;
   const grams = parseFloat(document.getElementById('grams').value);
   if (!grams || grams<=0){ document.getElementById('grams').focus(); return; }
+  // Curry / half-oil flags are AI-parse concepts now; manual adds default to plain weighed food.
   const e = computeEntry(name, grams,
-    document.getElementById('weighed').checked,
-    document.getElementById('isCurry').checked,
-    document.getElementById('halfOil').checked,
+    document.getElementById('weighed').checked, false, false,
     getBase(name), foodSource[name] || 'DB');
   ledger.push(e);
   document.getElementById('grams').value='';
+  clearProjection(); haptic();
   save(); render();
 };
 
@@ -2167,6 +2283,60 @@ document.getElementById('addBtn').onclick = ()=>{
 document.getElementById('grams').addEventListener('keydown', e=>{ if (e.key==='Enter') document.getElementById('addBtn').click(); });
 document.getElementById('usdaSearch').addEventListener('keydown', e=>{ if (e.key==='Enter') document.getElementById('usdaBtn').click(); });
 document.getElementById('nlInput').addEventListener('keydown', e=>{ if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) document.getElementById('parseBtn').click(); });
+
+// ---- BOTTOM-NAV TABS ------------------------------------------------------
+// Three views share one scroll; the nav swaps which <main> is visible. The
+// live day's maintenance actions ride along with Today only.
+function showTab(name){
+  ['today','engineer','insights'].forEach(t=>{
+    const view = document.getElementById('tab'+t.charAt(0).toUpperCase()+t.slice(1));
+    if (view) view.style.display = t===name ? '' : 'none';
+  });
+  document.getElementById('todayOnly').style.display = name==='today' ? '' : 'none';
+  document.querySelectorAll('.tabnav button').forEach(b=> b.classList.toggle('active', b.dataset.tab===name));
+  try{ localStorage.setItem('ledger_tab', name); }catch(e){}
+  window.scrollTo({top:0, behavior:'auto'});
+  render();   // re-run so charts that measure layout (ternary) size correctly when first revealed
+}
+document.querySelectorAll('.tabnav button').forEach(b=>{
+  b.onclick = ()=> showTab(b.dataset.tab);
+});
+
+// ---- OMNI-INPUT: reveal the manual USDA search on demand ------------------
+function openManual(){
+  document.getElementById('manualBlock').style.display = '';
+  document.getElementById('manualToggle').classList.add('on');
+}
+document.getElementById('manualToggle').onclick = ()=>{
+  const blk = document.getElementById('manualBlock');
+  const open = blk.style.display === 'none';
+  blk.style.display = open ? '' : 'none';
+  document.getElementById('manualToggle').classList.toggle('on', open);
+  if (open) document.getElementById('usdaSearch').focus();
+};
+
+// ---- MICRO-INTERACTIONS ---------------------------------------------------
+// Haptic tick on a successful log (PWA on Android; silently ignored elsewhere).
+function haptic(ms){ try{ if (navigator.vibrate) navigator.vibrate(ms||18); }catch(e){} }
+
+// Ghost projection: while the manual grams field holds a value, show where the
+// corridor cursor will land once this item is added — errors caught before they happen.
+function clearProjection(){ const p=document.getElementById('projCursor'); if (p) p.style.display='none'; }
+function updateProjection(){
+  const proj = document.getElementById('projCursor');
+  if (!proj) return;
+  const name = document.getElementById('food').value;
+  const grams = parseFloat(document.getElementById('grams').value);
+  const base = getBase(name);
+  if (!name || !base || !grams || grams<=0){ proj.style.display='none'; return; }
+  const add = computeEntry(name, grams, document.getElementById('weighed').checked, false, false, base, foodSource[name]||'DB');
+  const projected = totals().kcal + add.kcal;
+  const scaleMax = CEIL * 1.15;
+  proj.style.left = Math.min(100, projected/scaleMax*100) + '%';
+  proj.style.display = 'block';
+}
+document.getElementById('grams').addEventListener('input', updateProjection);
+document.getElementById('food').addEventListener('change', updateProjection);
 
 // Per-row delete + in-place gram edit (event delegation).
 document.getElementById('ledgerBody').onclick = (ev)=>{
@@ -2284,7 +2454,8 @@ function load(){ ledger=[]; try{ const r=localStorage.getItem('ledger_'+VIEW_DAT
 function viewDay(ds){
   if (!/^\d{4}-\d{2}-\d{2}$/.test(ds) || ds === VIEW_DATE) return;
   VIEW_DATE = ds;
-  load(); updateDayLabel(); render();
+  load(); updateDayLabel();
+  showTab('today');   // editing always happens on the Today view (also renders)
 }
 
 // Close the running day and open the next one. The new day is whichever is later:
@@ -2620,6 +2791,7 @@ document.getElementById('closeDayBtn').onclick = closeDay;
 document.getElementById('backToTodayBtn').onclick = ()=> viewDay(ACTIVE_DATE);
 updateDayLabel();
 loadTargets(); fillTargetInputs(); loadKeys(); initFoods(); load(); render(); renderTemplates(); requestPersistence();
+showTab('today');   // a logging app always opens on Today (also renders)
 if (syncConfigured()) syncNow(); else setSyncDot('off');   // boot pull+push (no-op when unconfigured)
 </script>
 </body>

@@ -165,6 +165,22 @@
       .sort((a, b) => b.s - a.s || a.i - b.i)      // best score first; USDA relevance breaks ties
       .map(x => x.f);
   }
+  // Given ranked candidates and a trusted AI per-100g calorie prior, decide the DEFAULT
+  // pick. USDA sometimes returns the wrong food entirely — a generic "water" at 40 kcal,
+  // a cousin ingredient — and ranking alone can still float it to the top. When the best
+  // match's energy density is implausibly far from the prior, prefer the highest-ranked
+  // candidate that DOES land near it; if none do, trust the AI estimate over a clearly
+  // wrong match. Returns 'u<index>' for candidates[index], or 'est' for the AI estimate.
+  const SEL_LN_TOL = Math.log(1.8);   // >1.8x or <0.55x off the prior = wrong food, not mere imprecision
+  function defaultSelection(ranked, estKcal) {
+    if (!ranked || !ranked.length) return 'est';
+    if (!(estKcal > 0)) return 'u0';                    // no prior to judge against — keep top match
+    const within = f => { const k = f.base && f.base.kcal; return k > 0 && Math.abs(Math.log(k / estKcal)) <= SEL_LN_TOL; };
+    if (within(ranked[0])) return 'u0';                 // best match already plausible
+    const i = ranked.findIndex(within);                 // else the best candidate that is plausible
+    if (i >= 0) return 'u' + i;
+    return 'est';                                       // nothing plausible — estimate beats a wrong match
+  }
 
   // ---- Protein fix: cheapest way to close a protein gap ----------------------
   // foods = [[name, {kcal,p}], ...] per-100g. Returns single-food options that
@@ -299,7 +315,7 @@
 
   return {
     nutrientsFrom, resolvePTarget, capGrams, computeEntry,
-    solveFridge, budgetCombos, scoreFood, rankFoods, proteinFix, weightTrend,
+    solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
     mergeSyncStates, ternary
   };
 });

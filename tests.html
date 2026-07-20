@@ -152,6 +152,25 @@ group('rankFoods — junk demotion, token boost, kcal plausibility');
   check('no prior → USDA order kept on score tie', r5[0].name==='Oil, plantain', `got ${r5[0].name}`);
 })();
 
+// ---- defaultSelection: pick a plausible candidate, else fall back to the AI estimate ----
+group('defaultSelection — reject a wrong top match, prefer the estimate');
+(function(){
+  const mk = (name,kcal)=>({name, base:{kcal, p:0, f:0, c:0}});
+  // No candidates → the AI estimate is all we have.
+  check('empty candidates → est', C.defaultSelection([], 250)==='est', 'expected est');
+  // No prior → keep the top-ranked match (legacy behaviour).
+  check('no prior → u0', C.defaultSelection([mk('Water',40)], 0)==='u0', 'expected u0');
+  // Top match is plausible vs the prior → take it.
+  check('plausible top → u0', C.defaultSelection([mk('Chapati',297), mk('Wheat flour',364)], 300)==='u0', 'expected u0');
+  // Top match wildly off (chapati est ~300, top is a 40 kcal "water"), but a later
+  // candidate lands near the prior → pick that candidate, not the wrong top one.
+  check('wrong top, plausible later → that index',
+    C.defaultSelection([mk('Water, bottled',40), mk('Chapati or roti',290)], 300)==='u1', 'expected u1');
+  // Nothing lands near the prior → trust the AI estimate over a clearly-wrong match.
+  check('no plausible candidate → est',
+    C.defaultSelection([mk('Water',40), mk('Broth',12)], 300)==='est', 'expected est');
+})();
+
 // ---- proteinFix: close a protein gap within a kcal budget ----
 group('proteinFix — cheapest protein sources that fit');
 (function(){
