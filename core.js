@@ -27,7 +27,8 @@
     let kcal = g('957') || g('958') || g('208') || (g('268') ? g('268') / 4.184 : 0);
     const est = 4 * c + 4 * p + 9 * f;
     if (est > 0 && kcal < est * 0.5) kcal = est;
-    return { kcal, p, f, c, ca: g('301'), ph: g('305') };
+    // Micronutrients (per 100g): 291 fiber(g), 269 total sugars(g), 307 sodium(mg).
+    return { kcal, p, f, c, ca: g('301'), ph: g('305'), fib: g('291'), sug: g('269'), na: g('307') };
   }
 
   // ---- Target resolution ---------------------------------------------------
@@ -49,7 +50,8 @@
     const e = {
       name, grams, weighed, isCurry, halfOil, base, source: source || 'DB',
       kcal: base.kcal * s, p: base.p * s, f: base.f * s,
-      c: (base.c || 0) * s, ca: (base.ca || 0) * s, ph: (base.ph || 0) * s, flags: []
+      c: (base.c || 0) * s, ca: (base.ca || 0) * s, ph: (base.ph || 0) * s,
+      fib: (base.fib || 0) * s, sug: (base.sug || 0) * s, na: (base.na || 0) * s, flags: []
     };
     if (!weighed) {
       e.kcal *= pen.inflate; e.p *= pen.deduct;
@@ -180,6 +182,45 @@
     const i = ranked.findIndex(within);                 // else the best candidate that is plausible
     if (i >= 0) return 'u' + i;
     return 'est';                                       // nothing plausible — estimate beats a wrong match
+  }
+
+  // ---- Body-fat change estimate ----------------------------------------------
+  // Energy-balance rule of thumb: ~7700 kcal ≈ 1 kg of body fat. Maintenance isn't a
+  // single number (activity and metabolism vary), so the caller passes a band and the
+  // result is a band too: the LOW maintenance bound produces the largest surplus (most
+  // fat gained), the HIGH bound the least. intakes = per-day kcal for days actually
+  // logged (untracked days are the caller's job to exclude). Positive kg = gained.
+  const KCAL_PER_KG_FAT = 7700;
+  function fatEstimate(intakes, maintLow, maintHigh) {
+    const n = intakes.length;
+    const sum = intakes.reduce((a, b) => a + (+b || 0), 0);
+    const lo = Math.min(maintLow, maintHigh), hi = Math.max(maintLow, maintHigh);
+    const kcalHigh = sum - lo * n;               // lower maintenance ⇒ bigger surplus
+    const kcalLow = sum - hi * n;
+    return { n, sum, kcalLow, kcalHigh, kgLow: kcalLow / KCAL_PER_KG_FAT, kgHigh: kcalHigh / KCAL_PER_KG_FAT };
+  }
+
+  // ---- TDEE: resting burn (Mifflin-St Jeor) + adaptive calibration -----------
+  // Mifflin-St Jeor BMR (kcal/day), the modern standard. sex 'female' uses the −161
+  // constant, anything else the male +5. Multiply by an activity factor for TDEE.
+  function bmrMifflin(sex, kg, cm, age) {
+    if (!(kg > 0) || !(cm > 0) || !(age > 0)) return 0;
+    const s = sex === 'female' ? -161 : 5;
+    return 10 * kg + 6.25 * cm - 5 * age + s;
+  }
+  // Blend the formula TDEE with what the logs actually reveal. Energy balance says a
+  // steady weight change at a known average intake pins maintenance directly:
+  //   dataTDEE = avgIntake − (weightChange in kcal). ratePerWeek(kg) × 7700 / 7 = kcal/day.
+  // Confidence w ramps 0→1 as the sample grows from 7 to 28 days, so the number leans on
+  // the formula early and on measured reality as the history accumulates — recalibrating
+  // every day. Needs a real weight trend and some logged intake, else it's formula-only.
+  function calibrateTDEE(formula, avgIntake, ratePerWeek, sampleDays) {
+    const hasData = avgIntake > 0 && sampleDays >= 7 && ratePerWeek != null;
+    const dataTDEE = hasData ? avgIntake - (ratePerWeek / 7) * KCAL_PER_KG_FAT : null;
+    const w = hasData ? Math.max(0, Math.min(1, (sampleDays - 7) / 21)) : 0;
+    const formulaN = formula > 0 ? formula : (dataTDEE || 0);
+    const blended = dataTDEE != null ? Math.round(w * dataTDEE + (1 - w) * formulaN) : Math.round(formulaN);
+    return { formula: Math.round(formulaN), dataTDEE: dataTDEE != null ? Math.round(dataTDEE) : null, blended, w };
   }
 
   // ---- Protein fix: cheapest way to close a protein gap ----------------------
@@ -316,6 +357,6 @@
   return {
     nutrientsFrom, resolvePTarget, capGrams, computeEntry,
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
-    mergeSyncStates, ternary
+    fatEstimate, bmrMifflin, calibrateTDEE, KCAL_PER_KG_FAT, mergeSyncStates, ternary
   };
 });

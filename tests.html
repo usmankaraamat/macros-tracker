@@ -63,6 +63,15 @@ group('nutrientsFrom — energy field selection');
   ]};
   const n3 = C.nutrientsFrom(food3);
   check('uses plausible #208 when no Atwater present', approx(n3.kcal, 165), `got ${n3.kcal}`);
+
+  // Micronutrients: 291 fiber(g), 269 sugars(g), 307 sodium(mg).
+  const food4 = { foodNutrients:[
+    {nutrientNumber:'208', value:165}, {nutrientNumber:'203', value:31},
+    {nutrientNumber:'291', value:2.5}, {nutrientNumber:'269', value:1.2}, {nutrientNumber:'307', value:400}
+  ]};
+  const n4 = C.nutrientsFrom(food4);
+  check('extracts fiber/sugar/sodium', n4.fib===2.5 && n4.sug===1.2 && n4.na===400, `got fib${n4.fib} sug${n4.sug} na${n4.na}`);
+  check('missing micros default to 0', C.nutrientsFrom({foodNutrients:[{nutrientNumber:'208',value:100}]}).fib===0, '');
 })();
 
 // ---- target resolution ----
@@ -92,6 +101,13 @@ const chk = {kcal:165, p:31, f:3.6, c:0};
 
   const half = C.computeEntry('Curry', 150, false, true, true, chk, 'DB', PEN);
   check('half oil tax adds 66 kcal', approx(half.kcal, 272.25 + 66), `got ${half.kcal.toFixed(2)}`);
+
+  // Micronutrients scale with grams like the macros; a legacy base without them → 0, never NaN.
+  const micBase = {kcal:100, p:5, f:2, c:10, fib:2, sug:5, na:400};
+  const mic = C.computeEntry('x', 150, true, false, false, micBase, 'DB', PEN);
+  check('micros scale at 150g: fib 3, sug 7.5, na 600', approx(mic.fib,3)&&approx(mic.sug,7.5)&&approx(mic.na,600), `got fib${mic.fib} sug${mic.sug} na${mic.na}`);
+  const legacy = C.computeEntry('x', 150, true, false, false, {kcal:100,p:5,f:2,c:10}, 'DB', PEN);
+  check('legacy base without micros → 0 (no NaN)', legacy.fib===0 && legacy.sug===0 && legacy.na===0, '');
 })();
 
 // ---- solveFridge ----
@@ -169,6 +185,41 @@ group('defaultSelection — reject a wrong top match, prefer the estimate');
   // Nothing lands near the prior → trust the AI estimate over a clearly-wrong match.
   check('no plausible candidate → est',
     C.defaultSelection([mk('Water',40), mk('Broth',12)], 300)==='est', 'expected est');
+})();
+
+// ---- fatEstimate: energy-balance body-fat change over a maintenance band ----
+group('fatEstimate — 7700 kcal ≈ 1 kg, maintenance as a band');
+(function(){
+  const e = C.fatEstimate([3000,3000], 2200, 2400);
+  check('n and sum', e.n===2 && e.sum===6000, `got n${e.n} sum${e.sum}`);
+  check('low maintenance bound gives the larger surplus', e.kcalHigh===1600 && e.kcalLow===1200, `got ${e.kcalLow}..${e.kcalHigh}`);
+  check('kg span = kcal / 7700', Math.abs(e.kgHigh-1600/7700)<1e-9 && Math.abs(e.kgLow-1200/7700)<1e-9, `got ${e.kgLow}..${e.kgHigh}`);
+  // Deficit → negative (fat lost); bounds passed unordered must still resolve.
+  const d = C.fatEstimate([1800,2000,1900], 2400, 2200);
+  check('deficit yields negative kcal (fat lost)', d.kcalHigh===-900 && d.kcalLow===-1500, `got ${d.kcalLow}..${d.kcalHigh}`);
+  const z = C.fatEstimate([], 2200, 2400);
+  check('empty run → zeros', z.n===0 && z.sum===0 && z.kcalLow===0 && z.kcalHigh===0, `got n${z.n}`);
+})();
+
+// ---- bmrMifflin + calibrateTDEE: resting burn and adaptive maintenance ----
+group('TDEE — Mifflin-St Jeor BMR and data calibration');
+(function(){
+  check('male 80kg/180cm/30y = 1780', C.bmrMifflin('male',80,180,30)===1780, `got ${C.bmrMifflin('male',80,180,30)}`);
+  check('female 60kg/165cm/30y = 1320.25', approx(C.bmrMifflin('female',60,165,30),1320.25), `got ${C.bmrMifflin('female',60,165,30)}`);
+  check('missing weight → 0', C.bmrMifflin('male',0,180,30)===0, '');
+  check('moderate TDEE = BMR×1.55 = 2759', approx(C.bmrMifflin('male',80,180,30)*1.55,2759), '');
+  // No usable weight trend → formula only.
+  const c0 = C.calibrateTDEE(2400, 0, null, 0);
+  check('no data → blended = formula 2400, dataTDEE null, w 0', c0.blended===2400 && c0.dataTDEE===null && c0.w===0, JSON.stringify(c0));
+  // Losing 0.2 kg/wk at 2300 kcal ⇒ maintenance 2520; 28 days → fully calibrated.
+  const c1 = C.calibrateTDEE(2400, 2300, -0.2, 28);
+  check('full calibration (28d): dataTDEE 2520, w 1, blended 2520', c1.dataTDEE===2520 && c1.w===1 && c1.blended===2520, JSON.stringify(c1));
+  // Gaining 0.1 kg/wk at 2500 ⇒ 2390; 17 days → half-weighted blend 2395.
+  const c2 = C.calibrateTDEE(2400, 2500, 0.1, 17);
+  check('half calibration (17d): dataTDEE 2390, blended 2395', c2.dataTDEE===2390 && approx(c2.w,10/21) && c2.blended===2395, JSON.stringify(c2));
+  // Under 7 days of trend → formula only, no data lean yet.
+  const c3 = C.calibrateTDEE(2400, 2300, -0.2, 5);
+  check('below 7-day threshold → formula only', c3.blended===2400 && c3.dataTDEE===null, JSON.stringify(c3));
 })();
 
 // ---- proteinFix: close a protein gap within a kcal budget ----

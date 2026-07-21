@@ -520,6 +520,7 @@
       <div class="k">Protein · <span id="pTitle">120</span>g floor</div>
       <div class="v"><span id="pNow">0</span><small>g · <span id="pRem">120</span> left</small></div>
       <div class="bar"><div id="pBar" style="width:0%;background:var(--ok)"></div></div>
+      <div id="pPerKg" style="font-size:11px;color:var(--ink-dim);margin-top:8px;font-family:var(--mono)"></div>
     </div>
     <div class="stat">
       <div class="k">Carbs<span id="cCapLbl"></span></div>
@@ -534,6 +535,8 @@
   </div>
   <!-- Donut Chart -->
   <div id="donutWrap" style="margin-top:16px;border-top:1px solid rgba(255,255,255,0.06);padding-top:16px"></div>
+  <!-- Micronutrients (fiber / sugar / sodium) — from USDA data, foods logged going forward -->
+  <div id="microLine" style="display:none;margin-top:14px;border-top:1px solid rgba(255,255,255,0.06);padding-top:12px"></div>
 </div>
 
 <!-- OMNI ADD-FOOD -->
@@ -666,6 +669,43 @@
   </div>
   <div id="wChart" style="margin-top:10px"></div>
   <div class="tactical" id="wStats" style="display:none;margin-top:8px"></div>
+
+  <!-- Body profile → adaptive TDEE (Mifflin-St Jeor, calibrated by weight + intake) -->
+  <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">
+    <div class="panel-title">Adaptive TDEE · learns your maintenance from weight + intake</div>
+    <div class="targets-grid">
+      <div><label>Sex</label><select id="pfSex"><option value="male">male</option><option value="female">female</option></select></div>
+      <div><label>Age (years)</label><input type="number" id="pfAge" min="0" step="1" placeholder="e.g. 28"></div>
+      <div><label>Height (cm)</label><input type="number" id="pfHeight" min="0" step="1" placeholder="e.g. 178"></div>
+      <div><label>Activity</label><select id="pfActivity">
+        <option value="sedentary">sedentary</option>
+        <option value="light">light</option>
+        <option value="moderate">moderate</option>
+        <option value="active">active</option>
+        <option value="athlete">athlete</option>
+      </select></div>
+    </div>
+    <div class="tactical" id="tdeeReadout" style="margin-top:4px">Enter age &amp; height and log a weight to estimate maintenance.</div>
+  </div>
+
+  <!-- Daily log: weight + calories + macros, newest first -->
+  <details style="margin-top:14px">
+    <summary class="panel-title" style="cursor:pointer;margin-bottom:0">Daily log · weight, calories &amp; macros ▸</summary>
+    <div id="weightLog" style="margin-top:10px"></div>
+    <button class="sm ghost" id="csvBtn" style="margin-top:10px">Export CSV</button>
+  </details>
+
+  <!-- Fat-change estimate from energy balance -->
+  <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">
+    <div class="panel-title">Fat change estimate · 7700 kcal ≈ 1 kg</div>
+    <div class="targets-grid">
+      <div><label>Maintenance — low</label><input type="number" id="maintLow" min="0" step="10" placeholder="blank = adaptive TDEE"></div>
+      <div><label>Maintenance — high</label><input type="number" id="maintHigh" min="0" step="10" placeholder="blank = adaptive TDEE"></div>
+      <div><label>From</label><input type="date" id="fatStart"></div>
+      <div><label>To</label><input type="date" id="fatEnd"></div>
+    </div>
+    <div class="tactical" id="fatEstimate" style="margin-top:4px">Fill in your profile above (or a maintenance range) to estimate fat gained or lost.</div>
+  </div>
 </div>
 
 <div class="panel intel-section">
@@ -732,6 +772,12 @@ function computePTarget(){ P_TARGET = LedgerCore.resolvePTarget(P_CFG, FLOOR); }
 let C_CAP = {mode:'g', val:0}, F_CAP = {mode:'g', val:0};
 function capGrams(cap, kcalPerG){ return LedgerCore.capGrams(cap, kcalPerG, FLOOR); }
 let OIL_KCAL = PROTOCOL.oilK, OIL_FAT = PROTOCOL.oilF;   // 1 tbsp hidden oil
+// Maintenance calorie band (kcal/day) for the fat-change estimate. 0 = unset. Rides
+// with the targets bundle so it persists and syncs across devices like the other goals.
+let MAINT = {min:0, max:0};
+// Body profile for the Mifflin-St Jeor BMR → TDEE. Also synced via the targets bundle.
+let PROFILE = {sex:'male', age:0, height:0, activity:'moderate'};
+const ACTIVITY_MULT = {sedentary:1.2, light:1.375, moderate:1.55, active:1.725, athlete:1.9};
 let INFLATE = 1 + PROTOCOL.penK/100, DEDUCT = 1 - PROTOCOL.penP/100;  // unweighed adjustments
 
 function loadTargets(){
@@ -743,14 +789,17 @@ function loadTargets(){
             if (t.cCap) C_CAP={mode:t.cCap.mode==='pct'?'pct':'g', val:+t.cCap.val||0};
             else if (+t.cMax) C_CAP={mode:'g', val:+t.cMax};        // legacy grams-only
             if (t.fCap) F_CAP={mode:t.fCap.mode==='pct'?'pct':'g', val:+t.fCap.val||0};
-            else if (+t.fMax) F_CAP={mode:'g', val:+t.fMax}; }
+            else if (+t.fMax) F_CAP={mode:'g', val:+t.fMax};
+            if (t.maint) MAINT={min:+t.maint.min||0, max:+t.maint.max||0};
+            if (t.profile) PROFILE={sex:t.profile.sex==='female'?'female':'male', age:+t.profile.age||0,
+                                    height:+t.profile.height||0, activity:ACTIVITY_MULT[t.profile.activity]?t.profile.activity:'moderate'}; }
     const pn = JSON.parse(localStorage.getItem('ledger_pen')||'null');
     if (pn){ INFLATE = 1 + (+pn.k||0)/100; DEDUCT = 1 - (+pn.p||0)/100;
              OIL_KCAL = +pn.oilK>=0 ? +pn.oilK : OIL_KCAL; OIL_FAT = +pn.oilF>=0 ? +pn.oilF : OIL_FAT; }
   } catch(e){}
 }
 function saveTargets(){
-  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR,ceil:CEIL,pCfg:P_CFG,cCap:C_CAP,fCap:F_CAP})); } catch(e){}
+  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR,ceil:CEIL,pCfg:P_CFG,cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE})); } catch(e){}
   stampTargets(); scheduleSync();              // a genuine local edit — wins LWW until someone edits later
 }
 function savePens(){
@@ -830,8 +879,9 @@ function escapeHtml(s){
 }
 function totalsOf(l) {
   return l.reduce((t,e)=>({
-    kcal:t.kcal+e.kcal, p:t.p+e.p, f:t.f+e.f, c:t.c+(e.c||0), ca:t.ca+e.ca, ph:t.ph+e.ph
-  }), {kcal:0,p:0,f:0,c:0,ca:0,ph:0});
+    kcal:t.kcal+e.kcal, p:t.p+e.p, f:t.f+e.f, c:t.c+(e.c||0), ca:t.ca+e.ca, ph:t.ph+e.ph,
+    fib:t.fib+(e.fib||0), sug:t.sug+(e.sug||0), na:t.na+(e.na||0)
+  }), {kcal:0,p:0,f:0,c:0,ca:0,ph:0,fib:0,sug:0,na:0});
 }
 function totals(){ return totalsOf(ledger); }
 
@@ -924,6 +974,19 @@ function render() {
   capBar('cBarWrap','cBar','cCapLbl', t.c, C_CAP, 4);
   capBar('fBarWrap','fBar','fCapLbl', t.f, F_CAP, 9);
 
+  // Protein per kg bodyweight — the number that actually matters on a cut.
+  const bw = latestWeight();
+  document.getElementById('pPerKg').textContent = bw>0 ? `${(t.p/bw).toFixed(2)} g/kg · ${bw}kg` : '';
+  // Micronutrients for the day. Partial by nature — only foods carrying USDA micro data
+  // (i.e. logged after this feature shipped) contribute; shown only once something does.
+  const micro = document.getElementById('microLine');
+  if (t.fib>0 || t.sug>0 || t.na>0){
+    micro.style.display='block';
+    micro.innerHTML = `<div class="panel-title" style="margin-bottom:6px">Micros today · from USDA data</div>`
+      + `<div style="display:flex;gap:18px;font-family:var(--mono);font-size:13px;color:var(--ink)">`
+      + `<span>Fiber <b>${t.fib.toFixed(0)}</b>g</span><span>Sugar <b>${t.sug.toFixed(0)}</b>g</span><span>Sodium <b>${Math.round(t.na)}</b>mg</span></div>`;
+  } else micro.style.display='none';
+
   // ledger table
   const body = document.getElementById('ledgerBody');
   if (!ledger.length) { body.innerHTML=`<tr><td colspan="5" style="padding:0">${emptyLedgerCell()}</td></tr>`; wireEmptyLedgerChips(); }
@@ -966,6 +1029,9 @@ function render() {
   renderWeeklyReport();
   renderTopFoods();
   renderWeight();
+  renderWeightLog();
+  renderTDEE();
+  renderFatEstimate();
   renderTernary();
 }
 
@@ -1166,9 +1232,42 @@ document.getElementById('wSaveBtn').onclick = ()=>{
   if (!v || v <= 0){ document.getElementById('wIn').focus(); return; }
   const map = weightsMap(), meta = weightsMeta();
   map[VIEW_DATE] = v; meta[VIEW_DATE] = new Date().toISOString();
-  saveWeights(map, meta); scheduleSync(); renderWeight();
+  saveWeights(map, meta); scheduleSync(); renderWeight(); renderWeightLog(); renderTDEE(); renderFatEstimate();
 };
 document.getElementById('wIn').addEventListener('keydown', e=>{ if (e.key==='Enter') document.getElementById('wSaveBtn').click(); });
+// Maintenance band rides with the targets bundle (persists + syncs); dates are ephemeral.
+['maintLow','maintHigh'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', ()=>{
+    MAINT = { min:+document.getElementById('maintLow').value||0, max:+document.getElementById('maintHigh').value||0 };
+    saveTargets(); renderFatEstimate();
+  });
+});
+['fatStart','fatEnd'].forEach(id=> document.getElementById(id).addEventListener('change', renderFatEstimate));
+// Body profile → TDEE, also synced via the targets bundle.
+['pfSex','pfAge','pfHeight','pfActivity'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', ()=>{
+    PROFILE = { sex:document.getElementById('pfSex').value==='female'?'female':'male',
+                age:+document.getElementById('pfAge').value||0,
+                height:+document.getElementById('pfHeight').value||0,
+                activity:document.getElementById('pfActivity').value };
+    saveTargets(); renderTDEE(); renderFatEstimate();
+  });
+});
+// CSV export of the full daily log — date, weight, calories, macros, micros.
+document.getElementById('csvBtn').onclick = ()=>{
+  const map=weightsMap(), tot={};
+  allDays(true).forEach(d=>{ tot[d.date]=totalsOf(d.ledger); });
+  const dates=Array.from(new Set(Object.keys(map).concat(Object.keys(tot))))
+    .filter(d=>(+map[d]>0)||(tot[d]&&tot[d].kcal>0)).sort();
+  if (!dates.length){ alert('Nothing to export yet.'); return; }
+  const rows=[['date','weight_kg','kcal','protein_g','carbs_g','fat_g','fiber_g','sugar_g','sodium_mg']];
+  dates.forEach(d=>{ const t=tot[d]||{}; rows.push([ d,
+    +map[d]>0?(+map[d]).toFixed(1):'', t.kcal?Math.round(t.kcal):'', t.p?t.p.toFixed(1):'',
+    t.c?t.c.toFixed(1):'', t.f?t.f.toFixed(1):'', t.fib?t.fib.toFixed(1):'', t.sug?t.sug.toFixed(1):'', t.na?Math.round(t.na):'' ]); });
+  const csv=rows.map(r=>r.join(',')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=`ledger_log_${ACTIVE_DATE}.csv`; a.click(); URL.revokeObjectURL(url);
+};
 function renderWeight(){
   document.getElementById('wDate').textContent = VIEW_DATE===ACTIVE_DATE ? 'today' : VIEW_DATE;
   const map = weightsMap();
@@ -1212,6 +1311,137 @@ function renderWeight(){
   const dir = Math.abs(rate)<0.05 ? 'holding steady' : (rate<0 ? `losing ${Math.abs(rate).toFixed(2)} kg/wk` : `gaining ${rate.toFixed(2)} kg/wk`);
   stats.innerHTML = `<b>${dir}</b> (last ${recent.length>=2?recent.length:entries.length} weigh-ins)`
     + (avgK ? ` · corridor avg ${Math.round(avgK)} kcal over last ${days7.length} logged day${days7.length>1?'s':''}` : '');
+}
+
+// DD/MM/YYYY for the log table (matches how the user reads dates locally).
+function fmtDMY(iso){ const p = iso.split('-'); return `${p[2]}/${p[1]}/${p[0]}`; }
+function addDaysISO(iso, n){ const dt = new Date(iso+'T00:00:00Z'); dt.setUTCDate(dt.getUTCDate()+n); return dt.toISOString().slice(0,10); }
+
+// Collapsible daily log: every date with a weigh-in or logged food, newest first,
+// showing weight and the day's calories with macros in parentheses.
+function renderWeightLog(){
+  const wrap = document.getElementById('weightLog'); if (!wrap) return;
+  const map = weightsMap(), tot = {};
+  allDays(true).forEach(d => { tot[d.date] = totalsOf(d.ledger); });
+  const dates = Array.from(new Set(Object.keys(map).concat(Object.keys(tot))))
+    .filter(d => (+map[d] > 0) || (tot[d] && tot[d].kcal > 0))
+    .sort().reverse();
+  if (!dates.length){ wrap.innerHTML = '<div class="empty">No weight or calories logged yet.</div>'; return; }
+  const rows = dates.map(d => {
+    const kg = +map[d] > 0 ? (+map[d]).toFixed(1) : '—';
+    const t = tot[d];
+    const cal = t && t.kcal > 0
+      ? `${Math.round(t.kcal)} <small style="color:var(--ink-faint)">(${Math.round(t.p)}P, ${Math.round(t.c)}C, ${Math.round(t.f)}F)</small>`
+      : '—';
+    return `<tr><td>${fmtDMY(d)}</td><td>${kg}</td><td>${cal}</td></tr>`;
+  }).join('');
+  wrap.innerHTML = `<table><thead><tr><th>Date</th><th>Weight</th><th>Calories (macros)</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// Fat gained/lost across a date range: sum each logged day's (intake − maintenance)
+// and convert at 7700 kcal ≈ 1 kg. Maintenance is a band → the answer is a band.
+function renderFatEstimate(){
+  const lowEl=document.getElementById('maintLow'), highEl=document.getElementById('maintHigh');
+  const startEl=document.getElementById('fatStart'), endEl=document.getElementById('fatEnd');
+  const out=document.getElementById('fatEstimate');
+  if (!out) return;
+  // Hydrate from state / defaults without disturbing a field being edited.
+  if (document.activeElement !== lowEl)  lowEl.value  = MAINT.min > 0 ? MAINT.min : '';
+  if (document.activeElement !== highEl) highEl.value = MAINT.max > 0 ? MAINT.max : '';
+  if (!endEl.value)   endEl.value   = ACTIVE_DATE;
+  if (!startEl.value) startEl.value = addDaysISO(endEl.value || ACTIVE_DATE, -6);   // default: last 7 days
+
+  const lo=+lowEl.value||0, hi=+highEl.value||0;
+  // Manual band if entered; otherwise fall back to the adaptive TDEE ± a confidence margin.
+  let maintLow, maintHigh, maintTxt;
+  if (lo || hi){
+    maintLow=Math.min(lo||hi, hi||lo); maintHigh=Math.max(lo||hi, hi||lo);
+    maintTxt = maintLow===maintHigh ? `${maintLow}` : `${maintLow}–${maintHigh}`;
+  } else {
+    const td=computeTDEE();
+    if (!(td.blended>0)){ out.className='tactical'; out.innerHTML='Fill in your <b>profile</b> above (or a maintenance range) to estimate fat change.'; return; }
+    const m=Math.round(150 - 75*td.w);            // ±150 early, tightening to ±75 fully calibrated
+    maintLow=td.blended-m; maintHigh=td.blended+m;
+    maintTxt = `adaptive TDEE ${td.blended.toLocaleString()} ±${m}`;
+  }
+  let start=startEl.value, end=endEl.value;
+  if (start>end){ const t=start; start=end; end=t; }        // tolerate a reversed range
+
+  const tot={}; allDays(true).forEach(d => { tot[d.date]=totalsOf(d.ledger); });
+  const intakes=[];
+  Object.keys(tot).forEach(d => { if (d>=start && d<=end && tot[d].kcal>0) intakes.push(tot[d].kcal); });
+  if (!intakes.length){ out.className='tactical'; out.textContent=`No logged days between ${fmtDMY(start)} and ${fmtDMY(end)}.`; return; }
+
+  const e=LedgerCore.fatEstimate(intakes, maintLow, maintHigh);
+  const span=Math.round((Date.parse(end)-Date.parse(start))/86400000)+1;
+  const fmtKg=v=>Math.abs(v).toFixed(2);
+  const aLo=Math.min(Math.abs(e.kgLow),Math.abs(e.kgHigh)), aHi=Math.max(Math.abs(e.kgLow),Math.abs(e.kgHigh));
+  const rangeKg = (aHi-aLo<0.01) ? `${fmtKg(aHi)} kg` : `${fmtKg(aLo)}–${fmtKg(aHi)} kg`;
+  let verdict, cls;
+  if (e.kcalLow>0){ verdict=`≈ +${rangeKg} fat gained`; cls='tactical bad'; }
+  else if (e.kcalHigh<0){ verdict=`≈ ${rangeKg} fat lost`; cls='tactical good'; }
+  else { verdict=`roughly maintenance (±${fmtKg(aHi)} kg)`; cls='tactical'; }
+  const netLo=Math.round(Math.min(e.kcalLow,e.kcalHigh)), netHi=Math.round(Math.max(e.kcalLow,e.kcalHigh));
+
+  // Scale check: does the actual weight change across the window agree with the calorie math?
+  const map=weightsMap();
+  const wIn=Object.keys(map).filter(d=>+map[d]>0 && d>=start && d<=end).sort();
+  let eva='';
+  if (wIn.length>=2){
+    const actual = +map[wIn[wIn.length-1]] - +map[wIn[0]];
+    const expected = (e.sum - ((maintLow+maintHigh)/2)*e.n)/7700;
+    const agree = Math.abs(actual-expected) < 0.4;
+    eva = `<span style="display:block;margin-top:5px;color:var(--ink-dim);border-left:2px solid var(--line);padding-left:8px">`
+      + `Scale check: expected ${expected>=0?'+':''}${expected.toFixed(2)} kg, actual ${actual>=0?'+':''}${actual.toFixed(2)} kg`
+      + ` — ${agree?'model is tracking your weight':'diverging — logging gaps or maintenance is off'}.</span>`;
+  }
+  out.className=cls;
+  out.innerHTML = `<b>${verdict}</b> over ${e.n} logged day${e.n>1?'s':''}${e.n<span?` of ${span}`:''}`
+    + ` · net ${netLo>0?'+':''}${netLo.toLocaleString()} to ${netHi>0?'+':''}${netHi.toLocaleString()} kcal vs maintenance ${maintTxt}.` + eva;
+}
+
+// Latest logged bodyweight (kg), or 0 if none — used by TDEE and protein-per-kg.
+function latestWeight(){
+  const map=weightsMap();
+  const ds=Object.keys(map).filter(d=>+map[d]>0).sort();
+  return ds.length ? +map[ds[ds.length-1]] : 0;
+}
+// Gather the inputs the pure TDEE math needs: formula BMR×activity from the profile +
+// latest weight, and a data-derived maintenance from the trailing 28 days of weigh-ins
+// and logged intake. calibrateTDEE() blends them by how much history exists.
+function computeTDEE(){
+  const kg=latestWeight();
+  const formula = kg>0 ? LedgerCore.bmrMifflin(PROFILE.sex, kg, +PROFILE.height, +PROFILE.age) * (ACTIVITY_MULT[PROFILE.activity]||1.55) : 0;
+  const end=ACTIVE_DATE, start=addDaysISO(end, -27);
+  const map=weightsMap();
+  const winW=Object.keys(map).filter(d=>+map[d]>0 && d>=start && d<=end).sort().map(d=>({date:d, kg:+map[d]}));
+  const tr = winW.length>=2 ? LedgerCore.weightTrend(winW) : null;
+  const sampleDays = winW.length>=2 ? Math.round((Date.parse(winW[winW.length-1].date)-Date.parse(winW[0].date))/86400000)+1 : 0;
+  const tot={}; allDays(true).forEach(d=>{ tot[d.date]=totalsOf(d.ledger); });
+  const intakes=Object.keys(tot).filter(d=>d>=start && d<=end && tot[d].kcal>0).map(d=>tot[d].kcal);
+  const avgIntake = intakes.length ? intakes.reduce((a,b)=>a+b,0)/intakes.length : 0;
+  const cal = LedgerCore.calibrateTDEE(formula, avgIntake, tr?tr.ratePerWeek:null, sampleDays);
+  return Object.assign(cal, {kg, avgIntake:Math.round(avgIntake), sampleDays});
+}
+function renderTDEE(){
+  const sexEl=document.getElementById('pfSex'), ageEl=document.getElementById('pfAge'),
+        hEl=document.getElementById('pfHeight'), actEl=document.getElementById('pfActivity'),
+        out=document.getElementById('tdeeReadout');
+  if (!out) return;
+  if (document.activeElement!==sexEl) sexEl.value=PROFILE.sex;
+  if (document.activeElement!==ageEl) ageEl.value=PROFILE.age>0?PROFILE.age:'';
+  if (document.activeElement!==hEl)   hEl.value=PROFILE.height>0?PROFILE.height:'';
+  if (document.activeElement!==actEl) actEl.value=PROFILE.activity;
+
+  const td=computeTDEE();
+  if (!td.kg){ out.className='tactical'; out.textContent='Log a weight (above) to compute your BMR and TDEE.'; return; }
+  if (!(+PROFILE.age>0) || !(+PROFILE.height>0)){ out.className='tactical'; out.textContent='Enter your age and height to estimate maintenance calories.'; return; }
+  const bits=[`formula ${td.formula.toLocaleString()}`];
+  bits.push(td.dataTDEE!=null
+    ? `measured ${td.dataTDEE.toLocaleString()} (${Math.round(td.w*100)}% weighted over ${td.sampleDays}d)`
+    : `measured pending — needs ~7+ days of weigh-ins`);
+  out.className='tactical good';
+  out.innerHTML = `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${bits.join(' · ')}.`;
 }
 
 // ---- INTELLIGENCE DASHBOARD ----
@@ -2413,7 +2643,7 @@ document.getElementById('exportBtn').onclick = async ()=>{
   allDays(true).forEach(d => { days[d.date] = d.ledger; });
   days[VIEW_DATE] = ledger;                       // the on-screen day's live state wins
   const payload = { exported: dateStr(), version: 2,
-    targets: {floor:FLOOR,ceil:CEIL,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP},
+    targets: {floor:FLOOR,ceil:CEIL,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE},
     pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
     weights: weightsMap(), templates: templates(),
     days, date: ACTIVE_DATE, ledger, totals: totals() };   // date/ledger kept for v1 compat
@@ -2652,7 +2882,7 @@ async function syncNow(){
     saveWeights(wm.days, wm.meta);
     load(); updateDayLabel(); render();        // reflect whatever the merge decided for the on-screen day
     const state = { v:1, days: merged.days, meta: merged.meta,
-      targets: {floor:FLOOR, ceil:CEIL, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP},
+      targets: {floor:FLOOR, ceil:CEIL, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP, maint:MAINT, profile:PROFILE},
       pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
       tUpdated: targetsStamp(),
       templates: templates(), tplUpdated: tplStamp(),
