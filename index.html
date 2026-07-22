@@ -1014,19 +1014,28 @@ function renderPace(t, pct){
   const paceKcal = center * frac;
   mark.style.left = pct(paceKcal) + '%'; mark.style.display = 'block';
 
+  // Protein steering, anchored to the FLOOR: the aim is to cover protein by the time you
+  // reach the floor, keeping floor→ceiling purely as catch-up buffer. A 20% cushion makes
+  // the nudge pre-emptive — it fires while you can still act, not once you're already stuck.
   const remP = Math.max(0, P_TARGET - t.p);
-  const roomToCeil = CEIL - t.kcal;
+  const roomToFloor = FLOOR - t.kcal;
+  const roomToCeil  = CEIL - t.kcal;
   const LEAN = 5;                                  // ~5 kcal per g protein from lean sources
-  const needKcal = remP * LEAN;
+  const needKcal = remP * LEAN;                    // lean kcal to close the protein gap
+  const needBuf  = needKcal * 1.2;                 // + 20% pre-emptive buffer
 
   const show = (cls, html)=>{ line.className='pace-line '+cls; line.innerHTML=html; line.style.display='block'; };
-  // Protein steering takes priority — it's the failure mode we're solving for.
-  if (remP > 0 && roomToCeil <= 0)
-    return show('bad', `⚠ Over ceiling with <b>${remP.toFixed(0)}g protein</b> still short — take the lean protein and accept the small overshoot.`);
-  if (remP > 0 && needKcal > roomToCeil)
-    return show('bad', `⚠ <b>${remP.toFixed(0)}g protein</b> left needs ~${Math.round(needKcal)} kcal of lean food but only <b>${Math.round(roomToCeil)}</b> to the ceiling — go lean now (chicken, egg whites, whey).`);
-  if (remP > 0 && needKcal > roomToCeil*0.7 && frac > 0.4)
-    return show('warn', `Protein's getting tight — ${remP.toFixed(0)}g left, ~${Math.round(roomToCeil)} kcal of room. Favour lean foods from here.`);
+  if (remP > 5){                                   // ignore a trivial (<5g) protein tail
+    if (roomToCeil <= 0)
+      return show('bad', `⚠ Over the ceiling with <b>${remP.toFixed(0)}g protein</b> still short — take the lean protein and accept the small overshoot.`);
+    if (needKcal > roomToCeil)                      // can't even fit it under the ceiling
+      return show('bad', `⚠ <b>${remP.toFixed(0)}g protein</b> left needs ~${Math.round(needKcal)} kcal of lean food but only <b>${Math.round(roomToCeil)}</b> to the ceiling — go lean now (chicken, egg whites, whey).`);
+    if (needBuf > roomToFloor){                     // won't comfortably land by the floor → steer early
+      return roomToFloor > 0
+        ? show('warn', `Cover protein by the floor: <b>${remP.toFixed(0)}g</b> left (~${Math.round(needKcal)} kcal lean) with only ~<b>${Math.round(roomToFloor)}</b> to the floor. Go lean now — the ceiling stays your buffer.`)
+        : show('warn', `Into the buffer with <b>${remP.toFixed(0)}g protein</b> left (~${Math.round(needKcal)} kcal) — keep it lean; ~<b>${Math.round(roomToCeil)}</b> to the ceiling.`);
+    }
+  }
 
   if (t.kcal < 1){ line.style.display='none'; return; }
   const delta = t.kcal - paceKcal;
