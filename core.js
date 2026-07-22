@@ -222,6 +222,15 @@
     const blended = dataTDEE != null ? Math.round(w * dataTDEE + (1 - w) * formulaN) : Math.round(formulaN);
     return { formula: Math.round(formulaN), dataTDEE: dataTDEE != null ? Math.round(dataTDEE) : null, blended, w };
   }
+  // Derive a calorie corridor from a maintenance (TDEE) number and a goal offset:
+  //   cut −500, maintain 0, lean bulk +300, etc. The band is the ± half-width around the
+  //   target centre. Rounded to the nearest 25 so the daily targets read cleanly and small
+  //   TDEE wobble doesn't reprint the numbers. floor/ceil are what the corridor shows.
+  function corridorFromTDEE(tdee, offset, band) {
+    const r = x => Math.round(x / 25) * 25;
+    const center = tdee + offset;
+    return { floor: r(center - band), ceil: r(center + band), center };
+  }
 
   // ---- Protein fix: cheapest way to close a protein gap ----------------------
   // foods = [[name, {kcal,p}], ...] per-100g. Returns single-food options that
@@ -357,6 +366,6 @@
   return {
     nutrientsFrom, resolvePTarget, capGrams, computeEntry,
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
-    fatEstimate, bmrMifflin, calibrateTDEE, KCAL_PER_KG_FAT, mergeSyncStates, ternary
+    fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, KCAL_PER_KG_FAT, mergeSyncStates, ternary
   };
 });

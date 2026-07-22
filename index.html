@@ -50,14 +50,20 @@
   .head-right { display: flex; gap: 12px; align-items: baseline; }
   .date { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); }
   .date.day-open { color: var(--warn); }   /* logical day still running from an earlier calendar date */
+  /* Banners use a dark translucent tint (not the saturated gradient) so the accent-coloured
+     text stays high-contrast and readable — same pattern as .tactical / .pace-line. */
   .past-banner { display: flex; justify-content: space-between; align-items: center; gap: 10px;
-    background: var(--warn-bg); border: 1px solid var(--warn); border-radius: 8px;
+    background: rgba(245,158,11,0.12); border: 1px solid var(--warn); border-radius: 8px;
     padding: 8px 12px; margin-bottom: 14px; font-size: 12px; color: var(--warn); }
+  .past-banner b { color: var(--ink); }
   .past-banner button { flex: none; }
   .digest-card { display: flex; justify-content: space-between; align-items: center; gap: 10px;
-    border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 12px; }
-  .digest-card.good { background: var(--ok-bg); border: 1px solid var(--ok); color: var(--ok); }
-  .digest-card.meh  { background: var(--warn-bg); border: 1px solid var(--warn); color: var(--warn); }
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 12px; line-height: 1.5; }
+  .digest-card b { color: var(--ink); }
+  .digest-card.good { background: rgba(16,185,129,0.12); border: 1px solid var(--ok); color: var(--ok); }
+  .digest-card.meh  { background: rgba(245,158,11,0.12); border: 1px solid var(--warn); color: var(--warn); }
+  .digest-card.bad  { background: rgba(239,68,68,0.12); border: 1px solid var(--bad); color: var(--bad); }
+  .digest-card .del { color: var(--ink-dim); }
   .tpl-chip { border-color: var(--accent); }
   .tpl-chip .del { margin-left: 6px; }
   .pfix-head { color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em;
@@ -337,6 +343,17 @@
   /* projection cursor: where the corridor will land if the pending grams are added */
   .corridor-cursor.proj { background: rgba(255,255,255,0.5); box-shadow: 0 0 8px 1px rgba(255,255,255,0.3);
     width: 3px; opacity: 0.85; }
+  /* pace marker: where you should be by now (moves across the day) */
+  .corridor-pace { position: absolute; top: 10px; width: 0; height: 40px;
+    border-left: 2px dashed var(--warn); opacity: 0.75; transform: translateX(-50%); z-index: 1;
+    transition: left 0.8s cubic-bezier(0.34,1.56,0.64,1); }
+  .pace-line { font-size: 12px; color: var(--ink-dim); line-height: 1.55; margin-top: 12px;
+    border-left: 2px solid var(--line); padding-left: 10px; }
+  .pace-line.good { border-color: var(--ok); color: var(--ok); }
+  .pace-line.warn { border-color: var(--warn); color: var(--warn); }
+  .pace-line.bad  { border-color: var(--bad); color: var(--bad); }
+  .pace-line b { color: var(--ink); font-weight: 600; }
+  #corridorMode { color: var(--accent); font-weight: 600; }
 
   /* ---- OMNI ADD-FOOD PANEL ---- */
   .omni-actions { display: flex; gap: 8px; margin-top: 10px; }
@@ -380,6 +397,12 @@
 <div class="digest-card" id="digestCard" style="display:none">
   <span class="dg-main"></span>
   <span class="del" id="digestClose" title="dismiss">✕</span>
+</div>
+
+<!-- Morning brief, shown once per day on open. -->
+<div class="digest-card" id="briefCard" style="display:none">
+  <span id="briefText"></span>
+  <span class="del" id="briefClose" title="dismiss">✕</span>
 </div>
 
 <!-- Shown while a past day is on screen — every add/edit lands on that day, not today. -->
@@ -479,9 +502,10 @@
 <main id="tabToday" class="tabview">
 <!-- CORRIDOR -->
 <div class="panel corridor-panel">
-  <div class="panel-title">Caloric corridor · <span id="floorTitle">1700</span> floor / <span id="ceilTitle">1900</span> ceiling</div>
+  <div class="panel-title">Caloric corridor · <span id="floorTitle">1700</span> floor / <span id="ceilTitle">1900</span> ceiling<span id="corridorMode"></span></div>
   <div class="corridor-wrap">
     <div class="corridor-cursor proj" id="projCursor" style="left:0%;display:none" title="where you'll land if you add this"></div>
+    <div class="corridor-pace" id="paceMark" style="left:0%;display:none" title="where you should be by now"></div>
     <div class="corridor-cursor" id="cursor" style="left:0%"></div>
     <div class="corridor-track"><div class="corridor-fill" id="fill" style="width:0%"></div></div>
     <div class="corridor-marker" style="left:0%"></div>
@@ -498,6 +522,8 @@
     </div>
     <span class="status" id="kcalStatus">empty</span>
   </div>
+  <!-- Pace + protein steering (live day only) -->
+  <div class="pace-line" id="paceLine" style="display:none"></div>
   <!-- Ghost Mode: pace overlay -->
   <div class="ghost-wrap" id="ghostWrap" style="display:none">
     <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:var(--ink-faint);margin-bottom:6px">Pace vs. yesterday</div>
@@ -686,6 +712,17 @@
       </select></div>
     </div>
     <div class="tactical" id="tdeeReadout" style="margin-top:4px">Enter age &amp; height and log a weight to estimate maintenance.</div>
+    <div class="targets-grid" style="margin-top:10px">
+      <div><label>Goal — auto-sets your corridor</label><select id="goalMode">
+        <option value="off">off · manual corridor</option>
+        <option value="cut">cut (−500/day)</option>
+        <option value="maintain">maintain (±0)</option>
+        <option value="bulk">lean bulk (+300/day)</option>
+        <option value="custom">custom…</option>
+      </select></div>
+      <div id="goalCustomWrap" style="display:none"><label>Custom offset (kcal/day)</label><input type="number" id="goalOffset" step="25" placeholder="e.g. 250"></div>
+    </div>
+    <div class="tactical" id="goalReadout" style="margin-top:4px;display:none"></div>
   </div>
 
   <!-- Daily log: weight + calories + macros, newest first -->
@@ -761,7 +798,19 @@
 // PROTOCOL holds the authoritative defaults; live targets are user-overridable
 // via Settings and persisted separately, so the protocol itself never mutates.
 const PROTOCOL = { floor:1700, ceil:1900, p:120, penK:10, penP:10, oilK:132, oilF:14 };
+// FLOOR/CEIL are the EFFECTIVE corridor the whole app reads. FLOOR_M/CEIL_M are the manual
+// base the user set in Settings — kept separate so the adaptive goal can drive FLOOR/CEIL
+// each day without ever overwriting (or persisting over) the hand-entered numbers.
 let FLOOR = PROTOCOL.floor, CEIL = PROTOCOL.ceil;
+let FLOOR_M = PROTOCOL.floor, CEIL_M = PROTOCOL.ceil;
+// Goal drives the corridor off the adaptive TDEE. mode 'off' = manual corridor; otherwise
+// corridor = TDEE + offset ± band. Presets set offset; 'custom' uses the stored offset.
+let GOAL = { mode:'off', offset:0, band:100 };
+const GOAL_OFFSET = { cut:-500, maintain:0, bulk:300 };   // 'custom' uses GOAL.offset
+const GOAL_LABEL  = { cut:'cut', maintain:'maintain', bulk:'lean bulk', custom:'custom' };
+function goalOffset(){ return GOAL.mode==='custom' ? (+GOAL.offset||0) : (GOAL_OFFSET[GOAL.mode]||0); }
+// Suggested protein by goal (g per kg bodyweight): bulk leans lower, cut higher to spare muscle.
+const GOAL_PROTEIN_PER_KG = { cut:2.2, maintain:1.8, bulk:1.6, custom:1.8, off:1.8 };
 // Protein floor, like the caps, can be a fixed gram value or a % of the calorie
 // floor (at 4 kcal/g). P_TARGET is the resolved grams used everywhere downstream.
 let P_CFG = {mode:'g', val:PROTOCOL.p};
@@ -783,7 +832,7 @@ let INFLATE = 1 + PROTOCOL.penK/100, DEDUCT = 1 - PROTOCOL.penP/100;  // unweigh
 function loadTargets(){
   try {
     const t = JSON.parse(localStorage.getItem('ledger_targets')||'null');
-    if (t){ FLOOR=+t.floor||FLOOR; CEIL=+t.ceil||CEIL;
+    if (t){ FLOOR=+t.floor||FLOOR; CEIL=+t.ceil||CEIL; FLOOR_M=FLOOR; CEIL_M=CEIL;
             if (t.pCfg) P_CFG={mode:t.pCfg.mode==='pct'?'pct':'g', val:+t.pCfg.val||PROTOCOL.p};
             else if (+t.p) P_CFG={mode:'g', val:+t.p};              // legacy grams-only
             if (t.cCap) C_CAP={mode:t.cCap.mode==='pct'?'pct':'g', val:+t.cCap.val||0};
@@ -792,14 +841,15 @@ function loadTargets(){
             else if (+t.fMax) F_CAP={mode:'g', val:+t.fMax};
             if (t.maint) MAINT={min:+t.maint.min||0, max:+t.maint.max||0};
             if (t.profile) PROFILE={sex:t.profile.sex==='female'?'female':'male', age:+t.profile.age||0,
-                                    height:+t.profile.height||0, activity:ACTIVITY_MULT[t.profile.activity]?t.profile.activity:'moderate'}; }
+                                    height:+t.profile.height||0, activity:ACTIVITY_MULT[t.profile.activity]?t.profile.activity:'moderate'};
+            if (t.goal) GOAL={mode:GOAL_LABEL[t.goal.mode]?t.goal.mode:'off', offset:+t.goal.offset||0, band:+t.goal.band>0?+t.goal.band:100}; }
     const pn = JSON.parse(localStorage.getItem('ledger_pen')||'null');
     if (pn){ INFLATE = 1 + (+pn.k||0)/100; DEDUCT = 1 - (+pn.p||0)/100;
              OIL_KCAL = +pn.oilK>=0 ? +pn.oilK : OIL_KCAL; OIL_FAT = +pn.oilF>=0 ? +pn.oilF : OIL_FAT; }
   } catch(e){}
 }
 function saveTargets(){
-  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR,ceil:CEIL,pCfg:P_CFG,cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE})); } catch(e){}
+  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,goal:GOAL})); } catch(e){}
   stampTargets(); scheduleSync();              // a genuine local edit — wins LWW until someone edits later
 }
 function savePens(){
@@ -929,7 +979,63 @@ function statusColor(kcal){
   if (kcal <= CEIL) return {c:'var(--ok)', bg:'var(--ok-bg)', s:'in corridor'};
   return {c:'var(--bad)', bg:'var(--bad-bg)', s:'CEILING BREACH'};
 }
+// When a goal is active and the adaptive TDEE is available, the effective corridor
+// (FLOOR/CEIL) is derived from it each render; the manual base (FLOOR_M/CEIL_M) is left
+// untouched. Returns the TDEE used, or null when the corridor is manual. CORRIDOR_AUTO
+// tells the rest of render() how to label the corridor.
+let CORRIDOR_AUTO = null;
+function applyAdaptiveCorridor(){
+  CORRIDOR_AUTO = null;
+  if (GOAL.mode !== 'off'){
+    const td = computeTDEE();
+    if (td.blended > 0){
+      const c = LedgerCore.corridorFromTDEE(td.blended, goalOffset(), GOAL.band||100);
+      FLOOR = c.floor; CEIL = c.ceil;
+      CORRIDOR_AUTO = { tdee: td.blended, center: c.center };
+      return;
+    }
+  }
+  FLOOR = FLOOR_M; CEIL = CEIL_M;   // manual corridor (goal off, or no TDEE yet)
+}
+// Pace marker + protein-aware steering — only meaningful on the live, open day. The marker
+// slides from 0 → the corridor centre across the eating day (06:00–24:00 PST), so a full
+// ceiling early doesn't read as "loads of room". Steering fires when the calories left to
+// the ceiling can no longer comfortably cover the protein still owed — the exact squeeze
+// the user hits at night. pct() is the corridor's kcal→% scale from render().
+function renderPace(t, pct){
+  const mark = document.getElementById('paceMark'), line = document.getElementById('paceLine');
+  const live = VIEW_DATE === ACTIVE_DATE;
+  if (!live || CEIL <= 0){ mark.style.display='none'; line.style.display='none'; return; }
+
+  const nowPst = new Date(Date.now() + TZ_OFFSET_MIN*60000);
+  const h = nowPst.getUTCHours() + nowPst.getUTCMinutes()/60;
+  const frac = Math.max(0, Math.min(1, (h - 6)/(24 - 6)));
+  const center = (FLOOR + CEIL)/2;
+  const paceKcal = center * frac;
+  mark.style.left = pct(paceKcal) + '%'; mark.style.display = 'block';
+
+  const remP = Math.max(0, P_TARGET - t.p);
+  const roomToCeil = CEIL - t.kcal;
+  const LEAN = 5;                                  // ~5 kcal per g protein from lean sources
+  const needKcal = remP * LEAN;
+
+  const show = (cls, html)=>{ line.className='pace-line '+cls; line.innerHTML=html; line.style.display='block'; };
+  // Protein steering takes priority — it's the failure mode we're solving for.
+  if (remP > 0 && roomToCeil <= 0)
+    return show('bad', `⚠ Over ceiling with <b>${remP.toFixed(0)}g protein</b> still short — take the lean protein and accept the small overshoot.`);
+  if (remP > 0 && needKcal > roomToCeil)
+    return show('bad', `⚠ <b>${remP.toFixed(0)}g protein</b> left needs ~${Math.round(needKcal)} kcal of lean food but only <b>${Math.round(roomToCeil)}</b> to the ceiling — go lean now (chicken, egg whites, whey).`);
+  if (remP > 0 && needKcal > roomToCeil*0.7 && frac > 0.4)
+    return show('warn', `Protein's getting tight — ${remP.toFixed(0)}g left, ~${Math.round(roomToCeil)} kcal of room. Favour lean foods from here.`);
+
+  if (t.kcal < 1){ line.style.display='none'; return; }
+  const delta = t.kcal - paceKcal;
+  if (delta > 150)       show('warn', `Ahead of pace — ~<b>${Math.round(paceKcal)}</b> expected by now, you're at <b>${Math.round(t.kcal)}</b>. Ease off to keep ceiling room.`);
+  else if (delta < -200) show('', `Pace says ~<b>${Math.round(paceKcal)}</b> by now — room to eat toward the floor.`);
+  else                   show('good', `On pace — ~<b>${Math.round(paceKcal)}</b> expected by now, you're at <b>${Math.round(t.kcal)}</b>.`);
+}
 function render() {
+  applyAdaptiveCorridor();   // set the effective corridor before anything reads FLOOR/CEIL
   computePTarget();          // resolve % protein against current floor before anything reads it
   const t = totals();
   // corridor: scale 0..CEIL*1.15 so breach is visible
@@ -950,6 +1056,11 @@ function render() {
   if (t.kcal < FLOOR)      rem.textContent = `${Math.round(FLOOR - t.kcal)} to floor`;
   else if (t.kcal <= CEIL) rem.textContent = `${Math.round(CEIL - t.kcal)} to ceiling`;
   else                     rem.textContent = `${Math.round(t.kcal - CEIL)} over ceiling`;
+
+  // Corridor title badge: shows when the goal is auto-driving the numbers.
+  const cm = document.getElementById('corridorMode');
+  cm.textContent = CORRIDOR_AUTO ? ` · auto ${GOAL_LABEL[GOAL.mode]} (TDEE ${CORRIDOR_AUTO.tdee.toLocaleString()})` : '';
+  renderPace(t, pct);        // moving pace marker + protein-aware steering (live day only)
 
   const set = (id,v)=>document.getElementById(id).textContent=v;
   set('pNow', t.p.toFixed(1)); set('pRem', Math.max(0,P_TARGET-t.p).toFixed(1));
@@ -974,9 +1085,14 @@ function render() {
   capBar('cBarWrap','cBar','cCapLbl', t.c, C_CAP, 4);
   capBar('fBarWrap','fBar','fCapLbl', t.f, F_CAP, 9);
 
-  // Protein per kg bodyweight — the number that actually matters on a cut.
+  // Protein per kg bodyweight — the number that actually matters — vs the goal's suggestion.
   const bw = latestWeight();
-  document.getElementById('pPerKg').textContent = bw>0 ? `${(t.p/bw).toFixed(2)} g/kg · ${bw}kg` : '';
+  if (bw>0){
+    const base = `${(t.p/bw).toFixed(2)} g/kg · ${bw}kg`;
+    if (GOAL.mode!=='off'){ const perKg=GOAL_PROTEIN_PER_KG[GOAL.mode]||1.8;
+      document.getElementById('pPerKg').textContent = `${(t.p/bw).toFixed(2)} g/kg · goal ${perKg} (${Math.round(perKg*bw)}g)`; }
+    else document.getElementById('pPerKg').textContent = base;
+  } else document.getElementById('pPerKg').textContent = '';
   // Micronutrients for the day. Partial by nature — only foods carrying USDA micro data
   // (i.e. logged after this feature shipped) contribute; shown only once something does.
   const micro = document.getElementById('microLine');
@@ -1031,6 +1147,7 @@ function render() {
   renderWeight();
   renderWeightLog();
   renderTDEE();
+  renderGoal();
   renderFatEstimate();
   renderTernary();
 }
@@ -1253,6 +1370,16 @@ document.getElementById('wIn').addEventListener('keydown', e=>{ if (e.key==='Ent
     saveTargets(); renderTDEE(); renderFatEstimate();
   });
 });
+// Goal → drives the adaptive corridor. Presets set the offset; custom uses the input.
+document.getElementById('goalMode').addEventListener('change', ()=>{
+  GOAL.mode = document.getElementById('goalMode').value;
+  if (GOAL.mode!=='custom' && GOAL.mode!=='off') GOAL.offset = GOAL_OFFSET[GOAL.mode]||0;
+  saveTargets(); render();
+});
+document.getElementById('goalOffset').addEventListener('change', ()=>{
+  GOAL.offset = +document.getElementById('goalOffset').value||0; saveTargets(); render();
+});
+document.getElementById('briefClose').onclick = ()=>{ document.getElementById('briefCard').style.display='none'; };
 // CSV export of the full daily log — date, weight, calories, macros, micros.
 document.getElementById('csvBtn').onclick = ()=>{
   const map=weightsMap(), tot={};
@@ -1418,7 +1545,9 @@ function computeTDEE(){
   const tr = winW.length>=2 ? LedgerCore.weightTrend(winW) : null;
   const sampleDays = winW.length>=2 ? Math.round((Date.parse(winW[winW.length-1].date)-Date.parse(winW[0].date))/86400000)+1 : 0;
   const tot={}; allDays(true).forEach(d=>{ tot[d.date]=totalsOf(d.ledger); });
-  const intakes=Object.keys(tot).filter(d=>d>=start && d<=end && tot[d].kcal>0).map(d=>tot[d].kcal);
+  // Exclude the still-open day: its partial intake would drag the average (and thus the
+  // adaptive corridor) around as you log meals. TDEE only moves when a day closes.
+  const intakes=Object.keys(tot).filter(d=>d>=start && d<=end && d!==ACTIVE_DATE && tot[d].kcal>0).map(d=>tot[d].kcal);
   const avgIntake = intakes.length ? intakes.reduce((a,b)=>a+b,0)/intakes.length : 0;
   const cal = LedgerCore.calibrateTDEE(formula, avgIntake, tr?tr.ratePerWeek:null, sampleDays);
   return Object.assign(cal, {kg, avgIntake:Math.round(avgIntake), sampleDays});
@@ -1434,14 +1563,75 @@ function renderTDEE(){
   if (document.activeElement!==actEl) actEl.value=PROFILE.activity;
 
   const td=computeTDEE();
+  const hasProfile = +PROFILE.age>0 && +PROFILE.height>0;
   if (!td.kg){ out.className='tactical'; out.textContent='Log a weight (above) to compute your BMR and TDEE.'; return; }
-  if (!(+PROFILE.age>0) || !(+PROFILE.height>0)){ out.className='tactical'; out.textContent='Enter your age and height to estimate maintenance calories.'; return; }
-  const bits=[`formula ${td.formula.toLocaleString()}`];
+  if (!hasProfile && td.dataTDEE==null){ out.className='tactical'; out.textContent='Enter age & height for a formula estimate — or log ~7 days of weigh-ins and it derives maintenance from your data.'; return; }
+  const bits=[];
+  if (hasProfile) bits.push(`formula ${td.formula.toLocaleString()}`);
   bits.push(td.dataTDEE!=null
     ? `measured ${td.dataTDEE.toLocaleString()} (${Math.round(td.w*100)}% weighted over ${td.sampleDays}d)`
     : `measured pending — needs ~7+ days of weigh-ins`);
   out.className='tactical good';
   out.innerHTML = `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${bits.join(' · ')}.`;
+}
+// Goal readout: the corridor the goal will impose + suggested protein for the phase.
+function renderGoal(){
+  const sel=document.getElementById('goalMode'), out=document.getElementById('goalReadout');
+  if (!sel) return;
+  if (document.activeElement!==sel) sel.value=GOAL.mode;
+  document.getElementById('goalCustomWrap').style.display = GOAL.mode==='custom' ? '' : 'none';
+  const offEl=document.getElementById('goalOffset');
+  if (document.activeElement!==offEl) offEl.value = GOAL.offset || '';
+  if (GOAL.mode==='off'){ out.style.display='none'; return; }
+  out.style.display='block';
+  const td=computeTDEE();
+  if (!(td.blended>0)){ out.className='tactical'; out.textContent='Fill in your profile and log a weight to activate the auto corridor.'; return; }
+  const c=LedgerCore.corridorFromTDEE(td.blended, goalOffset(), GOAL.band||100);
+  const kg=latestWeight(), perKg=GOAL_PROTEIN_PER_KG[GOAL.mode]||1.8;
+  const pg = kg>0 ? ` · protein ${perKg} g/kg ≈ ${Math.round(perKg*kg)}g` : '';
+  const off=goalOffset(), offTxt = off>0?`+${off}`:`${off}`;
+  out.className='tactical good';
+  out.innerHTML = `<b>${GOAL_LABEL[GOAL.mode]}</b> · corridor <b>${c.floor.toLocaleString()}–${c.ceil.toLocaleString()}</b>/day (TDEE ${td.blended.toLocaleString()} ${offTxt})${pg}. Recalibrates as your data grows.`;
+}
+// Trailing 28-day weight rate (kg/wk) for the brief and weekly narrative.
+function weekRatePerWeek(){
+  const map=weightsMap(), end=ACTIVE_DATE, start=addDaysISO(end,-27);
+  const w=Object.keys(map).filter(d=>+map[d]>0 && d>=start && d<=end).sort().map(d=>({date:d,kg:+map[d]}));
+  const tr=w.length>=2?LedgerCore.weightTrend(w):null; return tr?tr.ratePerWeek:null;
+}
+// One-sentence weekly story: intake, adherence, weight movement, and whether that matches the goal.
+function weeklyNarrative(avgK, n, okDays){
+  const r=weekRatePerWeek();
+  const rateTxt = r==null ? '' : (Math.abs(r)<0.05?'weight holding steady':(r<0?`down ${Math.abs(r).toFixed(2)} kg/wk`:`up ${r.toFixed(2)} kg/wk`));
+  let verdict='';
+  if (GOAL.mode!=='off' && r!=null){
+    const want=goalOffset();
+    if (want>0)      verdict = r>0.03 ? ' — lean bulk on plan, keep going.' : (r<-0.03 ? ' — you want a surplus but you\'re dropping; eat a bit more.' : ' — flat; nudge intake up to grow.');
+    else if (want<0) verdict = r<-0.03 ? ' — cut on plan.' : (r>0.03 ? ' — you want a deficit but you\'re gaining; tighten intake.' : ' — flat; drop intake a touch to move.');
+    else             verdict = Math.abs(r)<0.05 ? ' — holding at maintenance, as intended.' : '';
+  }
+  return `<div class="tactical" style="margin-bottom:12px">This week: avg <b style="color:var(--ink)">${Math.round(avgK)}</b> kcal · ${okDays}/${n} in corridor${rateTxt?` · ${rateTxt}`:''}${verdict}</div>`;
+}
+// Morning brief: shown once per day on first open — the day's plan and where you stand.
+function maybeShowBrief(){
+  try{
+    if (getKey('ledger_brief_seen')===ACTIVE_DATE) return;
+    const days=allDays(false); if(!days.length) return;      // nothing to brief on yet
+    const yt=totalsOf(days[0].ledger);
+    const yMark = yt.kcal>CEIL_M?'over ceiling':(yt.kcal>=FLOOR_M?'in corridor ✓':'under floor');
+    let msg='Good morning. ';
+    msg += CORRIDOR_AUTO
+      ? `${GOAL_LABEL[GOAL.mode]} — today's target <b>${FLOOR}–${CEIL}</b> (TDEE ${CORRIDOR_AUTO.tdee.toLocaleString()}). `
+      : `Target <b>${FLOOR}–${CEIL}</b>. `;
+    const r=weekRatePerWeek();
+    if (r!=null) msg += (Math.abs(r)<0.05?'Weight holding steady. ':(r<0?`Trending down ${Math.abs(r).toFixed(2)} kg/wk. `:`Trending up ${r.toFixed(2)} kg/wk. `));
+    msg += `Yesterday ${Math.round(yt.kcal)} kcal · ${yMark}.`;
+    const card=document.getElementById('briefCard');
+    document.getElementById('briefText').innerHTML=msg;
+    card.className='digest-card '+(yMark.includes('✓')?'good':(yt.kcal>CEIL_M?'bad':'meh'));
+    card.style.display='flex';
+    setKey('ledger_brief_seen', ACTIVE_DATE);                 // once per day, even across reloads
+  }catch(e){}
 }
 
 // ---- INTELLIGENCE DASHBOARD ----
@@ -1756,7 +1946,7 @@ function renderWeeklyReport() {
   const best = sorted[0];
   const worst = sorted[sorted.length - 1];
 
-  wrap.innerHTML = renderSparkline() + `
+  wrap.innerHTML = weeklyNarrative(avgK, tots.length, okDays) + renderSparkline() + `
     <div class="report-grid">
       <div class="report-metric"><div class="rm-val">${Math.round(avgK)}</div><div class="rm-label">Avg Kcal</div></div>
       <div class="report-metric"><div class="rm-val">${Math.round(avgP)}g</div><div class="rm-label">Avg Protein</div></div>
@@ -2586,8 +2776,8 @@ document.getElementById('ledgerBody').onclick = (ev)=>{
 
 // Targets: user-overridable, protocol defaults recoverable in one tap.
 function fillTargetInputs(){
-  document.getElementById('tFloor').value = FLOOR;
-  document.getElementById('tCeil').value  = CEIL;
+  document.getElementById('tFloor').value = FLOOR_M;
+  document.getElementById('tCeil').value  = CEIL_M;
   document.getElementById('tP').value     = P_CFG.val;
   document.getElementById('tPMode').value = P_CFG.mode;
   document.getElementById('tCMax').value  = C_CAP.val || '';
@@ -2608,13 +2798,14 @@ document.getElementById('saveTargets').onclick = ()=>{
   if (!(f>0 && c>0 && p>0)){ setStatus(st,'Floor, ceiling and protein must be positive.','bad'); return; }
   if (c < f){ setStatus(st,'Ceiling cannot be below floor.','bad'); return; }
   if ((pMode==='pct' && p>100) || (cMode==='pct' && cm>100) || (fMode==='pct' && fm>100)){ setStatus(st,'Percentage values cannot exceed 100.','bad'); return; }
-  FLOOR=f; CEIL=c; P_CFG={mode:pMode, val:p};
+  FLOOR=FLOOR_M=f; CEIL=CEIL_M=c; P_CFG={mode:pMode, val:p};
   C_CAP={mode:cMode, val:cm}; F_CAP={mode:fMode, val:fm};
   saveTargets(); render();
-  setStatus(st,'Targets saved. Corridor, solver and history all follow the new numbers.','good');
+  const note = GOAL.mode!=='off' ? ' Manual base saved — the goal still auto-drives the live corridor (turn Goal off to use these).' : '';
+  setStatus(st,'Targets saved. Corridor, solver and history all follow the new numbers.'+note,'good');
 };
 document.getElementById('resetTargets').onclick = ()=>{
-  FLOOR=PROTOCOL.floor; CEIL=PROTOCOL.ceil; P_CFG={mode:'g', val:PROTOCOL.p};
+  FLOOR=FLOOR_M=PROTOCOL.floor; CEIL=CEIL_M=PROTOCOL.ceil; P_CFG={mode:'g', val:PROTOCOL.p};
   C_CAP={mode:'g', val:0}; F_CAP={mode:'g', val:0};
   saveTargets(); fillTargetInputs(); render();
   setStatus(document.getElementById('targetStatus'),'Protocol defaults restored (1700/1900 · 120g protein · caps off).','good');
@@ -2643,7 +2834,7 @@ document.getElementById('exportBtn').onclick = async ()=>{
   allDays(true).forEach(d => { days[d.date] = d.ledger; });
   days[VIEW_DATE] = ledger;                       // the on-screen day's live state wins
   const payload = { exported: dateStr(), version: 2,
-    targets: {floor:FLOOR,ceil:CEIL,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE},
+    targets: {floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,goal:GOAL},
     pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
     weights: weightsMap(), templates: templates(),
     days, date: ACTIVE_DATE, ledger, totals: totals() };   // date/ledger kept for v1 compat
@@ -2882,7 +3073,7 @@ async function syncNow(){
     saveWeights(wm.days, wm.meta);
     load(); updateDayLabel(); render();        // reflect whatever the merge decided for the on-screen day
     const state = { v:1, days: merged.days, meta: merged.meta,
-      targets: {floor:FLOOR, ceil:CEIL, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP, maint:MAINT, profile:PROFILE},
+      targets: {floor:FLOOR_M, ceil:CEIL_M, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP, maint:MAINT, profile:PROFILE, goal:GOAL},
       pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
       tUpdated: targetsStamp(),
       templates: templates(), tplUpdated: tplStamp(),
@@ -3022,6 +3213,7 @@ document.getElementById('backToTodayBtn').onclick = ()=> viewDay(ACTIVE_DATE);
 updateDayLabel();
 loadTargets(); fillTargetInputs(); loadKeys(); initFoods(); load(); render(); renderTemplates(); requestPersistence();
 showTab('today');   // a logging app always opens on Today (also renders)
+maybeShowBrief();   // one-line plan for the day, once per day
 if (syncConfigured()) syncNow(); else setSyncDot('off');   // boot pull+push (no-op when unconfigured)
 </script>
 </body>
