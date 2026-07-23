@@ -27,8 +27,11 @@
     let kcal = g('957') || g('958') || g('208') || (g('268') ? g('268') / 4.184 : 0);
     const est = 4 * c + 4 * p + 9 * f;
     if (est > 0 && kcal < est * 0.5) kcal = est;
-    // Micronutrients (per 100g): 291 fiber(g), 269 total sugars(g), 307 sodium(mg).
-    return { kcal, p, f, c, ca: g('301'), ph: g('305'), fib: g('291'), sug: g('269'), na: g('307') };
+    // Micronutrients (per 100g), keyed by USDA nutrient number:
+    //   291 fiber(g) · 269 sugars(g) · 307 sodium · 306 potassium · 301 calcium ·
+    //   304 magnesium · 303 iron · 309 zinc (mg) · 401 vitamin C(mg) · 328 vitamin D(µg).
+    return { kcal, p, f, c, ca: g('301'), ph: g('305'), fib: g('291'), sug: g('269'), na: g('307'),
+             k: g('306'), mg: g('304'), fe: g('303'), zn: g('309'), vc: g('401'), vd: g('328') };
   }
 
   // ---- Target resolution ---------------------------------------------------
@@ -51,7 +54,9 @@
       name, grams, weighed, isCurry, halfOil, base, source: source || 'DB',
       kcal: base.kcal * s, p: base.p * s, f: base.f * s,
       c: (base.c || 0) * s, ca: (base.ca || 0) * s, ph: (base.ph || 0) * s,
-      fib: (base.fib || 0) * s, sug: (base.sug || 0) * s, na: (base.na || 0) * s, flags: []
+      fib: (base.fib || 0) * s, sug: (base.sug || 0) * s, na: (base.na || 0) * s,
+      k: (base.k || 0) * s, mg: (base.mg || 0) * s, fe: (base.fe || 0) * s,
+      zn: (base.zn || 0) * s, vc: (base.vc || 0) * s, vd: (base.vd || 0) * s, flags: []
     };
     if (!weighed) {
       e.kcal *= pen.inflate; e.p *= pen.deduct;
@@ -231,6 +236,26 @@
     const center = tdee + offset;
     return { floor: r(center - band), ceil: r(center + band), center };
   }
+  // Bracketed intake pace: expected calories consumed by a given hour-of-day given a meal
+  // plan. Each meal ramps over a 1-hour window centred on its time, so the curve sits flat
+  // between meals and steps up around each — matching a real eating rhythm instead of a
+  // straight line. meals = [{h: hoursOfDay, kcal}]. Returns raw kcal (caller scales it).
+  function mealPaceKcal(nowH, meals) {
+    let s = 0;
+    (meals || []).forEach(m => {
+      s += (m.kcal || 0) * Math.max(0, Math.min(1, (nowH - (m.h - 0.5)) / 1));
+    });
+    return s;
+  }
+  // Flag a micronutrient total against its daily reference. Nutrients you want to REACH
+  // (fiber, potassium…): 'ok' ≥100%, 'low' ≥60%, 'verylow' below. Nutrients that are a
+  // LIMIT (sodium, sugar): 'over' >100%, 'near' ≥80%, else 'ok'.
+  function microStatus(value, target, isLimit) {
+    if (!(target > 0)) return 'na';
+    const r = value / target;
+    if (isLimit) return r > 1 ? 'over' : (r >= 0.8 ? 'near' : 'ok');
+    return r >= 1 ? 'ok' : (r >= 0.6 ? 'low' : 'verylow');
+  }
 
   // ---- Protein fix: cheapest way to close a protein gap ----------------------
   // foods = [[name, {kcal,p}], ...] per-100g. Returns single-food options that
@@ -366,6 +391,7 @@
   return {
     nutrientsFrom, resolvePTarget, capGrams, computeEntry,
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
-    fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, KCAL_PER_KG_FAT, mergeSyncStates, ternary
+    fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
+    KCAL_PER_KG_FAT, mergeSyncStates, ternary
   };
 });

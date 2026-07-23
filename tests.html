@@ -230,6 +230,24 @@ group('TDEE — Mifflin-St Jeor BMR and data calibration');
   check('cut −500 → 1750/1950', cut.floor===1750 && cut.ceil===1950, JSON.stringify(cut));
 })();
 
+// ---- mealPaceKcal + microStatus ----
+group('mealPaceKcal — bracketed intake pace, and microStatus flags');
+(function(){
+  const meals=[{h:7.5,kcal:800},{h:11,kcal:200},{h:14,kcal:800},{h:16.5,kcal:300},{h:21,kcal:500}];
+  check('before first meal → 0', C.mealPaceKcal(6, meals)===0, `got ${C.mealPaceKcal(6,meals)}`);
+  check('breakfast ramp midpoint 07:30 → 400', C.mealPaceKcal(7.5, meals)===400, `got ${C.mealPaceKcal(7.5,meals)}`);
+  check('after breakfast, before brunch 10:00 → 800', C.mealPaceKcal(10, meals)===800, `got ${C.mealPaceKcal(10,meals)}`);
+  check('lunch midpoint 14:00 → 1400', C.mealPaceKcal(14, meals)===1400, `got ${C.mealPaceKcal(14,meals)}`);
+  check('end of day → full 2600', C.mealPaceKcal(23, meals)===2600, `got ${C.mealPaceKcal(23,meals)}`);
+
+  check('fiber 40/38 → ok', C.microStatus(40,38,false)==='ok', '');
+  check('fiber 25/38 → low', C.microStatus(25,38,false)==='low', '');
+  check('fiber 10/38 → verylow', C.microStatus(10,38,false)==='verylow', '');
+  check('sodium 2500/2300 (limit) → over', C.microStatus(2500,2300,true)==='over', '');
+  check('sodium 1900/2300 (limit) → near', C.microStatus(1900,2300,true)==='near', '');
+  check('no target → na', C.microStatus(5,0,false)==='na', '');
+})();
+
 // ---- proteinFix: close a protein gap within a kcal budget ----
 group('proteinFix — cheapest protein sources that fit');
 (function(){

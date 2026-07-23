@@ -355,6 +355,15 @@
   .pace-line b { color: var(--ink); font-weight: 600; }
   #corridorMode { color: var(--accent); font-weight: 600; }
 
+  /* micronutrient rows */
+  .micro-row { display: grid; grid-template-columns: 84px 1fr auto 60px; gap: 8px; align-items: center; margin-bottom: 7px; }
+  .micro-name { font-size: 12px; color: var(--ink-dim); }
+  .micro-bar { height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden; }
+  .micro-bar > span { display: block; height: 100%; border-radius: 3px; transition: width 0.6s cubic-bezier(0.34,1.56,0.64,1); }
+  .micro-val { font-size: 11px; color: var(--ink); white-space: nowrap; }
+  .micro-val small { color: var(--ink-faint); }
+  .micro-flag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; text-align: right; white-space: nowrap; }
+
   /* ---- OMNI ADD-FOOD PANEL ---- */
   .omni-actions { display: flex; gap: 8px; margin-top: 10px; }
   .omni-actions .omni-primary { flex: 1; }
@@ -474,6 +483,36 @@
     <button class="ghost" id="resetTargets">Protocol defaults</button>
   </div>
   <div class="tactical" id="targetStatus" style="margin-top:10px;display:none"></div>
+  <details style="margin-top:12px">
+    <summary>Meal pacing plan · when &amp; how much you usually eat</summary>
+    <div style="margin-top:10px">
+      <label>One meal per line — <b>HH:MM kcal Name</b>. Budgets are relative (scaled to your corridor), so they set the shape &amp; timing, not hard limits. Clear it for even pacing.</label>
+      <textarea id="mealPlanInput" rows="6" placeholder="07:30 800 Breakfast&#10;11:00 200 Brunch&#10;14:00 800 Lunch&#10;16:30 300 Supper&#10;21:00 500 Dinner"></textarea>
+      <div class="footer-actions" style="margin-top:8px">
+        <button id="saveMealPlan">Save meal plan</button>
+        <button class="ghost" id="clearMealPlan">Use even pacing</button>
+      </div>
+      <div class="tactical" id="mealPlanStatus" style="margin-top:8px;display:none"></div>
+    </div>
+  </details>
+  <details style="margin-top:12px">
+    <summary>Training schedule · powers day-type features</summary>
+    <div style="margin-top:10px">
+      <label>Weekly split — one per line "<b>Day Split</b>" (use <b>Rest</b> for off days)</label>
+      <textarea id="trainSplitInput" rows="7" placeholder="Mon Pull&#10;Tue Push&#10;Wed Legs&#10;Thu Upper · pull&#10;Fri Upper · push&#10;Sat Rest&#10;Sun Rest"></textarea>
+      <div class="targets-grid" style="margin-top:8px">
+        <div><label>Workout start</label><input type="time" id="trainStart"></div>
+        <div><label>Workout end</label><input type="time" id="trainEnd"></div>
+      </div>
+      <div style="margin-top:8px"><label class="pill"><input type="checkbox" id="trainCycle" hidden> ⚡ Cycle corridor by day — bigger surplus on training days</label></div>
+      <div class="targets-grid" id="cycleOffsets" style="margin-top:8px;display:none">
+        <div><label>Training-day offset (kcal)</label><input type="number" id="trainOffset" step="25"></div>
+        <div><label>Rest-day offset (kcal)</label><input type="number" id="restOffset" step="25"></div>
+      </div>
+      <div class="footer-actions" style="margin-top:8px"><button id="saveTrain">Save schedule</button></div>
+      <div class="tactical" id="trainStatus" style="margin-top:8px;display:none"></div>
+    </div>
+  </details>
   <details style="margin-top:12px">
     <summary>Advanced · unweighed penalties &amp; oil tax</summary>
     <div class="targets-grid" style="margin-top:10px">
@@ -811,6 +850,32 @@ const GOAL_LABEL  = { cut:'cut', maintain:'maintain', bulk:'lean bulk', custom:'
 function goalOffset(){ return GOAL.mode==='custom' ? (+GOAL.offset||0) : (GOAL_OFFSET[GOAL.mode]||0); }
 // Suggested protein by goal (g per kg bodyweight): bulk leans lower, cut higher to spare muscle.
 const GOAL_PROTEIN_PER_KG = { cut:2.2, maintain:1.8, bulk:1.6, custom:1.8, off:1.8 };
+// Meal plan for bracketed intake pacing: the pace marker ramps around each meal time and
+// sits flat between. Budgets are relative — they're scaled to the corridor centre — so the
+// numbers just set the shape and timing. Empty = plain linear pacing. Synced with targets.
+let MEAL_PLAN = [
+  { t:'07:30', kcal:800, name:'Breakfast' },
+  { t:'11:00', kcal:200, name:'Brunch' },
+  { t:'14:00', kcal:800, name:'Lunch' },
+  { t:'16:30', kcal:300, name:'Supper' },
+  { t:'21:00', kcal:500, name:'Dinner' }
+];
+// Training schedule. split is Mon-first (index 0=Mon … 6=Sun); '' or 'Rest' = rest day.
+// start/end are the workout window (editable in Settings). cycle drives the corridor to a
+// bigger surplus on training days and a smaller one on rest days. Synced with targets.
+let TRAIN = {
+  split: ['Pull','Push','Legs','Upper · pull','Upper · push','Rest','Rest'],
+  start:'18:00', end:'20:00', cycle:false, trainOffset:400, restOffset:0
+};
+const WEEKDAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+function weekdayMon(ds){ const p=ds.split('-').map(Number); return (new Date(Date.UTC(p[0],p[1]-1,p[2])).getUTCDay()+6)%7; }
+function splitForDate(ds){ return TRAIN.split[weekdayMon(ds)] || 'Rest'; }
+function isTrainingDay(ds){ const s=splitForDate(ds); return !!s && s.trim().toLowerCase()!=='rest'; }
+// Today's corridor offset: cycled by day type when enabled, else the flat goal offset.
+function effectiveOffset(){
+  if (TRAIN.cycle && GOAL.mode!=='off') return isTrainingDay(ACTIVE_DATE) ? (+TRAIN.trainOffset||0) : (+TRAIN.restOffset||0);
+  return goalOffset();
+}
 // Protein floor, like the caps, can be a fixed gram value or a % of the calorie
 // floor (at 4 kcal/g). P_TARGET is the resolved grams used everywhere downstream.
 let P_CFG = {mode:'g', val:PROTOCOL.p};
@@ -842,14 +907,19 @@ function loadTargets(){
             if (t.maint) MAINT={min:+t.maint.min||0, max:+t.maint.max||0};
             if (t.profile) PROFILE={sex:t.profile.sex==='female'?'female':'male', age:+t.profile.age||0,
                                     height:+t.profile.height||0, activity:ACTIVITY_MULT[t.profile.activity]?t.profile.activity:'moderate'};
-            if (t.goal) GOAL={mode:GOAL_LABEL[t.goal.mode]?t.goal.mode:'off', offset:+t.goal.offset||0, band:+t.goal.band>0?+t.goal.band:100}; }
+            if (t.goal) GOAL={mode:GOAL_LABEL[t.goal.mode]?t.goal.mode:'off', offset:+t.goal.offset||0, band:+t.goal.band>0?+t.goal.band:100};
+            if (Array.isArray(t.mealPlan)) MEAL_PLAN = t.mealPlan.map(m=>({t:String(m.t||''), kcal:+m.kcal||0, name:String(m.name||'meal')}));
+            if (t.train){ const tn=t.train;
+              TRAIN = { split: Array.isArray(tn.split)&&tn.split.length===7 ? tn.split.map(s=>String(s||'Rest')) : TRAIN.split,
+                        start:String(tn.start||'18:00'), end:String(tn.end||'20:00'),
+                        cycle:!!tn.cycle, trainOffset:+tn.trainOffset||0, restOffset:+tn.restOffset||0 }; } }
     const pn = JSON.parse(localStorage.getItem('ledger_pen')||'null');
     if (pn){ INFLATE = 1 + (+pn.k||0)/100; DEDUCT = 1 - (+pn.p||0)/100;
              OIL_KCAL = +pn.oilK>=0 ? +pn.oilK : OIL_KCAL; OIL_FAT = +pn.oilF>=0 ? +pn.oilF : OIL_FAT; }
   } catch(e){}
 }
 function saveTargets(){
-  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,goal:GOAL})); } catch(e){}
+  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN})); } catch(e){}
   stampTargets(); scheduleSync();              // a genuine local edit — wins LWW until someone edits later
 }
 function savePens(){
@@ -927,11 +997,16 @@ function escapeHtml(s){
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+// Log an entry, stamping the real wall-clock time it was added so meal-timing features
+// can learn from it later. Only the live day gets a timestamp — a back-filled past day
+// would carry a misleading "now", so those stay unstamped.
+function pushEntry(e){ if (VIEW_DATE === ACTIVE_DATE) e.at = new Date().toISOString(); ledger.push(e); return e; }
 function totalsOf(l) {
   return l.reduce((t,e)=>({
     kcal:t.kcal+e.kcal, p:t.p+e.p, f:t.f+e.f, c:t.c+(e.c||0), ca:t.ca+e.ca, ph:t.ph+e.ph,
-    fib:t.fib+(e.fib||0), sug:t.sug+(e.sug||0), na:t.na+(e.na||0)
-  }), {kcal:0,p:0,f:0,c:0,ca:0,ph:0,fib:0,sug:0,na:0});
+    fib:t.fib+(e.fib||0), sug:t.sug+(e.sug||0), na:t.na+(e.na||0),
+    k:t.k+(e.k||0), mg:t.mg+(e.mg||0), fe:t.fe+(e.fe||0), zn:t.zn+(e.zn||0), vc:t.vc+(e.vc||0), vd:t.vd+(e.vd||0)
+  }), {kcal:0,p:0,f:0,c:0,ca:0,ph:0,fib:0,sug:0,na:0,k:0,mg:0,fe:0,zn:0,vc:0,vd:0});
 }
 function totals(){ return totalsOf(ledger); }
 
@@ -989,9 +1064,11 @@ function applyAdaptiveCorridor(){
   if (GOAL.mode !== 'off'){
     const td = computeTDEE();
     if (td.blended > 0){
-      const c = LedgerCore.corridorFromTDEE(td.blended, goalOffset(), GOAL.band||100);
+      const off = effectiveOffset();
+      const c = LedgerCore.corridorFromTDEE(td.blended, off, GOAL.band||100);
       FLOOR = c.floor; CEIL = c.ceil;
-      CORRIDOR_AUTO = { tdee: td.blended, center: c.center };
+      CORRIDOR_AUTO = { tdee: td.blended, center: c.center, off,
+        cycled: TRAIN.cycle, training: isTrainingDay(ACTIVE_DATE), split: splitForDate(ACTIVE_DATE) };
       return;
     }
   }
@@ -1009,9 +1086,23 @@ function renderPace(t, pct){
 
   const nowPst = new Date(Date.now() + TZ_OFFSET_MIN*60000);
   const h = nowPst.getUTCHours() + nowPst.getUTCMinutes()/60;
-  const frac = Math.max(0, Math.min(1, (h - 6)/(24 - 6)));
   const center = (FLOOR + CEIL)/2;
-  const paceKcal = center * frac;
+  // Bracketed pace from the meal plan (flat between meals, ramps around each), scaled so the
+  // plan total maps to the corridor centre. Falls back to a plain linear ramp with no plan.
+  const meals = mealPlanHours();
+  const planTotal = meals.reduce((s,m)=>s+m.kcal, 0);
+  let paceKcal, nextMeal=null, expectedP=null;
+  if (meals.length && planTotal>0){
+    const scale = center/planTotal;
+    paceKcal = scale * LedgerCore.mealPaceKcal(h, meals);
+    // Protein is distributed across meals in proportion to their calories — spreading it
+    // supports muscle protein synthesis better than one big hit. Expected-by-now tracks it.
+    expectedP = P_TARGET * LedgerCore.mealPaceKcal(h, meals) / planTotal;
+    const nm = meals.find(m => h < m.h + 0.5);        // first meal not yet fully counted
+    if (nm) nextMeal = { name:nm.name, t:nm.t, kcal:Math.round(scale*nm.kcal), p:Math.round(P_TARGET*nm.kcal/planTotal) };
+  } else {
+    paceKcal = center * Math.max(0, Math.min(1, (h - 6)/(24 - 6)));
+  }
   mark.style.left = pct(paceKcal) + '%'; mark.style.display = 'block';
 
   // Protein steering, anchored to the FLOOR: the aim is to cover protein by the time you
@@ -1037,11 +1128,31 @@ function renderPace(t, pct){
     }
   }
 
+  // Peri-workout fuelling — only on training days, timed to your workout window.
+  if (isTrainingDay(ACTIVE_DATE)){
+    const ws = hoursOf(TRAIN.start), we = hoursOf(TRAIN.end);
+    if (ws!=null && h >= ws-2 && h < ws)
+      return show('warn', `Pre-lift (${TRAIN.start}) — get carbs + protein in soon so you're fuelled for ${escapeHtml(splitForDate(ACTIVE_DATE))}.`);
+    if (we!=null && h >= we && h < we+1.5)
+      return show('warn', `Post-lift — prioritise protein + carbs now to kick off recovery.`);
+  }
+
   if (t.kcal < 1){ line.style.display='none'; return; }
+  // Protein distribution nudge — lower priority than the floor-based steering above.
+  if (expectedP!=null && remP>10 && t.p < expectedP - 20)
+    return show('warn', `Protein back-loaded — ~<b>${Math.round(expectedP)}g</b> expected by now, you're at <b>${t.p.toFixed(0)}g</b>. Add a protein source this meal.`);
   const delta = t.kcal - paceKcal;
-  if (delta > 150)       show('warn', `Ahead of pace — ~<b>${Math.round(paceKcal)}</b> expected by now, you're at <b>${Math.round(t.kcal)}</b>. Ease off to keep ceiling room.`);
-  else if (delta < -200) show('', `Pace says ~<b>${Math.round(paceKcal)}</b> by now — room to eat toward the floor.`);
-  else                   show('good', `On pace — ~<b>${Math.round(paceKcal)}</b> expected by now, you're at <b>${Math.round(t.kcal)}</b>.`);
+  const nextTxt = nextMeal ? ` · next: ${escapeHtml(nextMeal.name)} ${nextMeal.t} (~${nextMeal.kcal}${nextMeal.p?`, ${nextMeal.p}g P`:''})` : '';
+  if (delta > 150)       show('warn', `Ahead of pace — ~<b>${Math.round(paceKcal)}</b> expected by now, you're at <b>${Math.round(t.kcal)}</b>. Ease off.${nextTxt}`);
+  else if (delta < -200) show('', `Pace says ~<b>${Math.round(paceKcal)}</b> by now — room to eat.${nextTxt}`);
+  else                   show('good', `On pace — ~<b>${Math.round(paceKcal)}</b> by now, you're at <b>${Math.round(t.kcal)}</b>.${nextTxt}`);
+}
+// Parse "HH:MM" → hours-of-day (float), or null. mealPlanHours() = the plan sorted, timed.
+function hoursOf(hhmm){ const m=/^(\d{1,2}):(\d{2})$/.exec(String(hhmm||'').trim()); if(!m) return null;
+  const H=+m[1], M=+m[2]; return (H<=23 && M<=59) ? H + M/60 : null; }
+function mealPlanHours(){
+  return MEAL_PLAN.map(m=>({h:hoursOf(m.t), t:m.t, kcal:+m.kcal||0, name:m.name||'meal'}))
+    .filter(m=>m.h!=null && m.kcal>0).sort((a,b)=>a.h-b.h);
 }
 function render() {
   applyAdaptiveCorridor();   // set the effective corridor before anything reads FLOOR/CEIL
@@ -1068,7 +1179,12 @@ function render() {
 
   // Corridor title badge: shows when the goal is auto-driving the numbers.
   const cm = document.getElementById('corridorMode');
-  cm.textContent = CORRIDOR_AUTO ? ` · auto ${GOAL_LABEL[GOAL.mode]} (TDEE ${CORRIDOR_AUTO.tdee.toLocaleString()})` : '';
+  if (CORRIDOR_AUTO){
+    const dayTxt = CORRIDOR_AUTO.cycled
+      ? ` · ${CORRIDOR_AUTO.training ? CORRIDOR_AUTO.split+' day' : 'rest day'} ${CORRIDOR_AUTO.off>=0?'+':''}${CORRIDOR_AUTO.off}`
+      : '';
+    cm.textContent = ` · auto ${GOAL_LABEL[GOAL.mode]}${dayTxt} (TDEE ${CORRIDOR_AUTO.tdee.toLocaleString()})`;
+  } else cm.textContent = '';
   renderPace(t, pct);        // moving pace marker + protein-aware steering (live day only)
 
   const set = (id,v)=>document.getElementById(id).textContent=v;
@@ -1102,15 +1218,7 @@ function render() {
       document.getElementById('pPerKg').textContent = `${(t.p/bw).toFixed(2)} g/kg · goal ${perKg} (${Math.round(perKg*bw)}g)`; }
     else document.getElementById('pPerKg').textContent = base;
   } else document.getElementById('pPerKg').textContent = '';
-  // Micronutrients for the day. Partial by nature — only foods carrying USDA micro data
-  // (i.e. logged after this feature shipped) contribute; shown only once something does.
-  const micro = document.getElementById('microLine');
-  if (t.fib>0 || t.sug>0 || t.na>0){
-    micro.style.display='block';
-    micro.innerHTML = `<div class="panel-title" style="margin-bottom:6px">Micros today · from USDA data</div>`
-      + `<div style="display:flex;gap:18px;font-family:var(--mono);font-size:13px;color:var(--ink)">`
-      + `<span>Fiber <b>${t.fib.toFixed(0)}</b>g</span><span>Sugar <b>${t.sug.toFixed(0)}</b>g</span><span>Sodium <b>${Math.round(t.na)}</b>mg</span></div>`;
-  } else micro.style.display='none';
+  renderMicros(t);           // micronutrient panel with under/over flags (partial-data caveat inside)
 
   // ledger table
   const body = document.getElementById('ledgerBody');
@@ -1214,7 +1322,7 @@ function renderHistory(){
         const base = e.base || DB[e.name];
         if (!base) return;
         if (e.base) registerFood(e.name, e.base, e.source);
-        ledger.push(computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source));
+        pushEntry(computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source));
       });
       save(); render();
       window.scrollTo({top:0, behavior:'smooth'});
@@ -1286,7 +1394,7 @@ function wireEmptyLedgerChips(){
       const e = f.e, base = e.base || DB[e.name];
       if (!base) return;
       if (base && !foodBase[e.name]) registerFood(e.name, base, e.source);
-      ledger.push(computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source));
+      pushEntry(computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source));
       haptic(); save(); render();
     };
   });
@@ -1337,7 +1445,7 @@ function renderTemplates(){
         const base = e.base || DB[e.name];
         if (!base) return;
         if (e.base) registerFood(e.name, e.base, e.source);
-        ledger.push(computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source));
+        pushEntry(computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source));
       });
       save(); render();
     };
@@ -1595,12 +1703,18 @@ function renderGoal(){
   out.style.display='block';
   const td=computeTDEE();
   if (!(td.blended>0)){ out.className='tactical'; out.textContent='Fill in your profile and log a weight to activate the auto corridor.'; return; }
-  const c=LedgerCore.corridorFromTDEE(td.blended, goalOffset(), GOAL.band||100);
+  const off=effectiveOffset();
+  const c=LedgerCore.corridorFromTDEE(td.blended, off, GOAL.band||100);
   const kg=latestWeight(), perKg=GOAL_PROTEIN_PER_KG[GOAL.mode]||1.8;
   const pg = kg>0 ? ` · protein ${perKg} g/kg ≈ ${Math.round(perKg*kg)}g` : '';
-  const off=goalOffset(), offTxt = off>0?`+${off}`:`${off}`;
+  const offTxt = off>0?`+${off}`:`${off}`;
+  const dayTxt = TRAIN.cycle ? ` · ${isTrainingDay(ACTIVE_DATE)?splitForDate(ACTIVE_DATE)+' day':'rest day'}` : '';
   out.className='tactical good';
-  out.innerHTML = `<b>${GOAL_LABEL[GOAL.mode]}</b> · corridor <b>${c.floor.toLocaleString()}–${c.ceil.toLocaleString()}</b>/day (TDEE ${td.blended.toLocaleString()} ${offTxt})${pg}. Recalibrates as your data grows.`;
+  out.innerHTML = `<b>${GOAL_LABEL[GOAL.mode]}${dayTxt}</b> · corridor <b>${c.floor.toLocaleString()}–${c.ceil.toLocaleString()}</b>/day (TDEE ${td.blended.toLocaleString()} ${offTxt})${pg}. Recalibrates as your data grows.`;
+  // Per-meal protein plan — distributed across the meal plan by calories (spread aids MPS).
+  const meals=mealPlanHours(), mt=meals.reduce((s,m)=>s+m.kcal,0);
+  if (meals.length && mt>0 && P_TARGET>0)
+    out.innerHTML += `<div style="margin-top:6px;font-size:11px;color:var(--ink-dim)">Protein/meal (g): ${meals.map(m=>`${escapeHtml(m.name)} ${Math.round(P_TARGET*m.kcal/mt)}`).join(' · ')}</div>`;
 }
 // Trailing 28-day weight rate (kg/wk) for the brief and weekly narrative.
 function weekRatePerWeek(){
@@ -1629,8 +1743,9 @@ function maybeShowBrief(){
     const yt=totalsOf(days[0].ledger);
     const yMark = yt.kcal>CEIL_M?'over ceiling':(yt.kcal>=FLOOR_M?'in corridor ✓':'under floor');
     let msg='Good morning. ';
+    msg += isTrainingDay(ACTIVE_DATE) ? `${escapeHtml(splitForDate(ACTIVE_DATE))} day (${TRAIN.start}). ` : `Rest day. `;
     msg += CORRIDOR_AUTO
-      ? `${GOAL_LABEL[GOAL.mode]} — today's target <b>${FLOOR}–${CEIL}</b> (TDEE ${CORRIDOR_AUTO.tdee.toLocaleString()}). `
+      ? `Target <b>${FLOOR}–${CEIL}</b> (TDEE ${CORRIDOR_AUTO.tdee.toLocaleString()}). `
       : `Target <b>${FLOOR}–${CEIL}</b>. `;
     const r=weekRatePerWeek();
     if (r!=null) msg += (Math.abs(r)<0.05?'Weight holding steady. ':(r<0?`Trending down ${Math.abs(r).toFixed(2)} kg/wk. `:`Trending up ${r.toFixed(2)} kg/wk. `));
@@ -1641,6 +1756,57 @@ function maybeShowBrief(){
     card.style.display='flex';
     setKey('ledger_brief_seen', ACTIVE_DATE);                 // once per day, even across reloads
   }catch(e){}
+}
+
+// ---- MICRONUTRIENTS: recovery-focused panel with under/over flags ----
+// Daily reference values (m = male, f = female). 'limit' nutrients (sodium/sugar) flag high;
+// the rest flag low. Targets are general adult references, not medical advice.
+const MICROS = [
+  {key:'fib', name:'Fiber',      unit:'g',  t:{m:38,f:25},     limit:false},
+  {key:'k',   name:'Potassium',  unit:'mg', t:{m:3400,f:2600}, limit:false, rec:true},
+  {key:'mg',  name:'Magnesium',  unit:'mg', t:{m:400,f:310},   limit:false, rec:true},
+  {key:'ca',  name:'Calcium',    unit:'mg', t:{m:1000,f:1000}, limit:false},
+  {key:'fe',  name:'Iron',       unit:'mg', t:{m:8,f:18},      limit:false},
+  {key:'zn',  name:'Zinc',       unit:'mg', t:{m:11,f:8},      limit:false},
+  {key:'vc',  name:'Vitamin C',  unit:'mg', t:{m:90,f:75},     limit:false, rec:true},
+  {key:'vd',  name:'Vitamin D',  unit:'µg', t:{m:15,f:15},     limit:false},
+  {key:'na',  name:'Sodium',     unit:'mg', t:{m:2300,f:2300}, limit:true,  rec:true},
+  {key:'sug', name:'Sugar',      unit:'g',  t:{m:50,f:50},     limit:true}
+];
+function renderMicros(t){
+  const wrap = document.getElementById('microLine');
+  if (!MICROS.some(mi => (t[mi.key]||0) > 0)){ wrap.style.display='none'; return; }
+  const sex = PROFILE.sex==='female' ? 'f' : 'm';
+  const training = isTrainingDay(VIEW_DATE);   // emphasise recovery nutrients on training days
+  const colour = { ok:'var(--ok)', near:'var(--warn)', over:'var(--bad)', low:'var(--warn)', verylow:'var(--bad)', na:'var(--ink-faint)' };
+  const badge  = { over:'over', verylow:'very low', low:'low', near:'near limit', ok:'', na:'' };
+  let low=0, over=0;
+  const rows = MICROS.map(mi=>{
+    const val = t[mi.key]||0, target = mi.t[sex];
+    const status = LedgerCore.microStatus(val, target, mi.limit);
+    if (status==='low'||status==='verylow') low++;
+    if (status==='over') over++;
+    const w = Math.min(100, target>0 ? val/target*100 : 0);
+    const shown = val<10 ? val.toFixed(1) : Math.round(val);
+    const recTag = (training && mi.rec) ? ' <span style="color:var(--accent)" title="supports recovery on training days">⚡</span>' : '';
+    return `<div class="micro-row">
+      <span class="micro-name">${mi.name}${recTag}</span>
+      <span class="micro-bar"><span style="width:${w}%;background:${colour[status]}"></span></span>
+      <span class="micro-val num">${shown}<small>/${target}${mi.unit}</small></span>
+      <span class="micro-flag" style="color:${colour[status]}">${badge[status]}</span>
+    </div>`;
+  }).join('');
+  const summary = (low||over)
+    ? [low?`${low} low`:'', over?`${over} over`:''].filter(Boolean).join(' · ')
+    : 'tracked micros on target';
+  const recNote = training
+    ? `<div class="tactical" style="margin-top:8px;font-size:11px;border-color:var(--accent)">⚡ ${escapeHtml(splitForDate(VIEW_DATE))} day — potassium, magnesium, sodium &amp; vitamin C support recovery; keep these topped up.</div>`
+    : '';
+  wrap.style.display='block';
+  wrap.innerHTML = `<details><summary class="panel-title" style="cursor:pointer;margin:0">Micronutrients · ${summary} ▸</summary>
+    <div style="margin-top:12px">${rows}${recNote}
+      <div class="tactical" style="margin-top:10px;font-size:11px;line-height:1.5">From USDA-matched foods only — AI estimates and older entries add nothing, so a low reading can mean under-<i>tracked</i>, not under-eaten. Sodium &amp; sugar are limits. General references, not medical advice.</div>
+    </div></details>`;
 }
 
 // ---- INTELLIGENCE DASHBOARD ----
@@ -2128,7 +2294,7 @@ document.getElementById('ternAdd').onclick = ()=>{
   tState.foods.forEach((name,i)=>{
     const g = Math.round(grams[i]);
     if (g < 1) return;
-    ledger.push(computeEntry(name, g, true, false, false, getBase(name), foodSource[name] || 'DB'));
+    pushEntry(computeEntry(name, g, true, false, false, getBase(name), foodSource[name] || 'DB'));
     added++;
   });
   if (added){
@@ -2501,7 +2667,7 @@ function commitPending(){
     const r = pendResolve(p);
     const name = r.source==='USDA' ? r.label : p.name;   // log under the real matched food name
     registerFood(name, r.base, r.source);
-    ledger.push(computeEntry(name, p.grams, p.weighed, p.isCurry, false, r.base, r.source));
+    pushEntry(computeEntry(name, p.grams, p.weighed, p.isCurry, false, r.base, r.source));
     added++;
   });
   pending = []; renderPending();
@@ -2702,7 +2868,7 @@ document.getElementById('addBtn').onclick = ()=>{
   const e = computeEntry(name, grams,
     document.getElementById('weighed').checked, false, false,
     getBase(name), foodSource[name] || 'DB');
-  ledger.push(e);
+  pushEntry(e);
   document.getElementById('grams').value='';
   clearProjection(); haptic();
   save(); render();
@@ -2797,6 +2963,39 @@ function fillTargetInputs(){
   document.getElementById('penP').value   = Math.round((1-DEDUCT)*100);
   document.getElementById('penOK').value  = OIL_KCAL;
   document.getElementById('penOF').value  = OIL_FAT;
+  fillMealPlan(); fillTrain();
+}
+// Meal plan editor: one "HH:MM kcal Name" per line.
+function mealPlanToText(){ return MEAL_PLAN.map(m=>`${m.t} ${m.kcal} ${m.name}`).join('\n'); }
+function fillMealPlan(){ const el=document.getElementById('mealPlanInput'); if (el && document.activeElement!==el) el.value = mealPlanToText(); }
+function parseMealPlan(txt){
+  const out=[];
+  String(txt||'').split('\n').forEach(line=>{
+    const m=/^\s*(\d{1,2}:\d{2})\s+(\d+)\s+(.+?)\s*$/.exec(line);
+    if (m && hoursOf(m[1])!=null) out.push({t:m[1], kcal:+m[2], name:m[3].trim()});
+  });
+  return out.sort((a,b)=>hoursOf(a.t)-hoursOf(b.t));
+}
+// Training schedule editor.
+function trainSplitToText(){ return TRAIN.split.map((s,i)=>`${WEEKDAYS[i]} ${s}`).join('\n'); }
+function fillTrain(){
+  const el=document.getElementById('trainSplitInput'); if(!el) return;
+  if (document.activeElement!==el) el.value = trainSplitToText();
+  document.getElementById('trainStart').value  = TRAIN.start;
+  document.getElementById('trainEnd').value    = TRAIN.end;
+  document.getElementById('trainCycle').checked = TRAIN.cycle;
+  document.getElementById('trainOffset').value = TRAIN.trainOffset;
+  document.getElementById('restOffset').value  = TRAIN.restOffset;
+  document.getElementById('cycleOffsets').style.display = TRAIN.cycle ? '' : 'none';
+}
+function parseTrainSplit(txt){
+  const map={mon:0,tue:1,wed:2,thu:3,fri:4,sat:5,sun:6};
+  const out = TRAIN.split.slice();
+  String(txt||'').split('\n').forEach(line=>{
+    const m=/^\s*([A-Za-z]{3})[A-Za-z]*\s+(.+?)\s*$/.exec(line);
+    if (m){ const idx=map[m[1].toLowerCase()]; if (idx!=null) out[idx]=m[2].trim(); }
+  });
+  return out;
 }
 document.getElementById('saveTargets').onclick = ()=>{
   const st = document.getElementById('targetStatus');
@@ -2818,6 +3017,37 @@ document.getElementById('resetTargets').onclick = ()=>{
   C_CAP={mode:'g', val:0}; F_CAP={mode:'g', val:0};
   saveTargets(); fillTargetInputs(); render();
   setStatus(document.getElementById('targetStatus'),'Protocol defaults restored (1700/1900 · 120g protein · caps off).','good');
+};
+document.getElementById('saveMealPlan').onclick = ()=>{
+  const st = document.getElementById('mealPlanStatus');
+  const plan = parseMealPlan(document.getElementById('mealPlanInput').value);
+  if (!plan.length){ setStatus(st,'No valid lines. Format: "HH:MM kcal Name" (e.g. 07:30 800 Breakfast).','bad'); return; }
+  MEAL_PLAN = plan; saveTargets(); fillMealPlan(); render();
+  setStatus(st, `Saved ${plan.length} meals · plan total ${plan.reduce((s,m)=>s+m.kcal,0)} kcal (scaled to your corridor).`, 'good');
+};
+document.getElementById('clearMealPlan').onclick = ()=>{
+  MEAL_PLAN = []; saveTargets(); fillMealPlan(); render();
+  setStatus(document.getElementById('mealPlanStatus'),'Meal plan cleared — pacing is now an even linear ramp.','good');
+};
+document.getElementById('trainCycle').addEventListener('change', ()=>{
+  document.getElementById('cycleOffsets').style.display = document.getElementById('trainCycle').checked ? '' : 'none';
+});
+document.getElementById('saveTrain').onclick = ()=>{
+  const st = document.getElementById('trainStatus');
+  TRAIN.split       = parseTrainSplit(document.getElementById('trainSplitInput').value);
+  TRAIN.start       = document.getElementById('trainStart').value || '18:00';
+  TRAIN.end         = document.getElementById('trainEnd').value   || '20:00';
+  TRAIN.cycle       = document.getElementById('trainCycle').checked;
+  TRAIN.trainOffset = +document.getElementById('trainOffset').value || 0;
+  TRAIN.restOffset  = +document.getElementById('restOffset').value  || 0;
+  saveTargets(); fillTrain(); render();
+  const nTrain = TRAIN.split.filter(s=> s && s.trim().toLowerCase()!=='rest').length;
+  let msg = `Saved · ${nTrain} training day${nTrain===1?'':'s'} (${TRAIN.start}–${TRAIN.end}).`;
+  if (TRAIN.cycle && nTrain>0){
+    const avg = Math.round((nTrain*TRAIN.trainOffset + (7-nTrain)*TRAIN.restOffset)/7);
+    msg += ` Corridor cycles: train ${TRAIN.trainOffset>=0?'+':''}${TRAIN.trainOffset}, rest ${TRAIN.restOffset>=0?'+':''}${TRAIN.restOffset} · weekly avg ${avg>=0?'+':''}${avg}.`;
+  }
+  setStatus(st, msg, 'good');
 };
 document.getElementById('savePens').onclick = ()=>{
   const st = document.getElementById('targetStatus');
@@ -2843,7 +3073,7 @@ document.getElementById('exportBtn').onclick = async ()=>{
   allDays(true).forEach(d => { days[d.date] = d.ledger; });
   days[VIEW_DATE] = ledger;                       // the on-screen day's live state wins
   const payload = { exported: dateStr(), version: 2,
-    targets: {floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,goal:GOAL},
+    targets: {floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN},
     pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
     weights: weightsMap(), templates: templates(),
     days, date: ACTIVE_DATE, ledger, totals: totals() };   // date/ledger kept for v1 compat
@@ -3082,7 +3312,7 @@ async function syncNow(){
     saveWeights(wm.days, wm.meta);
     load(); updateDayLabel(); render();        // reflect whatever the merge decided for the on-screen day
     const state = { v:1, days: merged.days, meta: merged.meta,
-      targets: {floor:FLOOR_M, ceil:CEIL_M, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP, maint:MAINT, profile:PROFILE, goal:GOAL},
+      targets: {floor:FLOOR_M, ceil:CEIL_M, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP, maint:MAINT, profile:PROFILE, goal:GOAL, mealPlan:MEAL_PLAN, train:TRAIN},
       pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
       tUpdated: targetsStamp(),
       templates: templates(), tplUpdated: tplStamp(),
