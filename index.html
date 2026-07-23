@@ -3417,14 +3417,27 @@ document.getElementById('importFile').onchange = (ev)=>{
 // The new SW skipWaiting()s on install; when it takes over an existing page,
 // offer a one-tap reload so the fresh shell actually loads.
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', ()=>{
-    navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW registration failed:', err));
-  });
   const hadController = !!navigator.serviceWorker.controller;
-  navigator.serviceWorker.addEventListener('controllerchange', ()=>{
-    if (hadController) document.getElementById('toast').style.display='block';
-  });
+  const showToast = ()=>{ if (hadController) document.getElementById('toast').style.display='block'; };
   document.getElementById('toast').onclick = ()=> location.reload();
+  // controllerchange fires when the fresh SW (skipWaiting + clients.claim) takes over.
+  navigator.serviceWorker.addEventListener('controllerchange', showToast);
+  window.addEventListener('load', ()=>{
+    // updateViaCache:'none' forces the browser to re-fetch sw.js bypassing the HTTP cache,
+    // so a new version is detected even while GitHub Pages still serves a cached script.
+    navigator.serviceWorker.register('sw.js', {updateViaCache:'none'}).then(reg=>{
+      reg.update();                                    // check for a new SW right away
+      reg.addEventListener('updatefound', ()=>{        // and when one starts installing
+        const nw = reg.installing; if (!nw) return;
+        nw.addEventListener('statechange', ()=>{ if (nw.state==='activated') showToast(); });
+      });
+    }).catch(err => console.warn('SW registration failed:', err));
+  });
+  // Re-check whenever the app is reopened or refocused — catches updates without a manual reload.
+  document.addEventListener('visibilitychange', ()=>{
+    if (document.visibilityState==='visible')
+      navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(()=>{});
+  });
 }
 
 // Hydrate key fields from storage on boot.
