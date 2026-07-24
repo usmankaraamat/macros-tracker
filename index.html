@@ -291,6 +291,15 @@
   .tern-foods { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 10px; }
   .tern-foods label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; }
   .tern-foods select { padding: 7px 8px; font-size: 11px; }
+  .tern-pick { display: flex; gap: 4px; align-items: stretch; }
+  .tern-pick select { flex: 1; min-width: 0; }
+  .tern-find { flex: 0 0 auto; padding: 0 8px; font-size: 12px; line-height: 1;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+    color: var(--ink-dim); box-shadow: none; }
+  .tern-find:hover { transform: none; box-shadow: none; color: var(--accent); border-color: var(--accent); }
+  .tern-search { margin: 0 0 12px; padding: 12px; border: 1px solid var(--line);
+    border-radius: 8px; background: rgba(0,0,0,0.14); }
+  .tern-search label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; }
   .tern-target { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin-bottom: 12px; }
   .tern-target .hint { font-size: 10px; color: var(--ink-faint); white-space: nowrap; padding-bottom: 10px; }
   .tern-stage { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
@@ -681,9 +690,22 @@
 <div class="panel intel-section">
   <div class="panel-title">Meal engineer · balance 3 foods to a calorie target</div>
   <div class="tern-foods">
-    <div><label>Food A</label><select id="ternA"></select></div>
-    <div><label>Food B</label><select id="ternB"></select></div>
-    <div><label>Food C</label><select id="ternC"></select></div>
+    <div><label>Food A</label><div class="tern-pick"><select id="ternA"></select><button class="tern-find" data-slot="0" title="Search any food for this slot">🔍</button></div></div>
+    <div><label>Food B</label><div class="tern-pick"><select id="ternB"></select><button class="tern-find" data-slot="1" title="Search any food for this slot">🔍</button></div></div>
+    <div><label>Food C</label><div class="tern-pick"><select id="ternC"></select><button class="tern-find" data-slot="2" title="Search any food for this slot">🔍</button></div></div>
+  </div>
+  <!-- Shared USDA search: 🔍 on a slot opens this; picking a result fills that slot with any food. -->
+  <div id="ternSearch" class="tern-search" style="display:none">
+    <div class="row" style="grid-template-columns:1fr 76px">
+      <div>
+        <label id="ternSearchLbl">Search any food (USDA) → Slot A</label>
+        <input type="text" id="ternSearchIn" placeholder="e.g. greek yogurt, salmon, lentils">
+      </div>
+      <div style="display:flex;align-items:flex-end">
+        <button id="ternSearchBtn" style="height:38px">Find</button>
+      </div>
+    </div>
+    <div id="ternSearchResults" style="margin-top:8px"></div>
   </div>
   <div class="tern-target">
     <div><label>Calorie target</label><input type="number" id="ternKcal" min="50" step="10"></div>
@@ -2285,6 +2307,50 @@ document.getElementById('ternKcal').addEventListener('input', ()=>{ tState.kcalT
 ['ternA','ternB','ternC'].forEach((id,slot)=>{
   document.getElementById(id).addEventListener('change', e=>{ tState.foods[slot] = e.target.value; renderTernary(); });
 });
+
+// ---- Ternary slot search: pick ANY food (USDA), not just the registered few ----
+// A 🔍 on a slot opens the shared search; a chosen result is registered into the food
+// registry (so it joins every select) and assigned to that slot.
+let ternSearchSlot = 0;
+function openTernSearch(slot){
+  ternSearchSlot = slot;
+  const box = document.getElementById('ternSearch');
+  document.getElementById('ternSearchLbl').textContent =
+    'Search any food (USDA) → Slot ' + 'ABC'[slot];
+  box.style.display = '';
+  document.getElementById('ternSearchResults').innerHTML = '';
+  const inp = document.getElementById('ternSearchIn');
+  inp.focus(); inp.select();
+}
+document.querySelectorAll('.tern-find').forEach(btn=>{
+  btn.onclick = ()=> openTernSearch(+btn.dataset.slot);
+});
+document.getElementById('ternSearchBtn').onclick = async ()=>{
+  const q = document.getElementById('ternSearchIn').value.trim();
+  const out = document.getElementById('ternSearchResults');
+  if (!q){ out.innerHTML=''; return; }
+  out.innerHTML = '<div class="tactical"><span class="spin"></span>Searching USDA…</div>';
+  try {
+    const results = await usdaSearch(q);
+    if (!results.length){ out.innerHTML='<div class="tactical">No matches.</div>'; return; }
+    out.innerHTML = results.map((r,i)=>
+      `<div class="result">
+         <div><div class="rname">${escapeHtml(r.name)}</div>
+           <div class="rmeta">${Math.round(r.base.kcal)} kcal · P ${r.base.p.toFixed(1)} · F ${r.base.f.toFixed(1)} /100g</div></div>
+         <button class="sm" data-i="${i}">Use</button>
+       </div>`).join('');
+    out.querySelectorAll('button[data-i]').forEach(btn=>{
+      btn.onclick = ()=>{
+        const r = results[+btn.dataset.i];
+        registerFood(r.name, r.base, 'USDA');   // joins every food select, incl. the ternary slots
+        tState.foods[ternSearchSlot] = r.name;
+        document.getElementById('ternSearch').style.display = 'none';
+        renderTernary();
+      };
+    });
+  } catch(err){ out.innerHTML = `<div class="tactical bad">${escapeHtml(err.message)}</div>`; }
+};
+document.getElementById('ternSearchIn').addEventListener('keydown', e=>{ if (e.key==='Enter') document.getElementById('ternSearchBtn').click(); });
 document.getElementById('ternAdd').onclick = ()=>{
   const foods = ternFoodObjs();
   const kcal = ternTargetKcal();
