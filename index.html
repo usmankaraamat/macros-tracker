@@ -380,6 +380,7 @@
     color: var(--ink-dim); box-shadow: none; text-shadow: none; font-size: 12px; padding: 10px 14px; }
   .omni-chip:hover { background: var(--panel-2); color: var(--ink); box-shadow: none; }
   .omni-chip.on { border-color: var(--accent); color: var(--ink); background: rgba(59,130,246,0.1); }
+  .omni-chip.icon-chip { padding: 10px 12px; font-size: 15px; line-height: 1; }
 
   /* pill toggle replaces the tiny weighed checkbox */
   .pill-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -629,8 +630,8 @@
   <input type="file" id="photoGallery" accept="image/*" style="display:none">
   <div class="omni-actions">
     <button id="parseBtn" class="omni-primary">Parse meal</button>
-    <button class="omni-chip" id="photoBtn" title="Take a photo of the meal — sent to the AI under your key">📷 Camera</button>
-    <button class="omni-chip" id="galleryBtn" title="Choose a meal photo from your gallery — sent to the AI under your key">🖼️ Gallery</button>
+    <button class="omni-chip icon-chip" id="photoBtn" aria-label="Take a photo" title="Take a photo of the meal — sent to the AI under your key">📷</button>
+    <button class="omni-chip icon-chip" id="galleryBtn" aria-label="Choose from gallery" title="Choose a meal photo from your gallery — sent to the AI under your key">🖼️</button>
     <button class="omni-chip" id="manualToggle" title="Log a food by manual USDA search">🔍 Manual</button>
   </div>
   <div class="tactical" id="parseStatus" style="margin-top:8px;display:none"></div>
