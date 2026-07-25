@@ -624,10 +624,13 @@
     <span id="photoName" class="ink-dim"></span>
     <span class="del" id="photoClear" title="remove photo">✕</span>
   </div>
+  <!-- Two pickers: camera (capture) forces the camera on mobile; gallery (no capture) opens the photo library. -->
   <input type="file" id="photoFile" accept="image/*" capture="environment" style="display:none">
+  <input type="file" id="photoGallery" accept="image/*" style="display:none">
   <div class="omni-actions">
     <button id="parseBtn" class="omni-primary">Parse meal</button>
-    <button class="omni-chip" id="photoBtn" title="Photo of the meal — sent to the AI under your key">📷 Photo</button>
+    <button class="omni-chip" id="photoBtn" title="Take a photo of the meal — sent to the AI under your key">📷 Camera</button>
+    <button class="omni-chip" id="galleryBtn" title="Choose a meal photo from your gallery — sent to the AI under your key">🖼️ Gallery</button>
     <button class="omni-chip" id="manualToggle" title="Log a food by manual USDA search">🔍 Manual</button>
   </div>
   <div class="tactical" id="parseStatus" style="margin-top:8px;display:none"></div>
@@ -2096,9 +2099,7 @@ function renderHeatmap() {
 
 // SPARKLINE: last ~14 days of kcal against the corridor band (inline SVG, no deps).
 function renderSparkline() {
-  const all = allDays(false).slice().reverse();          // oldest → newest
-  if (ledger.length) all.push({ date: VIEW_DATE, ledger });
-  all.sort((a,b)=> a.date<b.date ? -1 : 1);              // keep order after the overlay
+  const all = closedDays().sort((a,b)=> a.date<b.date ? -1 : 1);   // oldest → newest, open day excluded
   const pts = all.slice(-14).map(d => ({ date: d.date, kcal: totalsOf(d.ledger).kcal }));
   if (pts.length < 2) return '';
   const W = 300, H = 64, padT = 6, padB = 10, padL = 4, padR = 4;
@@ -2123,9 +2124,7 @@ function renderSparkline() {
 // 6. WEEKLY REPORT CARD
 function renderWeeklyReport() {
   const wrap = document.getElementById('weeklyReport');
-  const all = allDays(false);
-  if (ledger.length) all.unshift({ date: VIEW_DATE, ledger });
-  all.sort((a,b)=> a.date<b.date ? 1 : -1);               // newest first after the overlay
+  const all = closedDays();          // open day excluded — matches the rolling averages exactly
   if (all.length < 2) { wrap.innerHTML = '<div class="empty">Need at least 2 days of data.</div>'; return; }
 
   const week = all.slice(0, Math.min(7, all.length));
@@ -2875,14 +2874,18 @@ function shrinkImage(file){
   });
 }
 document.getElementById('photoBtn').onclick = ()=> document.getElementById('photoFile').click();
+document.getElementById('galleryBtn').onclick = ()=> document.getElementById('photoGallery').click();
 document.getElementById('photoClear').onclick = ()=> setMealPhoto(null);
-document.getElementById('photoFile').onchange = async (ev)=>{
+// Shared by both the camera and gallery inputs — same downscale/attach path.
+async function handlePhotoPick(ev){
   const file = ev.target.files[0]; ev.target.value = '';
   if (!file) return;
   const status = document.getElementById('parseStatus');
   try { setMealPhoto(await shrinkImage(file), file.name); setStatus(status, 'Photo attached — add notes if you like, then Parse meal.'); }
   catch(e){ setStatus(status, e.message, 'bad'); }
-};
+}
+document.getElementById('photoFile').onchange = handlePhotoPick;
+document.getElementById('photoGallery').onchange = handlePhotoPick;
 
 // AI meal parse → resolve each item against USDA, else keep the AI estimate.
 document.getElementById('parseBtn').onclick = async ()=>{
