@@ -1672,6 +1672,11 @@ function renderFatEstimate(){
     const first=+map[wIn[0]], last=+map[wIn[wIn.length-1]];
     const dw=last-first, wdays=Math.round((Date.parse(wIn[wIn.length-1])-Date.parse(wIn[0]))/86400000);
     raw+=` · weight ${first}→${last} kg (<b>${dw>=0?'+':''}${dw.toFixed(1)} kg</b> over ${wdays} day${wdays>1?'s':''})`;
+    // Maintenance from your own numbers: intake minus the daily kcal the weight change accounts for.
+    if (wdays>0){
+      const maint=Math.round((avgIn - dw*7700/wdays)/5)*5;
+      raw+=` → implied maintenance ≈ <b>${maint.toLocaleString()}</b> kcal/day`;
+    }
   } else {
     raw+=` · weight Δ n/a — needs 2+ weigh-ins in range`;
   }
