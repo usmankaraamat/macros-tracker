@@ -434,7 +434,7 @@
 <div class="panel" id="settingsPanel" style="display:none">
   <div class="panel-title">Settings · API keys — stored in this browser only, never uploaded</div>
   <label>USDA FoodData Central key</label>
-  <input type="password" id="usdaKey" placeholder="optional — a shared key is built in; paste your own for a private quota" autocomplete="off" style="margin-bottom:10px">
+  <input type="password" id="usdaKey" placeholder="required for food search — free key at fdc.nal.usda.gov/api-key-signup" autocomplete="off" style="margin-bottom:10px">
   <label>Gemini API key</label>
   <input type="password" id="geminiKey" placeholder="AIza…" autocomplete="off" style="margin-bottom:10px">
   <label>Gemini model</label>
@@ -989,10 +989,9 @@ let _prevLedgerLen = 0;                      // for flashing newly-added ledger 
 const LS = { usda:'ledger_usda_key', gem:'ledger_gemini_key', model:'ledger_gemini_model',
              or:'ledger_openrouter_key',
              supaUrl:'ledger_supa_url', supaKey:'ledger_supa_key', pass:'ledger_sync_pass' };
-// Shared default USDA key so the app works out of the box. Deliberately public: USDA
-// keys are free, unbilled, and per-key throttled (1,000 req/hr → 429). A personal key
-// in Settings overrides it and gets its own quota lane.
-const USDA_DEFAULT_KEY = '32EXShdn5fDWQz84KCuGPgNRnLwR5cbN6WxxFuPh';
+// USDA food search needs a personal key — free, unbilled, per-key throttled (1,000
+// req/hr). No shared default is embedded: data.gov deactivates any key committed to a
+// public repo, so each user pastes their own in Settings (fdc.nal.usda.gov/api-key-signup).
 // Built-in sync backend. The publishable key is public by design (anon role only);
 // rows are unguessable 256-bit ids holding client-side-encrypted blobs, so the only
 // per-user secret is the passphrase. Settings can override both for self-hosted forks.
@@ -1000,7 +999,7 @@ const SUPA_DEFAULT_URL = 'https://rekcgerktrykotwzppkz.supabase.co';
 const SUPA_DEFAULT_KEY = 'sb_publishable_adWOcEpQyprhtOBpjSLS7A_sYW58wkX';
 function getKey(k){ try { return localStorage.getItem(k) || ''; } catch(e){ return ''; } }
 function setKey(k,v){ try { v ? localStorage.setItem(k,v) : localStorage.removeItem(k); } catch(e){} }
-function usdaKey(){ return getKey(LS.usda) || USDA_DEFAULT_KEY; }
+function usdaKey(){ return getKey(LS.usda); }
 function hasUSDA(){ return !!usdaKey(); }
 function hasGemini(){ return !!getKey(LS.gem); }
 function hasOR(){ return !!getKey(LS.or); }
@@ -1665,9 +1664,22 @@ function renderFatEstimate(){
       + `Scale check: expected ${expected>=0?'+':''}${expected.toFixed(2)} kg, actual ${actual>=0?'+':''}${actual.toFixed(2)} kg`
       + ` — ${agree?'model is tracking your weight':'diverging — logging gaps or maintenance is off'}.</span>`;
   }
+  // Raw ingredients for a by-hand maintenance check: avg intake + real weight delta over the range.
+  const avgIn=Math.round(e.sum/e.n);
+  let raw=`<span style="display:block;margin-top:5px;color:var(--ink-dim);border-left:2px solid var(--line);padding-left:8px">`
+    + `Avg intake <b>${avgIn.toLocaleString()}</b> kcal/day over ${e.n} logged day${e.n>1?'s':''}`;
+  if (wIn.length>=2){
+    const first=+map[wIn[0]], last=+map[wIn[wIn.length-1]];
+    const dw=last-first, wdays=Math.round((Date.parse(wIn[wIn.length-1])-Date.parse(wIn[0]))/86400000);
+    raw+=` · weight ${first}→${last} kg (<b>${dw>=0?'+':''}${dw.toFixed(1)} kg</b> over ${wdays} day${wdays>1?'s':''})`;
+  } else {
+    raw+=` · weight Δ n/a — needs 2+ weigh-ins in range`;
+  }
+  raw+=`</span>`;
+
   out.className=cls;
   out.innerHTML = `<b>${verdict}</b> over ${e.n} logged day${e.n>1?'s':''}${e.n<span?` of ${span}`:''}`
-    + ` · net ${netLo>0?'+':''}${netLo.toLocaleString()} to ${netHi>0?'+':''}${netHi.toLocaleString()} kcal vs maintenance ${maintTxt}.` + eva;
+    + ` · net ${netLo>0?'+':''}${netLo.toLocaleString()} to ${netHi>0?'+':''}${netHi.toLocaleString()} kcal vs maintenance ${maintTxt}.` + raw + eva;
 }
 
 // Latest logged bodyweight (kg), or 0 if none — used by TDEE and protein-per-kg.
@@ -2426,11 +2438,8 @@ async function usdaSearch(query, estKcal){
     } finally { clearTimeout(timer); }
   }
   if (netErr) throw new Error("Couldn't reach USDA — it may be slow or temporarily down. "
-    + "Check your connection and try again"
-    + (getKey(LS.usda) ? '.' : '; if it keeps failing, add your own free key in ⚙ Settings.'));
-  if (r.status === 429) throw new Error(getKey(LS.usda)
-    ? 'USDA API 429 — your key is rate-limited this hour, try later.'
-    : 'USDA API 429 — the shared key is rate-limited this hour. Get a free personal key at fdc.nal.usda.gov/api-key-signup and paste it in ⚙ Settings.');
+    + "Check your connection and try again.");
+  if (r.status === 429) throw new Error('USDA API 429 — your key is rate-limited this hour, try later.');
   if (!r.ok) throw new Error('USDA API ' + r.status
     + (r.status===403 ? ' — key rejected' : r.status===400 ? ' — bad request' : ''));
   const d = await r.json();
@@ -2778,7 +2787,7 @@ document.getElementById('gear').onclick = ()=>{
 function refreshKeyUI(){
   const st = document.getElementById('keyStatus');
   const bits = [];
-  bits.push(getKey(LS.usda) ? 'USDA ✓ (your key)' : 'USDA ✓ (shared key)');
+  bits.push(hasUSDA() ? 'USDA ✓ (your key)' : 'USDA — not set');
   bits.push(hasGemini() ? 'Gemini ✓' : 'Gemini — not set');
   if (hasOR()) bits.push('OpenRouter ✓');
   st.textContent = bits.join('  ·  ') + (hasUSDA()&&hasAI() ? '  · all systems go.' : '  · AI parse disabled until a Gemini or OpenRouter key is set.');
