@@ -287,6 +287,37 @@
   .report-bw .rbw-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-faint); margin-bottom: 4px; }
   .report-bw .rbw-val { font-family: var(--mono); font-size: 12px; color: var(--ink); }
 
+  /* ---- SUPPLEMENT CYCLE ---- */
+  .supp-card { display: flex; gap: 10px; align-items: center; padding: 10px 12px; margin-bottom: 8px;
+    border: 1px solid var(--line); border-radius: 10px; background: rgba(0,0,0,0.18); }
+  .supp-card.on   { border-color: var(--warn); background: rgba(245,158,11,0.10); }
+  .supp-card.done { border-color: var(--ok);   background: rgba(16,185,129,0.10); }
+  .supp-card.off  { opacity: 0.6; }
+  .supp-main { flex: 1; min-width: 0; }
+  .supp-name { font-size: 13px; font-weight: 600; }
+  .supp-name small { font-weight: 400; color: var(--ink-faint); font-family: var(--mono); font-size: 10px; }
+  .supp-sub { font-family: var(--mono); font-size: 10.5px; color: var(--ink-dim); margin-top: 2px; }
+  .supp-card.on .supp-sub   { color: var(--warn); }
+  .supp-card.done .supp-sub { color: var(--ok); }
+  .supp-strip { display: flex; gap: 3px; margin-top: 7px; }
+  /* One square per day, oldest → today. Outline = an ON day, fill = what actually happened. */
+  .supp-dot { width: 13px; height: 13px; border-radius: 3px; background: rgba(255,255,255,0.05); border: 1px solid var(--line); }
+  .supp-dot.due   { border-color: var(--warn); }
+  .supp-dot.hit   { background: var(--ok);  border-color: var(--ok); }
+  .supp-dot.miss  { background: rgba(239,68,68,0.35); border-color: var(--bad); }
+  .supp-dot.extra { background: rgba(59,130,246,0.40); border-color: var(--accent); }
+  .supp-dot.today { box-shadow: 0 0 0 2px rgba(255,255,255,0.22); }
+  .supp-take { flex: 0 0 auto; width: auto; padding: 8px 13px; font-size: 12px; }
+  .supp-row { display: flex; gap: 8px; align-items: center; justify-content: space-between;
+    padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
+  .supp-row:last-child { border-bottom: none; }
+  .supp-row .sr-sub { font-family: var(--mono); font-size: 10px; color: var(--ink-faint); }
+  .supp-days { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+  .supp-days .chip.on { border-color: var(--accent); color: var(--accent); background: rgba(59,130,246,0.12); }
+  .nav-badge { position: absolute; top: -4px; right: -9px; min-width: 15px; height: 15px; padding: 0 4px;
+    border-radius: 8px; background: var(--warn); color: #0c0e12;
+    font-family: var(--sans); font-size: 9px; font-weight: 800; line-height: 15px; text-align: center; }
+
   /* ---- TERNARY MEAL ENGINEER ---- */
   .tern-foods { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 10px; }
   .tern-foods label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; }
@@ -340,7 +371,7 @@
     flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
     color: var(--ink-faint); font-weight: 600; font-size: 9px; text-transform: uppercase;
     letter-spacing: 0.06em; padding: 6px 0; border-radius: 10px; transition: color 0.2s, background 0.2s; }
-  .tabnav button .ico { font-size: 19px; line-height: 1; }
+  .tabnav button .ico { font-size: 19px; line-height: 1; position: relative; }
   .tabnav button:hover { transform: none; box-shadow: none; color: var(--ink-dim); background: var(--panel-2); }
   .tabnav button.active { color: var(--accent); }
   .tabnav button.active .ico { filter: drop-shadow(0 0 6px var(--accent-glow)); }
@@ -681,6 +712,44 @@
 </main><!-- /tabToday -->
 
 <main id="tabEngineer" class="tabview" style="display:none">
+<!-- SUPPLEMENT CYCLE: the ON/OFF answer for the day on screen -->
+<div class="panel intel-section">
+  <div class="panel-title">Supplements · what's ON for <span id="suppDate">today</span></div>
+  <div id="suppToday"></div>
+  <div class="tactical" id="suppSummary" style="display:none;margin-top:8px"></div>
+
+  <details style="margin-top:14px">
+    <summary class="panel-title" style="cursor:pointer;margin-bottom:0">Manage protocols ▸</summary>
+    <div id="suppManage" style="margin-top:10px"></div>
+    <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+      <div class="targets-grid">
+        <div><label>Name</label><input type="text" id="suppName" placeholder="e.g. Vitamin D3"></div>
+        <div><label>Dose (optional)</label><input type="text" id="suppDose" placeholder="e.g. 5000 IU"></div>
+      </div>
+      <div class="targets-grid">
+        <div><label>Schedule</label><select id="suppKind">
+          <option value="every">every N days</option>
+          <option value="days">specific weekdays</option>
+        </select></div>
+        <div id="suppEveryWrap"><label>N — 2 = every other day</label><input type="number" id="suppEvery" min="1" step="1" value="2"></div>
+      </div>
+      <div class="targets-grid" id="suppPhaseWrap">
+        <div><label>Anchor — an ON day you're sure of</label><input type="date" id="suppAnchor"></div>
+        <div><label>Cycle</label><select id="suppMode">
+          <option value="fixed">fixed — locked to the calendar</option>
+          <option value="rolling">rolling — N days after the last dose</option>
+        </select></div>
+      </div>
+      <div id="suppDaysWrap" style="display:none;margin-bottom:10px">
+        <label>Days</label>
+        <div class="supp-days" id="suppDaysPick"></div>
+      </div>
+      <button class="sm" id="suppAddBtn">Add supplement</button>
+      <div class="tactical" id="suppFormMsg" style="margin-top:8px">Log the days you take it and the strip shows the pattern — no more guessing whether today is ON.</div>
+    </div>
+  </details>
+</div>
+
 <!-- BUDGET TRANSLATOR (replaces fridge closer) -->
 <div class="panel intel-section">
   <div class="panel-title">Meal combos to close the gap · <span id="solverTitle">1700</span> kcal target</div>
@@ -849,7 +918,7 @@
 <!-- BOTTOM NAVIGATION -->
 <nav class="tabnav">
   <button data-tab="today" class="active"><span class="ico">🏠</span>Today</button>
-  <button data-tab="engineer"><span class="ico">⚙️</span>Engineer</button>
+  <button data-tab="engineer"><span class="ico">⚙️<span class="nav-badge" id="suppBadge" style="display:none"></span></span>Engineer</button>
   <button data-tab="insights"><span class="ico">📊</span>Insights</button>
 </nav>
 
@@ -1292,6 +1361,8 @@ function render() {
   renderGoal();
   renderFatEstimate();
   renderTernary();
+  renderSupps();
+  renderSuppManage();
 }
 
 // ---- HISTORY PANEL ----
@@ -1476,6 +1547,177 @@ function renderTemplates(){
     };
   });
 }
+
+// ---- SUPPLEMENTS: alternate-day protocols and their dose log ----------------
+// Two stores, because they age differently. The PROTOCOLS are settings — one small list,
+// last-write-wins as a whole (same shape as templates). The DOSE LOG is per-day facts
+// ({date: [ids]}), so it merges date-by-date through mergeSyncStates exactly like ledger
+// days and weights: ticking a dose on your phone can't clobber yesterday's tick from the PC.
+// A supplement doubles as its own schedule object — core.js reads .every/.anchor/.mode/.days
+// off it directly, so there's no second shape to keep in step.
+function supps(){ try{ const l=JSON.parse(localStorage.getItem('ledger_supps')||'[]'); return Array.isArray(l)?l:[]; }catch(e){ return []; } }
+function suppsStamp(){ return getKey('ledger_supps_updated'); }
+function saveSupps(list){
+  try{ localStorage.setItem('ledger_supps', JSON.stringify(list)); }catch(e){}
+  setKey('ledger_supps_updated', new Date().toISOString());
+  scheduleSync(); renderSupps(); renderSuppManage();
+}
+function suppLog(){ try{ const m=JSON.parse(localStorage.getItem('ledger_supp_log')||'{}'); return m&&typeof m==='object'?m:{}; }catch(e){ return {}; } }
+function suppLogMeta(){ try{ return JSON.parse(localStorage.getItem('ledger_supp_log_meta')||'{}'); }catch(e){ return {}; } }
+function saveSuppLog(map, meta){
+  try{ localStorage.setItem('ledger_supp_log', JSON.stringify(map));
+       localStorage.setItem('ledger_supp_log_meta', JSON.stringify(meta)); }catch(e){}
+}
+// {date:true} for one supplement, the shape core.js's window walker wants.
+function suppTakenMap(id){
+  const log = suppLog(), m = {};
+  Object.keys(log).forEach(d=>{ if ((log[d]||[]).indexOf(id) >= 0) m[d] = true; });
+  return m;
+}
+// Tick / untick a dose on the day being viewed. Empty days are stored, not deleted — a
+// cleared day is data and has to propagate through sync like any other edit.
+function toggleSupp(id, date){
+  const log = suppLog(), meta = suppLogMeta();
+  const cur = (log[date] || []).slice();
+  const i = cur.indexOf(id);
+  if (i >= 0) cur.splice(i, 1); else cur.push(id);
+  log[date] = cur; meta[date] = new Date().toISOString();
+  saveSuppLog(log, meta); scheduleSync(); renderSupps();
+}
+function suppCadenceText(s){
+  if (Array.isArray(s.days) && s.days.length) return s.days.map(i=>WEEKDAYS[i]).join('/');
+  const n = Math.max(1, Math.round(s.every||1));
+  const base = n===1 ? 'daily' : n===2 ? 'every other day' : `every ${n} days`;
+  return n>1 && s.mode==='rolling' ? base+' (rolling)' : base;
+}
+// "Wed 30 Jul" — short enough for a card line, unambiguous about which day is meant.
+function suppDayLabel(iso, today){
+  if (iso === today) return 'today';
+  if (iso === addDaysISO(today, 1)) return 'tomorrow';
+  const dt = new Date(iso+'T00:00:00Z');
+  return WEEKDAYS[LedgerCore.isoWeekdayMon(iso)] + ' ' + dt.getUTCDate() + ' ' +
+         ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getUTCMonth()];
+}
+const SUPP_STRIP_DAYS = 14;
+function renderSupps(){
+  const wrap = document.getElementById('suppToday'); if (!wrap) return;
+  document.getElementById('suppDate').textContent = VIEW_DATE===ACTIVE_DATE ? 'today' : VIEW_DATE;
+  const list = supps();
+  const badge = document.getElementById('suppBadge');
+  if (!list.length){
+    wrap.innerHTML = '<div class="empty">No supplements yet — add one below and it will tell you whether today is an ON day.</div>';
+    document.getElementById('suppSummary').style.display = 'none';
+    if (badge) badge.style.display = 'none';
+    return;
+  }
+  let dueNow = 0, pending = 0;
+  wrap.innerHTML = list.map((s, i)=>{
+    const taken = suppTakenMap(s.id);
+    const cells = LedgerCore.supplementWindow(s, taken, VIEW_DATE, SUPP_STRIP_DAYS);
+    const st = LedgerCore.supplementStats(cells);
+    const cell = cells[cells.length-1];
+    if (cell.due) { dueNow++; if (!cell.taken) pending++; }
+    const cls = cell.taken ? 'done' : (cell.due ? 'on' : 'off');
+    // The one line that answers the question: take it, done, or off — and if off, when next.
+    let sub;
+    if (cell.taken)   sub = cell.due ? '✓ taken' : '✓ taken · off-schedule dose';
+    else if (cell.due) sub = '● ON — take it';
+    else {
+      const nx = LedgerCore.supplementNextDue(s, addDaysISO(VIEW_DATE,1), lastDoseUpTo(taken, VIEW_DATE));
+      sub = '○ OFF' + (nx ? ' · next ' + suppDayLabel(nx, VIEW_DATE) : '');
+    }
+    const strip = cells.map(c=>{
+      const k = c.due ? (c.taken ? 'due hit' : (c.date===VIEW_DATE ? 'due' : 'due miss'))
+                      : (c.taken ? 'extra' : '');
+      return `<div class="supp-dot ${k}${c.date===VIEW_DATE?' today':''}" title="${c.date} · ${c.due?'ON':'off'}${c.taken?' · taken':''}"></div>`;
+    }).join('');
+    const tail = st.streak>1 ? ` · streak ${st.streak}` : '';
+    return `<div class="supp-card ${cls}">
+      <div class="supp-main">
+        <div class="supp-name">${escapeHtml(s.name)}${s.dose?` <small>${escapeHtml(s.dose)}</small>`:''}</div>
+        <div class="supp-sub">${sub}</div>
+        <div class="supp-strip">${strip}</div>
+        <div class="supp-sub" style="margin-top:5px;color:var(--ink-faint)">${suppCadenceText(s)} · ${st.taken}/${st.due} of the last ${SUPP_STRIP_DAYS}d${tail}</div>
+      </div>
+      <button class="supp-take ${cell.due && !cell.taken ? '' : 'ghost'}" data-supptake="${i}">${cell.taken?'undo':'take'}</button>
+    </div>`;
+  }).join('');
+  wrap.querySelectorAll('[data-supptake]').forEach(b=>{
+    b.onclick = ()=>{ const s = supps()[+b.dataset.supptake]; if (s) toggleSupp(s.id, VIEW_DATE); };
+  });
+  const sum = document.getElementById('suppSummary');
+  sum.style.display = 'block';
+  sum.textContent = dueNow === 0
+    ? `Nothing due ${VIEW_DATE===ACTIVE_DATE?'today':'that day'} — all ${list.length} protocol${list.length>1?'s are':' is'} off-cycle.`
+    : pending === 0 ? `All ${dueNow} due ${VIEW_DATE===ACTIVE_DATE?'today':'that day'} logged. ✓`
+    : `${pending} of ${dueNow} due ${VIEW_DATE===ACTIVE_DATE?'today':'that day'} still to take.`;
+  // Badge the Engineer tab so a pending dose is visible from any view — the actual cure
+  // for forgetting. Only the live day nags; browsing history shouldn't raise an alarm.
+  if (badge){
+    const show = pending > 0 && VIEW_DATE === ACTIVE_DATE;
+    badge.style.display = show ? '' : 'none';
+    badge.textContent = show ? pending : '';
+  }
+}
+// Most recent logged dose at or before `iso` — the phase reference a rolling cycle counts from.
+function lastDoseUpTo(taken, iso){
+  let last = null;
+  Object.keys(taken).forEach(d=>{ if (taken[d] && d <= iso && (last===null || d > last)) last = d; });
+  return last;
+}
+function renderSuppManage(){
+  const wrap = document.getElementById('suppManage'); if (!wrap) return;
+  const list = supps();
+  if (!list.length){ wrap.innerHTML = '<div class="empty">Nothing to manage yet.</div>'; return; }
+  wrap.innerHTML = list.map((s,i)=>
+    `<div class="supp-row"><div><div>${escapeHtml(s.name)}${s.dose?` <span class="sr-sub">${escapeHtml(s.dose)}</span>`:''}</div>`+
+    `<div class="sr-sub">${suppCadenceText(s)}${s.anchor&&!(s.days&&s.days.length)?` · anchored ${s.anchor}`:''}</div></div>`+
+    `<button class="sm ghost" data-suppdel="${i}">remove</button></div>`).join('');
+  wrap.querySelectorAll('[data-suppdel]').forEach(b=>{
+    b.onclick = ()=>{
+      const l = supps(), s = l[+b.dataset.suppdel];
+      if (s && confirm(`Remove "${s.name}"? Its dose history stays logged.`)) saveSupps(l.filter(v=>v.id!==s.id));
+    };
+  });
+}
+// ---- supplement form ----
+let SUPP_DAYS_PICK = [];
+function renderSuppDayPick(){
+  const el = document.getElementById('suppDaysPick'); if (!el) return;
+  el.innerHTML = WEEKDAYS.map((d,i)=>`<span class="chip${SUPP_DAYS_PICK.indexOf(i)>=0?' on':''}" data-suppday="${i}">${d}</span>`).join('');
+  el.querySelectorAll('[data-suppday]').forEach(c=>{
+    c.onclick = ()=>{
+      const i = +c.dataset.suppday, at = SUPP_DAYS_PICK.indexOf(i);
+      if (at>=0) SUPP_DAYS_PICK.splice(at,1); else SUPP_DAYS_PICK.push(i);
+      SUPP_DAYS_PICK.sort((a,b)=>a-b); renderSuppDayPick();
+    };
+  });
+}
+document.getElementById('suppKind').addEventListener('change', ()=>{
+  const byDays = document.getElementById('suppKind').value === 'days';
+  document.getElementById('suppDaysWrap').style.display  = byDays ? '' : 'none';
+  document.getElementById('suppEveryWrap').style.display = byDays ? 'none' : '';
+  document.getElementById('suppPhaseWrap').style.display = byDays ? 'none' : '';
+});
+document.getElementById('suppAddBtn').onclick = ()=>{
+  const msg = document.getElementById('suppFormMsg');
+  const name = (document.getElementById('suppName').value||'').trim();
+  if (!name){ document.getElementById('suppName').focus(); msg.textContent='Give it a name first.'; return; }
+  const s = { id: 's'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
+              name: name, dose: (document.getElementById('suppDose').value||'').trim() };
+  if (document.getElementById('suppKind').value === 'days'){
+    if (!SUPP_DAYS_PICK.length){ msg.textContent='Pick at least one weekday.'; return; }
+    s.days = SUPP_DAYS_PICK.slice();
+  } else {
+    s.every = Math.max(1, Math.round(+document.getElementById('suppEvery').value || 1));
+    s.mode  = document.getElementById('suppMode').value === 'rolling' ? 'rolling' : 'fixed';
+    s.anchor = document.getElementById('suppAnchor').value || ACTIVE_DATE;
+  }
+  saveSupps(supps().concat([s]));
+  document.getElementById('suppName').value=''; document.getElementById('suppDose').value='';
+  SUPP_DAYS_PICK = []; renderSuppDayPick();
+  msg.textContent = `Added ${name} · ${suppCadenceText(s)}.`;
+};
 
 // ---- WEIGHT: daily weigh-in, trend, and corridor cross-check ----------------
 // Stored as {date: kg} with per-date stamps so it merges across devices exactly
@@ -3177,6 +3419,7 @@ document.getElementById('exportBtn').onclick = async ()=>{
     targets: {floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN},
     pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
     weights: weightsMap(), templates: templates(),
+    supps: supps(), suppLog: suppLog(),
     days, date: ACTIVE_DATE, ledger, totals: totals() };   // date/ledger kept for v1 compat
   // Bind the backup to this sync account when one is set, so a shared/leaked export can
   // only be re-imported on the owning passphrase (import refuses a mismatched owner).
@@ -3406,17 +3649,31 @@ async function syncNow(){
         renderTemplates();
       } catch(e){}
     }
+    if (remote && Array.isArray(remote.supps) && (remote.suppsUpdated||'') > suppsStamp()){
+      try {
+        localStorage.setItem('ledger_supps', JSON.stringify(remote.supps));
+        setKey('ledger_supps_updated', remote.suppsUpdated);
+      } catch(e){}
+    }
     // Weights merge per-date like ledger days (values are kg numbers, same LWW rules).
     const wm = LedgerCore.mergeSyncStates(
       {days: weightsMap(), meta: weightsMeta()},
       {days: (remote && remote.weights) || {}, meta: (remote && remote.wMeta) || {}});
     saveWeights(wm.days, wm.meta);
+    // Dose log is per-day arrays of supplement ids — the same shape ledger days have,
+    // so the identical per-day LWW merge applies.
+    const sm = LedgerCore.mergeSyncStates(
+      {days: suppLog(), meta: suppLogMeta()},
+      {days: (remote && remote.suppLog) || {}, meta: (remote && remote.sMeta) || {}});
+    saveSuppLog(sm.days, sm.meta);
     load(); updateDayLabel(); render();        // reflect whatever the merge decided for the on-screen day
     const state = { v:1, days: merged.days, meta: merged.meta,
       targets: {floor:FLOOR_M, ceil:CEIL_M, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP, maint:MAINT, profile:PROFILE, goal:GOAL, mealPlan:MEAL_PLAN, train:TRAIN},
       pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
       tUpdated: targetsStamp(),
       templates: templates(), tplUpdated: tplStamp(),
+      supps: supps(), suppsUpdated: suppsStamp(),
+      suppLog: sm.days, sMeta: sm.meta,
       weights: wm.days, wMeta: wm.meta };
     const blob = await syncEncrypt(state);
     const p = await supaFetch('/rest/v1/rpc/sync_put', {
@@ -3502,6 +3759,16 @@ document.getElementById('importFile').onchange = (ev)=>{
           const names = new Set(templates().map(t=>t.name));
           saveTemplates(templates().concat(data.templates.filter(t=>t && t.name && !names.has(t.name))));
         }
+        if (Array.isArray(data.supps) && data.supps.length){
+          const ids = new Set(supps().map(s=>s.id));
+          saveSupps(supps().concat(data.supps.filter(s=>s && s.id && s.name && !ids.has(s.id))));
+        }
+        if (data.suppLog && typeof data.suppLog === 'object'){
+          const map = Object.assign({}, data.suppLog, suppLog());   // restore fills gaps; local wins on clash
+          const meta = suppLogMeta(); const now = new Date().toISOString();
+          Object.keys(data.suppLog).forEach(d=>{ if(!meta[d]) meta[d]=now; });
+          saveSuppLog(map, meta);
+        }
       } else if (data.ledger && Array.isArray(data.ledger)) {
         // v1 single-day export.
         if (ledger.length && !confirm(`Replace current ${ledger.length} entries with ${data.ledger.length} imported?`)) return;
@@ -3564,6 +3831,8 @@ function requestPersistence(){
 document.getElementById('closeDayBtn').onclick = closeDay;
 document.getElementById('backToTodayBtn').onclick = ()=> viewDay(ACTIVE_DATE);
 updateDayLabel();
+document.getElementById('suppAnchor').value = ACTIVE_DATE;   // "an ON day you're sure of" defaults to today
+renderSuppDayPick();
 loadTargets(); fillTargetInputs(); loadKeys(); initFoods(); load(); render(); renderTemplates(); requestPersistence();
 showTab('today');   // a logging app always opens on Today (also renders)
 maybeShowBrief();   // one-line plan for the day, once per day

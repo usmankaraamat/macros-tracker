@@ -342,6 +342,90 @@ group('ternary — barycentric plot');
   check('already-met protein → full triangle green', T.greenPolygon(foods, 600, 0, TVe).length === 3, '');
 })();
 
+// ---- supplement cycles ----
+group('supplementDue — fixed calendar parity');
+(function(){
+  const alt = {every:2, anchor:'2026-07-01', mode:'fixed'};
+  check('anchor day is ON',            C.supplementDue(alt,'2026-07-01'), '');
+  check('day after anchor is OFF',    !C.supplementDue(alt,'2026-07-02'), '');
+  check('two days after is ON',        C.supplementDue(alt,'2026-07-03'), '');
+  check('parity holds a month out',    C.supplementDue(alt,'2026-07-31'), '30 days on');
+  check('and its neighbour is OFF',   !C.supplementDue(alt,'2026-08-01'), '');
+  check('before the anchor = not started', !C.supplementDue(alt,'2026-06-30'), '');
+  check('a missed dose does not shift parity',
+        C.supplementDue(alt,'2026-07-05', '2026-07-04'), 'lastTaken is ignored in fixed mode');
+  check('every:1 is daily',            C.supplementDue({every:1, anchor:'2026-07-01'},'2026-07-02'), '');
+  check('every:3 hits day 3, not day 2',
+        C.supplementDue({every:3, anchor:'2026-07-01'},'2026-07-04') &&
+       !C.supplementDue({every:3, anchor:'2026-07-01'},'2026-07-03'), '');
+})();
+
+group('supplementDue — weekdays and rolling');
+(function(){
+  // 2026-07-01 is a Wednesday → Monday-first index 2.
+  check('weekday index is Monday-first', C.isoWeekdayMon('2026-07-01') === 2, `got ${C.isoWeekdayMon('2026-07-01')}`);
+  const mw = {days:[0,2]};                                  // Mon + Wed
+  check('Wednesday is ON',   C.supplementDue(mw,'2026-07-01'), '');
+  check('Thursday is OFF',  !C.supplementDue(mw,'2026-07-02'), '');
+  check('Monday is ON',      C.supplementDue(mw,'2026-07-06'), '');
+
+  const roll = {every:2, mode:'rolling'};
+  check('rolling with no history is due now', C.supplementDue(roll,'2026-07-05', null), '');
+  check('rolling: 1 day after a dose is OFF', !C.supplementDue(roll,'2026-07-05','2026-07-04'), '');
+  check('rolling: 2 days after a dose is ON',  C.supplementDue(roll,'2026-07-06','2026-07-04'), '');
+  check('rolling: overdue stays ON',          C.supplementDue(roll,'2026-07-09','2026-07-04'), '');
+})();
+
+group('supplementNextDue');
+(function(){
+  const alt = {every:2, anchor:'2026-07-01', mode:'fixed'};
+  check('next ON day from an OFF day', C.supplementNextDue(alt,'2026-07-02') === '2026-07-03',
+        `got ${C.supplementNextDue(alt,'2026-07-02')}`);
+  check('an ON day is its own answer',  C.supplementNextDue(alt,'2026-07-03') === '2026-07-03', '');
+  // An empty weekday list is not a "never" schedule — it falls through to the every-N
+  // branch, where a missing `every` means daily. The add form rejects it before it lands.
+  check('empty weekday set degrades to daily', C.supplementNextDue({days:[]},'2026-07-02') === '2026-07-02',
+        `got ${C.supplementNextDue({days:[]},'2026-07-02')}`);
+})();
+
+group('supplementWindow + supplementStats');
+(function(){
+  const alt = {every:2, anchor:'2026-07-01', mode:'fixed'};
+  // ON days in 1–7 July: 1,3,5,7. Took 1 and 3, missed 5, 7 is the open day on screen.
+  const taken = {'2026-07-01':true, '2026-07-03':true};
+  const cells = C.supplementWindow(alt, taken, '2026-07-07', 7);
+  check('window is 7 cells ending on the view date',
+        cells.length === 7 && cells[6].date === '2026-07-07', `got ${cells.length}`);
+  check('marks the right days ON', cells.filter(c=>c.due).length === 4, `got ${cells.filter(c=>c.due).length}`);
+  const st = C.supplementStats(cells);
+  check('counts 4 due, 2 taken, 2 missed', st.due===4 && st.taken===2 && st.missed===2,
+        `got due ${st.due}, taken ${st.taken}, missed ${st.missed}`);
+  check('adherence rate is 50%', approx(st.rate, 0.5, 0.001), `got ${st.rate}`);
+
+  // Perfect run whose final ON day is the still-open day on screen: it must not break the streak.
+  const perfect = C.supplementWindow(alt, {'2026-07-01':true,'2026-07-03':true,'2026-07-05':true}, '2026-07-07', 7);
+  check('open ON day is pending, not a miss', C.supplementStats(perfect).streak === 3,
+        `got ${C.supplementStats(perfect).streak}`);
+  // A genuine gap mid-window does break it.
+  check('an unmet past ON day breaks the streak', st.streak === 0, `got ${st.streak}`);
+
+  // A dose on an OFF day is extra credit, never adherence.
+  const off = C.supplementWindow(alt, {'2026-07-02':true}, '2026-07-07', 7);
+  const ost = C.supplementStats(off);
+  check('off-schedule dose counts as extra', ost.extra===1 && ost.taken===0, `got extra ${ost.extra}, taken ${ost.taken}`);
+
+  // Rolling: the walk must carry doses forward, so each dose re-phases the next ON day.
+  // Jul 2 due (no history) and dosed → Jul 3 off, Jul 4 due again, Jul 5 still due (overdue).
+  const rw = C.supplementWindow({every:2, mode:'rolling'}, {'2026-07-02':true}, '2026-07-05', 4);
+  check('rolling window re-phases after a dose, and stays ON once overdue',
+        rw[0].due && !rw[1].due && rw[2].due && rw[3].due,
+        rw.map(c=>(c.due?'O':'.')).join(''));
+  // A dose BEFORE the window still sets the phase at the strip's left edge.
+  const seeded = C.supplementWindow({every:2, mode:'rolling'}, {'2026-07-04':true}, '2026-07-07', 3);
+  check('seeds phase from a dose before the window', !seeded[0].due && seeded[1].due,
+        seeded.map(c=>(c.due?'O':'.')).join(''));
+})();
+
 // ---- summary ----
 const sum = document.getElementById('summary');
 sum.className = failed === 0 ? 'allpass' : 'anyfail';
