@@ -342,6 +342,40 @@ group('ternary — barycentric plot');
   check('already-met protein → full triangle green', T.greenPolygon(foods, 600, 0, TVe).length === 3, '');
 })();
 
+// ---- repairJson: salvaging a malformed model reply ----
+group('repairJson — unbalanced / wrapped JSON');
+(function(){
+  // Verbatim capture from gemini-3.5-flash on this app's own prompt: a complete reply that
+  // simply omits the outer closing brace (finishReason was STOP, not a length cutoff).
+  const real = '{\n  "items": [\n    {\n      "name": "boiled egg",\n      "partOf": "",\n'
+    + '      "grams": 100,\n      "weighed": false,\n      "isCurry": false,\n'
+    + '      "est": {\n        "kcal": 155,\n        "p": 13.0,\n        "f": 11.0,\n        "c": 1.1\n      }\n    }\n  ]';
+  check('real gemini-3.5-flash reply is NOT valid JSON', (()=>{ try{JSON.parse(real);return false;}catch(e){return true;} })(), 'missing final }');
+  const fixed = C.repairJson(real);
+  check('repairJson recovers it', !!fixed && fixed.items && fixed.items.length===1, '');
+  check('recovered values are intact', fixed.items[0].name==='boiled egg' && fixed.items[0].est.kcal===155,
+        `got ${fixed && fixed.items[0].name}`);
+
+  check('valid JSON passes straight through',
+        C.repairJson('{"items":[{"name":"rice"}]}').items[0].name === 'rice', '');
+  check('strips prose before and after',
+        C.repairJson('Here you go:\n{"items":[{"name":"rice"}]}\nHope that helps!').items[0].name === 'rice', '');
+  check('closes a dropped array bracket AND brace',
+        (C.repairJson('{"items":[{"name":"oats"}')||{}).items[0].name === 'oats', '');
+  check('drops a dangling comma from a cut-off item',
+        (C.repairJson('{"items":[{"name":"oats"},')||{}).items.length === 1, '');
+  check('closes a reply cut mid-string',
+        (C.repairJson('{"items":[{"name":"chick')||{}).items[0].name === 'chick', '');
+  check('a brace inside a string is not counted as structure',
+        C.repairJson('{"items":[{"name":"weird } [ name"}]}').items[0].name === 'weird } [ name', '');
+  check('an escaped quote does not end the string',
+        C.repairJson('{"items":[{"name":"6\\" sub"}]}').items[0].name === '6" sub', '');
+  check('bare array reply is accepted', C.repairJson('[{"name":"rice"}]').length === 1, '');
+  check('no JSON at all returns null', C.repairJson('I could not read that meal.') === null, '');
+  check('non-string input returns null', C.repairJson(null) === null, '');
+  check('unsalvageable garbage returns null', C.repairJson('{"a": @@@') === null, '');
+})();
+
 // ---- supplement cycles ----
 group('supplementDue — fixed calendar parity');
 (function(){

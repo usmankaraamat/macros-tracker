@@ -292,6 +292,42 @@
     return { ratePerWeek: slope * 7, latest: entries[n - 1].kg };
   }
 
+  // ---- Salvage a truncated / unbalanced JSON reply --------------------------
+  // Models do not always honour a strict-JSON response mode. Measured on this app's own
+  // prompt: gemini-3.5-flash closes the items array but omits the outer brace, leaving
+  //   {"items":[ {...} ]          ← no final }
+  // with finishReason STOP — it is NOT length truncation, so raising maxOutputTokens does
+  // not help. A first-brace-to-last-bracket regex can't fix it either: the slice ends at
+  // ']' and is still invalid. So balance the brackets instead — walk the text tracking
+  // string literals, then close whatever is still open. Also drops prose that trails a
+  // complete object, and a dangling comma left by a cut-off item.
+  // Returns the parsed value, or null when nothing salvageable is in there.
+  function repairJson(s) {
+    if (typeof s !== 'string') return null;
+    const start = s.search(/[[{]/);
+    if (start < 0) return null;
+    const stack = [];
+    let inStr = false, esc = false, end = -1;
+    for (let i = start; i < s.length; i++) {
+      const ch = s[i];
+      if (esc) { esc = false; continue; }
+      if (inStr && ch === '\\') { esc = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === '{' || ch === '[') stack.push(ch === '{' ? '}' : ']');
+      else if (ch === '}' || ch === ']') { stack.pop(); if (!stack.length) { end = i; break; } }
+    }
+    let out;
+    if (!stack.length && end >= 0) {
+      out = s.slice(start, end + 1);                   // balanced already; trailing prose dropped
+    } else {
+      out = s.slice(start).replace(/[,\s]+$/, '');     // unbalanced: close what's still open
+      if (inStr) out += '"';                           // reply cut mid-string
+      while (stack.length) out += stack.pop();
+    }
+    try { return JSON.parse(out); } catch (e) { return null; }
+  }
+
   // ---- Supplement cycles: which days a protocol is ON ------------------------
   // A protocol is either "every N days" or "these weekdays". Every-other-day (N=2) is the
   // one nobody can hold in their head, so the ON/OFF parity is made a property of the
@@ -472,6 +508,7 @@
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
     supplementDue, supplementNextDue, supplementWindow, supplementStats, isoWeekdayMon,
+    repairJson,
     KCAL_PER_KG_FAT, mergeSyncStates, ternary
   };
 });
