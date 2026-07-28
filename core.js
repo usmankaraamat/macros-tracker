@@ -292,6 +292,85 @@
     return { ratePerWeek: slope * 7, latest: entries[n - 1].kg };
   }
 
+  // ---- Supplement cycles: which days a protocol is ON ------------------------
+  // A protocol is either "every N days" or "these weekdays". Every-other-day (N=2) is the
+  // one nobody can hold in their head, so the ON/OFF parity is made a property of the
+  // calendar rather than of memory: pin an anchor date and the grid answers for any day,
+  // past or future. sched = {every, anchor, mode} or {days:[0..6]}, Monday=0 to match the
+  // training split. Two ways to run an every-N cycle, because they genuinely differ:
+  //   'fixed'   — ON days are the calendar grid: (date − anchor) % N === 0. A missed dose
+  //               does NOT shift the pattern; tomorrow is still whatever the grid says.
+  //   'rolling' — the cycle re-anchors on the last dose actually taken: due once N days
+  //               have passed since it. Taking one a day late pushes the next one out a
+  //               day too, which is what a true "one every 48h" protocol wants.
+  const DAY_MS = 86400000;
+  function isoDay(iso) { return Math.floor(Date.parse(iso + 'T00:00:00Z') / DAY_MS); }
+  function dayIso(n) { return new Date(n * DAY_MS).toISOString().slice(0, 10); }
+  // Epoch day 0 (1970-01-01) was a Thursday, which is index 3 in a Monday-first week.
+  function isoWeekdayMon(iso) { return ((isoDay(iso) + 3) % 7 + 7) % 7; }
+  function supplementDue(sched, dateISO, lastTakenISO) {
+    if (!sched) return false;
+    if (Array.isArray(sched.days) && sched.days.length) return sched.days.indexOf(isoWeekdayMon(dateISO)) >= 0;
+    const n = Math.max(1, Math.round(sched.every || 1));
+    if (n === 1) return true;                                  // daily — every day is ON
+    if (sched.mode === 'rolling') {
+      if (!lastTakenISO) return true;                          // never dosed — start today
+      return isoDay(dateISO) - isoDay(lastTakenISO) >= n;
+    }
+    if (!sched.anchor) return true;                            // no anchor to phase against
+    const d = isoDay(dateISO) - isoDay(sched.anchor);
+    return d >= 0 && d % n === 0;                              // before the anchor = not started
+  }
+  // First ON day at or after fromISO — the "next dose" line on an OFF day. Null if the
+  // schedule has no ON day within the horizon (only possible for an empty weekday set).
+  function supplementNextDue(sched, fromISO, lastTakenISO, horizon) {
+    const h = horizon > 0 ? horizon : 60;
+    for (let i = 0; i <= h; i++) {
+      const d = dayIso(isoDay(fromISO) + i);
+      if (supplementDue(sched, d, lastTakenISO)) return d;
+    }
+    return null;
+  }
+  // The day-strip: for each of the last `days` days ending at endISO, was the protocol ON
+  // and was a dose logged. taken = {'YYYY-MM-DD': true}. A rolling schedule depends on
+  // dosing history, so the walk carries lastTaken forward and seeds it from the most
+  // recent dose BEFORE the window — that keeps the strip in the right phase at its left edge.
+  function supplementWindow(sched, taken, endISO, days) {
+    const n = days > 0 ? days : 7;
+    const end = isoDay(endISO), start = end - (n - 1);
+    let last = null;
+    Object.keys(taken || {}).forEach(d => {
+      if (taken[d] && isoDay(d) < start && (last === null || d > last)) last = d;
+    });
+    const cells = [];
+    for (let i = start; i <= end; i++) {
+      const date = dayIso(i);
+      const due = supplementDue(sched, date, last);
+      const got = !!(taken && taken[date]);
+      cells.push({ date: date, due: due, taken: got });
+      if (got) last = date;
+    }
+    return cells;
+  }
+  // Score a strip. streak = the run of ON days met, counted back from the end; OFF days are
+  // skipped over, an unmet ON day breaks it. The final cell is the day on screen and is
+  // still open, so an un-taken ON day there can't break the streak — it just hasn't
+  // happened yet. Doses on OFF days count as `extra`, never as adherence.
+  function supplementStats(cells) {
+    let due = 0, hit = 0, extra = 0;
+    cells.forEach(c => { if (c.due) { due++; if (c.taken) hit++; } else if (c.taken) extra++; });
+    let i = cells.length - 1;
+    if (i >= 0 && cells[i].due && !cells[i].taken) i--;         // open day: pending, not missed
+    let streak = 0;
+    for (; i >= 0; i--) {
+      if (!cells[i].due) continue;
+      if (!cells[i].taken) break;
+      streak++;
+    }
+    return { due: due, taken: hit, missed: due - hit, extra: extra, streak: streak,
+             rate: due ? hit / due : null };
+  }
+
   // ---- Sync merge: last-write-wins per DAY ----------------------------------
   // A sync state is {days:{'YYYY-MM-DD':[entries]}, meta:{'YYYY-MM-DD':isoStamp}}.
   // Per-day (not per-blob) LWW makes "phone logs lunch, PC logs dinner on another
@@ -392,6 +471,7 @@
     nutrientsFrom, resolvePTarget, capGrams, computeEntry,
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
+    supplementDue, supplementNextDue, supplementWindow, supplementStats, isoWeekdayMon,
     KCAL_PER_KG_FAT, mergeSyncStates, ternary
   };
 });
