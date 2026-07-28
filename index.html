@@ -469,7 +469,7 @@
   <label>Gemini API key</label>
   <input type="password" id="geminiKey" placeholder="AIza…" autocomplete="off" style="margin-bottom:10px">
   <label>Gemini model</label>
-  <input type="text" id="geminiModel" list="modelList" placeholder="gemini-3.1-flash-lite" style="margin-bottom:8px">
+  <input type="text" id="geminiModel" list="modelList" placeholder="gemini-3.5-flash-lite" style="margin-bottom:8px">
   <datalist id="modelList"></datalist>
   <label>OpenRouter key — optional fallback when Gemini fails or is missing</label>
   <input type="password" id="orKey" placeholder="sk-or-… (free models are rotated automatically)" autocomplete="off" style="margin-bottom:10px">
@@ -1073,7 +1073,7 @@ function hasUSDA(){ return !!usdaKey(); }
 function hasGemini(){ return !!getKey(LS.gem); }
 function hasOR(){ return !!getKey(LS.or); }
 function hasAI(){ return hasGemini() || hasOR(); }
-function geminiModel(){ return getKey(LS.model) || 'gemini-3.1-flash-lite'; }
+function geminiModel(){ return getKey(LS.model) || 'gemini-3.5-flash-lite'; }
 
 // ---- CORE: compute one entry's contribution with penalties applied ----
 // base = per-100g nutrients; source tags provenance so AI estimates read as provisional.
@@ -2708,12 +2708,18 @@ async function listGeminiModels(){
     .map(m => (m.name||'').replace(/^models\//,''))
     .filter(Boolean);
 }
-// Prefer the known-good default, then newest flash-lite/flash, else whatever exists.
+// Prefer the known-good default, then any newer flash-lite, and only then a full flash.
+// flash-lite outranks flash deliberately: benchmarked on this app's own prompt, the lite
+// tier matched the full tier on decomposition and per-100g estimates while running ~5x
+// faster on far fewer tokens, and the full-flash models spend 1-2k thinking tokens per
+// parse to no measurable benefit here. gemini-3.5-flash is excluded outright — it emits
+// unbalanced JSON on this prompt (repairJson covers it, but don't pick it on purpose).
 function pickModel(list){
-  return list.find(n=>n==='gemini-3.1-flash-lite')
-      || list.find(n=>/3\.\d.*flash-lite/.test(n) && !/preview/.test(n))
-      || list.find(n=>/flash-lite/.test(n) && !/preview/.test(n))
-      || list.find(n=>/flash/.test(n) && !/thinking|preview/.test(n))
+  const ok = n => !/preview|thinking|image|tts|gemini-3\.5-flash$/.test(n);
+  return list.find(n=>n==='gemini-3.5-flash-lite')
+      || list.find(n=>/3\.\d.*flash-lite/.test(n) && ok(n))
+      || list.find(n=>/flash-lite/.test(n) && ok(n))
+      || list.find(n=>/flash/.test(n) && ok(n))
       || list.find(n=>/flash/.test(n))
       || list[0];
 }
@@ -2815,10 +2821,15 @@ Meal: """${text}"""`;
   }
   if (!txt) throw gemErr || new Error('No AI provider available.');
 
-  // Free models are flaky with strict JSON mode — regex extraction is the safety net.
+  // Models are flaky with strict JSON mode — free ones wrap it in prose, and some paid ones
+  // (measured: gemini-3.5-flash) end an otherwise perfect reply one closing brace short.
+  // repairJson balances the brackets rather than regex-slicing, which handles both.
   let parsed;
   try { parsed = JSON.parse(txt); }
-  catch(e){ const m = txt.match(/[\[{][\s\S]*[\]}]/); if(!m) throw new Error('Could not parse AI JSON.'); parsed = JSON.parse(m[0]); }
+  catch(e){
+    parsed = LedgerCore.repairJson(txt);
+    if (!parsed) throw new Error('Could not parse AI JSON.');
+  }
   const items = Array.isArray(parsed) ? parsed : (parsed.items || []);
   if (!items.length) throw new Error('No foods recognised.');
   // Safety net: some models still emit a plain-water/ice component despite the prompt.
@@ -3812,7 +3823,7 @@ if ('serviceWorker' in navigator) {
 function loadKeys(){
   document.getElementById('usdaKey').value   = getKey(LS.usda);
   document.getElementById('geminiKey').value = getKey(LS.gem);
-  document.getElementById('geminiModel').value = getKey(LS.model) || 'gemini-3.1-flash-lite';
+  document.getElementById('geminiModel').value = getKey(LS.model) || 'gemini-3.5-flash-lite';
   document.getElementById('orKey').value     = getKey(LS.or);
   document.getElementById('supaUrl').value   = getKey(LS.supaUrl);
   document.getElementById('supaKey').value   = getKey(LS.supaKey);
