@@ -405,13 +405,24 @@
   .micro-flag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; text-align: right; white-space: nowrap; }
 
   /* ---- OMNI ADD-FOOD PANEL ---- */
-  .omni-actions { display: flex; gap: 8px; margin-top: 10px; }
-  .omni-actions .omni-primary { flex: 1; }
+  .omni-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .omni-actions .omni-primary { flex: 1; min-width: 130px; }
   .omni-chip { flex: none; width: auto; background: transparent; border: 1px solid var(--line);
     color: var(--ink-dim); box-shadow: none; text-shadow: none; font-size: 12px; padding: 10px 14px; }
   .omni-chip:hover { background: var(--panel-2); color: var(--ink); box-shadow: none; }
   .omni-chip.on { border-color: var(--accent); color: var(--ink); background: rgba(59,130,246,0.1); }
   .omni-chip.icon-chip { padding: 10px 12px; font-size: 15px; line-height: 1; }
+
+  /* ---- ASK: the answer card the analyst writes into ---- */
+  .ask-card { margin-top: 10px; border: 1px solid var(--line); border-left: 2px solid var(--accent);
+    border-radius: 8px; background: var(--panel-2); padding: 12px 14px; font-size: 13px; line-height: 1.65; }
+  .ask-card .ask-q { color: var(--ink-faint); font-family: var(--mono); font-size: 11px;
+    margin-bottom: 8px; display: flex; gap: 8px; align-items: baseline; }
+  .ask-card .ask-q .del { margin-left: auto; cursor: pointer; }
+  .ask-card .ask-body { color: var(--ink); white-space: pre-wrap; }
+  .ask-card .ask-foot { margin-top: 10px; font-size: 10.5px; color: var(--ink-faint);
+    font-family: var(--mono); border-top: 1px solid var(--line); padding-top: 8px; }
+  .ask-card .ask-warn { color: var(--warn); }
 
   /* pill toggle replaces the tiny weighed checkbox */
   .pill-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -473,6 +484,9 @@
   <datalist id="modelList"></datalist>
   <label>OpenRouter key — optional fallback when Gemini fails or is missing</label>
   <input type="password" id="orKey" placeholder="sk-or-… (free models are rotated automatically)" autocomplete="off" style="margin-bottom:10px">
+  <label>Ask · daily query limit — 0 = unlimited</label>
+  <input type="number" id="aiCap" min="0" step="1" placeholder="20" style="margin-bottom:6px">
+  <div class="tactical" id="aiCapStatus" style="margin-bottom:10px">Caps how many 💬 Ask questions run per day, so a chatty session can't burn your free tier. Meal parsing is never capped.</div>
   <div class="footer-actions" style="margin-bottom:12px">
     <button id="saveKeys">Save keys</button>
     <button class="ghost" id="loadModelsBtn">Load models</button>
@@ -664,8 +678,12 @@
     <button class="omni-chip icon-chip" id="photoBtn" aria-label="Take a photo" title="Take a photo of the meal — sent to the AI under your key">📷</button>
     <button class="omni-chip icon-chip" id="galleryBtn" aria-label="Choose from gallery" title="Choose a meal photo from your gallery — sent to the AI under your key">🖼️</button>
     <button class="omni-chip" id="manualToggle" title="Log a food by manual USDA search">🔍 Manual</button>
+    <button class="omni-chip" id="askBtn" title="Ask a question about your own logged data — answered from your history, not from the internet">💬 Ask</button>
   </div>
+  <!-- A blank box tells nobody what's askable, so the openers are one tap. -->
+  <div class="chips" id="askChips" style="display:none;margin-top:8px;margin-bottom:0"></div>
   <div class="tactical" id="parseStatus" style="margin-top:8px;display:none"></div>
+  <div id="askAnswer"></div>
   <div id="pending" style="margin-top:10px"></div>
 
   <!-- Manual USDA logging — revealed on demand -->
@@ -1056,7 +1074,7 @@ let _prevLedgerLen = 0;                      // for flashing newly-added ledger 
 
 // ---- KEYS (localStorage; never exported) ----
 const LS = { usda:'ledger_usda_key', gem:'ledger_gemini_key', model:'ledger_gemini_model',
-             or:'ledger_openrouter_key',
+             or:'ledger_openrouter_key', aiCap:'ledger_ai_cap', aiUsed:'ledger_ai_used',
              supaUrl:'ledger_supa_url', supaKey:'ledger_supa_key', pass:'ledger_sync_pass' };
 // USDA food search needs a personal key — free, unbilled, per-key throttled (1,000
 // req/hr). No shared default is embedded: data.gov deactivates any key committed to a
@@ -1073,6 +1091,22 @@ function hasUSDA(){ return !!usdaKey(); }
 function hasGemini(){ return !!getKey(LS.gem); }
 function hasOR(){ return !!getKey(LS.or); }
 function hasAI(){ return hasGemini() || hasOR(); }
+// ---- Ask quota: a per-day ceiling on assistant queries ----
+// Parsing a meal is one call you asked for; a chat box invites twenty, and the free tier
+// is the user's own. The counter is deliberately local-only and never synced — it guards
+// a per-device key, and syncing it would let one device lock out another.
+const AI_CAP_DEFAULT = 20;
+function aiCap(){ const v = getKey(LS.aiCap); return v==='' ? AI_CAP_DEFAULT : Math.max(0, +v||0); }
+function aiUsedToday(){
+  try { const u = JSON.parse(getKey(LS.aiUsed)||'null');
+        return (u && u.date===ACTIVE_DATE) ? (+u.n||0) : 0; } catch(e){ return 0; }
+}
+function aiQuotaLeft(){ const c = aiCap(); return c===0 ? Infinity : Math.max(0, c - aiUsedToday()); }
+function aiCountQuery(){ setKey(LS.aiUsed, JSON.stringify({date:ACTIVE_DATE, n:aiUsedToday()+1})); }
+function aiQuotaText(){
+  const c = aiCap();
+  return c===0 ? 'unlimited queries' : `${aiQuotaLeft()} of ${c} queries left today`;
+}
 function geminiModel(){ return getKey(LS.model) || 'gemini-3.5-flash-lite'; }
 
 // ---- CORE: compute one entry's contribution with penalties applied ----
@@ -2772,27 +2806,10 @@ async function openrouterGenerate(prompt, imageB64){
   throw lastErr || new Error('All OpenRouter models failed.');
 }
 
-let AI_VIA = '';                               // which provider/model handled the last parse
-async function aiParse(text, imageB64){
-  if (!hasAI()) throw new Error('No AI key — add a Gemini or OpenRouter key in ⚙ Settings.');
-  const photoClause = imageB64
-    ? `A photo of the meal is attached. Identify every food visible in it and estimate each portion's grams from visual cues (plate size, utensils, typical serving volumes). The text below adds context or corrections — when it states an amount or names a food, the text wins over your visual guess. If the text is empty, work from the photo alone.\n`
-    : '';
-  const prompt =
-`You convert a meal description into structured food items for a macro tracker.
-${photoClause}
-Break composite or prepared dishes (samosa, biryani, sandwich, burger, pizza slice, curry, paratha, wrap, etc.) into their base single-ingredient components — the nutrient database only has reliable data for simple ingredients, not assembled dishes. Each component gets its own estimated grams; the components of one dish should sum to roughly that dish's total weight. When a dish is fried or oily, add a "cooking oil" component for the absorbed fat.
-Leave naturally single-ingredient foods (an egg, an apple, grilled chicken, rice, milk) as ONE item — never split those. Also keep everyday breads and flatbreads that the database stores as finished items — chapati, roti, naan, tortilla, pita, plain bread, idli, dosa — as ONE item under their common name (e.g. "chapati", "roti"); do NOT split those into flour and water.
-Never output water, ice, plain black coffee or unsweetened tea, or any other zero-calorie liquid as an item — they carry no macros and only distort the totals.
-Return JSON: {"items":[{"name":<short generic single-ingredient name good for a USDA database search>,`+
-`"partOf":<the dish this component came from, or "" if it was logged as a plain food>,`+
-`"grams":<number, estimate a realistic portion if none is stated>,`+
-`"weighed":<boolean, true ONLY if the user gave an explicit weight/measure for THIS component; a decomposed guess is false>,`+
-`"isCurry":<boolean, true if this component sits in curry/gravy/added oil>,`+
-`"est":{"kcal":<per 100g>,"p":<protein g per 100g>,"f":<fat g per 100g>,"c":<carb g per 100g>}}]}.
-"est" is your best per-100g estimate, used only as a fallback. Output JSON only, no prose.
-Meal: """${text}"""`;
-
+let AI_VIA = '';                               // which provider/model handled the last call
+// One prompt in, one string out — Gemini first, OpenRouter as the fallback. Shared by the
+// meal parser and the Ask assistant so both inherit the same model auto-detect and retry.
+async function aiComplete(prompt, imageB64){
   let txt = '', gemErr = null;
   if (hasGemini()){
     try {
@@ -2820,6 +2837,29 @@ Meal: """${text}"""`;
     txt = o.txt; AI_VIA = o.via;
   }
   if (!txt) throw gemErr || new Error('No AI provider available.');
+  return txt;
+}
+async function aiParse(text, imageB64){
+  if (!hasAI()) throw new Error('No AI key — add a Gemini or OpenRouter key in ⚙ Settings.');
+  const photoClause = imageB64
+    ? `A photo of the meal is attached. Identify every food visible in it and estimate each portion's grams from visual cues (plate size, utensils, typical serving volumes). The text below adds context or corrections — when it states an amount or names a food, the text wins over your visual guess. If the text is empty, work from the photo alone.\n`
+    : '';
+  const prompt =
+`You convert a meal description into structured food items for a macro tracker.
+${photoClause}
+Break composite or prepared dishes (samosa, biryani, sandwich, burger, pizza slice, curry, paratha, wrap, etc.) into their base single-ingredient components — the nutrient database only has reliable data for simple ingredients, not assembled dishes. Each component gets its own estimated grams; the components of one dish should sum to roughly that dish's total weight. When a dish is fried or oily, add a "cooking oil" component for the absorbed fat.
+Leave naturally single-ingredient foods (an egg, an apple, grilled chicken, rice, milk) as ONE item — never split those. Also keep everyday breads and flatbreads that the database stores as finished items — chapati, roti, naan, tortilla, pita, plain bread, idli, dosa — as ONE item under their common name (e.g. "chapati", "roti"); do NOT split those into flour and water.
+Never output water, ice, plain black coffee or unsweetened tea, or any other zero-calorie liquid as an item — they carry no macros and only distort the totals.
+Return JSON: {"items":[{"name":<short generic single-ingredient name good for a USDA database search>,`+
+`"partOf":<the dish this component came from, or "" if it was logged as a plain food>,`+
+`"grams":<number, estimate a realistic portion if none is stated>,`+
+`"weighed":<boolean, true ONLY if the user gave an explicit weight/measure for THIS component; a decomposed guess is false>,`+
+`"isCurry":<boolean, true if this component sits in curry/gravy/added oil>,`+
+`"est":{"kcal":<per 100g>,"p":<protein g per 100g>,"f":<fat g per 100g>,"c":<carb g per 100g>}}]}.
+"est" is your best per-100g estimate, used only as a fallback. Output JSON only, no prose.
+Meal: """${text}"""`;
+
+  const txt = await aiComplete(prompt, imageB64);
 
   // Models are flaky with strict JSON mode — free ones wrap it in prose, and some paid ones
   // (measured: gemini-3.5-flash) end an otherwise perfect reply one closing brace short.
@@ -2843,6 +2883,139 @@ Meal: """${text}"""`;
   });
   return cleaned.length ? cleaned : items;
 }
+
+// ---- ASK: an analyst over your own ledger -----------------------------------
+// Three constraints shape the whole feature:
+//   1. The model never does arithmetic. Asked "how was my week" over raw rows, a language
+//      model invents totals with total confidence. So every figure it could need is
+//      computed first by LedgerCore.assistantDigest(), the model is told it may only copy
+//      numbers out of that block, and the reply is screened for figures that aren't in it.
+//   2. It is scoped to this log, not to nutrition science. A food log cannot answer
+//      medical questions, so the prompt refuses dosing, diagnosis and health claims
+//      rather than letting an ungrounded model drift into them.
+//   3. It is the only part of the app that needs the network, and it spends the user's
+//      own key — so it fails loudly offline and is capped per day from Settings.
+
+// A blank prompt tells nobody what's askable; these are the openers that make it usable
+// on day one, and each one is answerable purely from the digest.
+const ASK_SUGGESTIONS = [
+  'Am I actually losing weight?',
+  'How did last week go?',
+  'What can I still eat tonight?',
+  'Where am I slipping?',
+  'What do I eat most?'
+];
+
+// Collect app state into the shape assistantDigest() wants. Reads only — nothing here
+// mutates the ledger, and the still-open day is passed separately so rolling averages
+// aren't dragged around by a half-logged today.
+function askGather(){
+  const closed = closedDays();                        // newest first, open day excluded
+  let openEntries = ledger;
+  if (VIEW_DATE !== ACTIVE_DATE){                     // browsing history: today lives in storage
+    const d = allDays(true).filter(x => x.date === ACTIVE_DATE)[0];
+    openEntries = d ? d.ledger : [];
+  }
+  const t = totalsOf(openEntries);
+  const sex = PROFILE.sex==='female' ? 'f' : 'm';
+  const micros = MICROS.filter(m => (t[m.key]||0) > 0).map(m => ({
+    name: m.name, value: Math.round((t[m.key]||0)*10)/10, target: m.t[sex], unit: m.unit,
+    limit: m.limit, status: LedgerCore.microStatus(t[m.key]||0, m.t[sex], m.limit)
+  }));
+  const supplements = supps().map(s => {
+    const cells = LedgerCore.supplementWindow(s, suppTakenMap(s.id), ACTIVE_DATE, SUPP_STRIP_DAYS);
+    const st = LedgerCore.supplementStats(cells);
+    const last = cells[cells.length-1] || {};
+    return { name: s.name, cadence: suppCadenceText(s), dueToday: !!last.due, takenToday: !!last.taken,
+             due: st.due, taken: st.taken, streak: st.streak, windowDays: SUPP_STRIP_DAYS };
+  });
+  const map = weightsMap();
+  const weights = Object.keys(map).filter(d => +map[d] > 0).sort().map(d => ({date:d, kg:+map[d]}));
+  return {
+    today: ACTIVE_DATE,
+    open: {date: ACTIVE_DATE, totals: t, entries: openEntries},
+    days: closed.map(d => ({date: d.date, totals: totalsOf(d.ledger), entries: d.ledger})),
+    targets: { floor: FLOOR, ceil: CEIL, protein: Math.round(P_TARGET),
+               carbCap: capGrams(C_CAP, 4) || null, fatCap: capGrams(F_CAP, 9) || null,
+               goalLabel: GOAL.mode !== 'off' ? GOAL_LABEL[GOAL.mode] : null,
+               corridorAuto: !!CORRIDOR_AUTO },
+    weights, tdee: computeTDEE(), supplements, micros,
+    training: {split: splitForDate(ACTIVE_DATE), isTraining: isTrainingDay(ACTIVE_DATE)}
+  };
+}
+
+function askPrompt(question, facts){
+  return `You are the analyst built into this person's own macro-tracking app. You answer questions about THEIR logged data and nothing else.
+
+RULES — every one of them applies:
+1. Do no arithmetic. Every number in your answer must be copied verbatim from the FACTS block below. Never add, average, subtract, extrapolate or convert figures yourself — the app has already computed everything that matters. If the number the question needs is not in FACTS, say plainly that it is not in the data.
+2. Answer only from FACTS. Do not bring in outside nutrition knowledge to assert what is healthy, and never give medical advice, supplement dosing, diagnoses, or claims about disease or health outcomes. If the question calls for that, say it is outside what a food log can answer and that a doctor or dietitian is the right place for it.
+3. Where the data is thin or missing — no weigh-ins, few logged days, micronutrients that only count USDA-matched foods — say so and name exactly what they would need to log to get a real answer. Never paper over a gap with a guess.
+4. Judge them against their OWN targets as given in FACTS, never against targets you think they should have.
+5. Reply in plain prose: 2 to 5 sentences, no markdown, no headings, no bullet points. Lead with the direct answer, then the one or two figures that support it. Be specific and unsentimental.
+
+FACTS — all figures precomputed from their log by the app:
+${facts}
+
+QUESTION: """${question}"""`;
+}
+
+let ASK_BUSY = false;
+async function askRun(question){
+  const q = (question || '').trim();
+  const status = document.getElementById('parseStatus');
+  const out = document.getElementById('askAnswer');
+  if (!q || ASK_BUSY) return;
+  if (!hasAI()){ setStatus(status, 'No AI key — add a Gemini or OpenRouter key in ⚙ Settings.', 'bad'); return; }
+  // The rest of the app is offline-first; this one feature genuinely isn't, so say that
+  // instead of hanging on a fetch that cannot succeed.
+  if (navigator.onLine === false){
+    setStatus(status, 'Ask needs a connection — everything else in the app works offline.', 'bad'); return;
+  }
+  if (aiQuotaLeft() <= 0){
+    setStatus(status, `Daily query limit reached (${aiCap()}). Raise or clear it in ⚙ Settings — logging and parsing are unaffected.`, 'bad'); return;
+  }
+
+  const digest = LedgerCore.assistantDigest(askGather());
+  const facts = LedgerCore.digestFacts(digest);
+  ASK_BUSY = true;
+  const btn = document.getElementById('askBtn'); btn.disabled = true;
+  busy(status, 'Reading your log…');
+  aiCountQuery();                                  // a dispatched call is spent, answered or not
+  try {
+    const answer = (await aiComplete(askPrompt(q, facts), null)).trim();
+    // Screen for arithmetic the model did anyway. A figure with no basis in the facts is
+    // shown, not hidden — a false positive costs a footnote, a silent invention costs trust.
+    const bogus = LedgerCore.unverifiedNumbers(answer, facts);
+    setStatus(status, '');
+    out.innerHTML = `<div class="ask-card">
+      <div class="ask-q"><span>❯ ${escapeHtml(q)}</span><span class="del" id="askClose" title="dismiss">✕</span></div>
+      <div class="ask-body">${escapeHtml(answer)}</div>
+      <div class="ask-foot">${escapeHtml(AI_VIA)} · answered from your ${digest.loggedDays} logged day(s) · ${aiQuotaText()}
+        ${bogus.length ? `<div class="ask-warn" style="margin-top:5px">⚠ ${bogus.length} figure(s) not found in your data — treat as unverified: ${bogus.join(', ')}</div>` : ''}
+      </div></div>`;
+    document.getElementById('askClose').onclick = ()=>{ out.innerHTML=''; };
+    haptic();
+  } catch(err){
+    setStatus(status, err.message, 'bad');
+  } finally { ASK_BUSY = false; btn.disabled = !hasAI(); refreshKeyUI(); }   // keep the Settings quota line honest
+}
+
+function renderAskChips(){
+  const el = document.getElementById('askChips');
+  if (!el) return;
+  if (!hasAI()){ el.style.display = 'none'; return; }
+  el.style.display = 'flex';
+  el.innerHTML = ASK_SUGGESTIONS.map((s,i)=>`<span class="chip" data-ask="${i}">${escapeHtml(s)}</span>`).join('');
+  el.querySelectorAll('[data-ask]').forEach(c=>{
+    c.onclick = ()=>{
+      const q = ASK_SUGGESTIONS[+c.dataset.ask];
+      document.getElementById('nlInput').value = q;
+      askRun(q);
+    };
+  });
+}
+document.getElementById('askBtn').onclick = ()=> askRun(document.getElementById('nlInput').value);
 
 // ---- PENDING (AI review) ----
 // Resolve a pending item's active choice (a USDA candidate or the AI estimate).
@@ -3051,12 +3224,20 @@ function refreshKeyUI(){
   st.textContent = bits.join('  ·  ') + (hasUSDA()&&hasAI() ? '  · all systems go.' : '  · AI parse disabled until a Gemini or OpenRouter key is set.');
   document.getElementById('usdaBtn').disabled = !hasUSDA();
   document.getElementById('parseBtn').disabled = !hasAI();
+  document.getElementById('askBtn').disabled = !hasAI();
+  const cap = document.getElementById('aiCapStatus');
+  if (cap) cap.textContent = hasAI()
+    ? `${aiQuotaText()} · caps 💬 Ask only, so a chatty session can't burn your free tier. Meal parsing is never capped.`
+    : 'Caps how many 💬 Ask questions run per day, so a chatty session can\'t burn your free tier. Meal parsing is never capped.';
+  renderAskChips();
 }
 document.getElementById('saveKeys').onclick = ()=>{
   setKey(LS.usda,  document.getElementById('usdaKey').value.trim());
   setKey(LS.gem,   document.getElementById('geminiKey').value.trim());
   setKey(LS.model, document.getElementById('geminiModel').value.trim());
   setKey(LS.or,    document.getElementById('orKey').value.trim());
+  const capVal = document.getElementById('aiCap').value.trim();
+  setKey(LS.aiCap, capVal === '' ? '' : String(Math.max(0, Math.round(+capVal || 0))));
   refreshKeyUI();
   setStatus(document.getElementById('keyStatus'),
     'Saved. ' + (hasUSDA()&&hasAI() ? 'All systems go.' : 'Some keys still missing.'),
@@ -3825,6 +4006,7 @@ function loadKeys(){
   document.getElementById('geminiKey').value = getKey(LS.gem);
   document.getElementById('geminiModel').value = getKey(LS.model) || 'gemini-3.5-flash-lite';
   document.getElementById('orKey').value     = getKey(LS.or);
+  document.getElementById('aiCap').value     = getKey(LS.aiCap) || String(AI_CAP_DEFAULT);
   document.getElementById('supaUrl').value   = getKey(LS.supaUrl);
   document.getElementById('supaKey').value   = getKey(LS.supaKey);
   document.getElementById('syncPass').value  = getKey(LS.pass);

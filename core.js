@@ -328,6 +328,196 @@
     try { return JSON.parse(out); } catch (e) { return null; }
   }
 
+  // ---- Assistant digest: the facts an LLM is allowed to narrate --------------
+  // The assistant must never do arithmetic — a language model asked "how was my week"
+  // over raw ledger rows will confidently invent totals. So every number it can possibly
+  // need is computed HERE, deterministically, and the model only gets the finished
+  // figures. Raw entries ride along untouched for "what did I eat on the 14th" lookups,
+  // never as something to add up.
+  //
+  // input = {
+  //   today, open:{date,totals,entries}, days:[{date,totals,entries}] newest-first (closed),
+  //   targets:{floor,ceil,protein,carbCap,fatCap,goalLabel,corridorAuto},
+  //   weights:[{date,kg}] ascending, tdee:{...calibrateTDEE output}, supplements:[...],
+  //   micros:[{name,value,target,unit,limit,status}], training:{split,isTraining} }
+  // Everything is optional; missing inputs produce nulls the model is told to admit to.
+  const DIGEST_WINDOWS = [7, 14, 30];
+  function assistantDigest(input) {
+    const inp = input || {};
+    const t = inp.targets || {};
+    const floor = +t.floor || 0, ceil = +t.ceil || 0, pTarget = +t.protein || 0;
+    const days = (inp.days || []).slice().sort((a, b) => a.date < b.date ? 1 : -1);
+    const tot = d => (d && d.totals) || { kcal: 0, p: 0, f: 0, c: 0 };
+    const dayOk = d => {
+      const x = tot(d);
+      return x.kcal >= floor && (!ceil || x.kcal <= ceil) && x.p >= pTarget;
+    };
+    const avg = (arr, pick) => arr.length
+      ? Math.round(arr.reduce((s, d) => s + (pick(tot(d)) || 0), 0) / arr.length * 10) / 10 : null;
+
+    // Rolling windows over CLOSED days only — the open day is still being logged, so
+    // folding it in would make every average drift as the user eats.
+    const windows = {};
+    DIGEST_WINDOWS.forEach(n => {
+      const w = days.slice(0, n);
+      const overCeil = w.filter(d => ceil && tot(d).kcal > ceil).map(d => d.date);
+      const underFloor = w.filter(d => floor && tot(d).kcal < floor).map(d => d.date);
+      const missedP = w.filter(d => pTarget && tot(d).p < pTarget).map(d => d.date);
+      windows['d' + n] = {
+        days: w.length,
+        avgKcal: w.length ? Math.round(w.reduce((s, d) => s + tot(d).kcal, 0) / w.length) : null,
+        avgProtein: avg(w, x => x.p), avgFat: avg(w, x => x.f), avgCarb: avg(w, x => x.c),
+        inCorridor: w.filter(dayOk).length,
+        overCeilDays: overCeil, underFloorDays: underFloor, missedProteinDays: missedP
+      };
+    });
+
+    // Streak: consecutive compliant days back from the most recent CLOSED day.
+    let streak = 0;
+    for (let i = 0; i < days.length; i++) { if (dayOk(days[i])) streak++; else break; }
+
+    // Most-logged foods over the last 30 closed days + the open one: what the diet
+    // actually consists of, which is most of what "am I eating well" comes down to.
+    const foodTally = {};
+    const forFoods = days.slice(0, 30).concat(inp.open && inp.open.date ? [inp.open] : []);
+    forFoods.forEach(d => (d.entries || []).forEach(e => {
+      const k = String(e.name || '').trim();
+      if (!k) return;
+      const f = foodTally[k] || (foodTally[k] = { name: k, times: 0, dates: {}, kcal: 0, grams: 0 });
+      f.times++; f.dates[d.date] = true; f.kcal += +e.kcal || 0; f.grams += +e.grams || 0;
+    }));
+    const topFoods = Object.keys(foodTally).map(k => {
+      const f = foodTally[k];
+      return { name: f.name, times: f.times, days: Object.keys(f.dates).length,
+               totalKcal: Math.round(f.kcal), avgGrams: Math.round(f.grams / f.times) };
+    }).sort((a, b) => b.times - a.times).slice(0, 12);
+
+    // Weight: the full-history trend plus the trailing 28 days, which is the one that
+    // answers "is the current corridor working" rather than "did I lose weight ever".
+    const ws = (inp.weights || []).filter(w => +w.kg > 0)
+      .slice().sort((a, b) => a.date < b.date ? -1 : 1);
+    const recentW = ws.slice(-28);
+    const trAll = weightTrend(ws), tr28 = weightTrend(recentW);
+    const weight = ws.length ? {
+      latest: ws[ws.length - 1].kg, latestDate: ws[ws.length - 1].date,
+      first: ws[0].kg, firstDate: ws[0].date, weighIns: ws.length,
+      changeKg: Math.round((ws[ws.length - 1].kg - ws[0].kg) * 100) / 100,
+      ratePerWeek: trAll ? Math.round(trAll.ratePerWeek * 100) / 100 : null,
+      ratePerWeek28: tr28 ? Math.round(tr28.ratePerWeek * 100) / 100 : null
+    } : null;
+
+    const openTotals = tot(inp.open);
+    const remaining = {
+      kcalToFloor: floor ? Math.max(0, Math.round(floor - openTotals.kcal)) : null,
+      kcalToCeil: ceil ? Math.round(ceil - openTotals.kcal) : null,
+      proteinToTarget: pTarget ? Math.max(0, Math.round(pTarget - openTotals.p)) : null
+    };
+
+    return {
+      today: inp.today || (inp.open && inp.open.date) || null,
+      targets: { floor, ceil, protein: pTarget, carbCap: +t.carbCap || null, fatCap: +t.fatCap || null,
+                 goalLabel: t.goalLabel || null, corridorAuto: !!t.corridorAuto },
+      training: inp.training || null,
+      openDay: { date: (inp.open && inp.open.date) || null, totals: roundTotals(openTotals),
+                 items: (inp.open && inp.open.entries || []).length },
+      remaining, windows, streak, topFoods, weight,
+      tdee: inp.tdee || null,
+      supplements: inp.supplements || [],
+      micros: inp.micros || [],
+      loggedDays: days.length,
+      // Item-level detail for lookups, newest first and capped — enough to answer "what
+      // did I eat on Tuesday" without burying the computed figures above.
+      recent: days.slice(0, 14).map(d => ({
+        date: d.date, totals: roundTotals(tot(d)),
+        items: (d.entries || []).slice(0, 30).map(e => ({
+          name: e.name, grams: Math.round(+e.grams || 0), kcal: Math.round(+e.kcal || 0),
+          p: Math.round((+e.p || 0) * 10) / 10, f: Math.round((+e.f || 0) * 10) / 10,
+          c: Math.round((+e.c || 0) * 10) / 10
+        }))
+      }))
+    };
+  }
+  function roundTotals(x) {
+    return { kcal: Math.round(x.kcal || 0), p: Math.round((x.p || 0) * 10) / 10,
+             f: Math.round((x.f || 0) * 10) / 10, c: Math.round((x.c || 0) * 10) / 10 };
+  }
+
+  // Render a digest as the plain-text FACTS block the model is handed. Kept separate
+  // from assistantDigest so the numbers can be tested without parsing prose.
+  function digestFacts(d) {
+    const L = [];
+    const n = v => v == null ? 'unknown' : (typeof v === 'number' ? String(v) : v);
+    L.push(`TODAY: ${n(d.today)}` + (d.training && d.training.split ? ` (${d.training.split}${d.training.isTraining ? ' — training day' : ' — rest day'})` : ''));
+    const t = d.targets;
+    L.push(`TARGETS: corridor ${n(t.floor)}-${n(t.ceil)} kcal/day, protein floor ${n(t.protein)} g`
+      + (t.carbCap ? `, carb cap ${t.carbCap} g` : '') + (t.fatCap ? `, fat cap ${t.fatCap} g` : '')
+      + (t.goalLabel ? `, goal "${t.goalLabel}"` : '') + (t.corridorAuto ? ', corridor auto-set from TDEE' : ''));
+    const o = d.openDay;
+    L.push(`TODAY SO FAR: ${o.totals.kcal} kcal, ${o.totals.p} g protein, ${o.totals.f} g fat, ${o.totals.c} g carb, across ${o.items} logged item(s)`);
+    const r = d.remaining;
+    L.push(`REMAINING TODAY: ${r.kcalToCeil == null ? 'unknown' : r.kcalToCeil + ' kcal to ceiling'}`
+      + (r.kcalToFloor == null ? '' : `, ${r.kcalToFloor} kcal still needed to reach the floor`)
+      + (r.proteinToTarget == null ? '' : `, ${r.proteinToTarget} g protein still needed`));
+    L.push(`HISTORY: ${d.loggedDays} closed day(s) logged; current compliant streak ${d.streak} day(s)`);
+    DIGEST_WINDOWS.forEach(k => {
+      const w = d.windows['d' + k];
+      if (!w || !w.days) { L.push(`LAST ${k} DAYS: no closed days logged`); return; }
+      L.push(`LAST ${k} DAYS (${w.days} logged): avg ${w.avgKcal} kcal, ${w.avgProtein} g protein, `
+        + `${w.avgFat} g fat, ${w.avgCarb} g carb; ${w.inCorridor} of ${w.days} fully on target; `
+        + `${w.overCeilDays.length} over ceiling${w.overCeilDays.length ? ' (' + w.overCeilDays.join(', ') + ')' : ''}; `
+        + `${w.underFloorDays.length} under floor${w.underFloorDays.length ? ' (' + w.underFloorDays.join(', ') + ')' : ''}; `
+        + `${w.missedProteinDays.length} short on protein${w.missedProteinDays.length ? ' (' + w.missedProteinDays.join(', ') + ')' : ''}`);
+    });
+    L.push(d.weight
+      ? `WEIGHT: latest ${d.weight.latest} kg on ${d.weight.latestDate}, from ${d.weight.first} kg on ${d.weight.firstDate} `
+        + `(${d.weight.changeKg >= 0 ? '+' : ''}${d.weight.changeKg} kg over ${d.weight.weighIns} weigh-ins); `
+        + `trend ${d.weight.ratePerWeek == null ? 'unknown' : d.weight.ratePerWeek + ' kg/week'} all-time, `
+        + `${d.weight.ratePerWeek28 == null ? 'unknown' : d.weight.ratePerWeek28 + ' kg/week'} over the last 28 days`
+      : 'WEIGHT: no weigh-ins logged — weight-based questions cannot be answered');
+    L.push(d.tdee && d.tdee.blended
+      ? `MAINTENANCE (TDEE): ${d.tdee.blended} kcal/day (formula ${d.tdee.formula}, `
+        + `measured-from-data ${d.tdee.dataTDEE == null ? 'not yet available' : d.tdee.dataTDEE}, `
+        + `data weighted ${Math.round((d.tdee.w || 0) * 100)}% over ${d.tdee.sampleDays || 0} days; `
+        + `average logged intake ${d.tdee.avgIntake || 0} kcal)`
+      : 'MAINTENANCE (TDEE): not computable — needs a bodyweight and profile');
+    if (d.topFoods.length)
+      L.push('MOST-LOGGED FOODS (last 30 days): ' + d.topFoods.map(f =>
+        `${f.name} x${f.times} on ${f.days} day(s), ${f.totalKcal} kcal total, typical ${f.avgGrams} g`).join('; '));
+    if (d.micros.length)
+      L.push('MICRONUTRIENTS TODAY (USDA-matched foods only, so these under-read): ' + d.micros.map(m =>
+        `${m.name} ${m.value}/${m.target} ${m.unit} (${m.status})`).join('; '));
+    if (d.supplements.length)
+      L.push('SUPPLEMENTS: ' + d.supplements.map(s =>
+        `${s.name} — ${s.cadence}, ${s.dueToday ? 'due today' : 'not due today'}, `
+        + `${s.takenToday ? 'taken today' : 'not yet taken today'}, ${s.taken}/${s.due} of the last ${s.windowDays} days, streak ${s.streak}`).join('; '));
+    d.recent.forEach(day => {
+      L.push(`ENTRIES ${day.date} (${day.totals.kcal} kcal, ${day.totals.p} g protein): `
+        + (day.items.length ? day.items.map(i => `${i.name} ${i.grams}g = ${i.kcal} kcal/${i.p}p/${i.f}f/${i.c}c`).join('; ') : 'nothing logged'));
+    });
+    return L.join('\n');
+  }
+
+  // Guard against the model doing arithmetic anyway. Pulls every number out of an answer
+  // and checks it against the numbers in the facts block. Values under 10 are ignored —
+  // counts, ordinals and "2 eggs" dominate there and would drown the signal. A 1% (or
+  // ±1) tolerance absorbs sensible rounding. Returns the numbers with no basis in the
+  // data; the caller flags them rather than hiding the answer, since a false positive is
+  // cheaper than silently shipping an invented figure.
+  function unverifiedNumbers(answer, factsText, minValue) {
+    const min = minValue == null ? 10 : minValue;
+    const grab = s => (String(s || '').match(/\d[\d,]*(?:\.\d+)?/g) || [])
+      .map(x => parseFloat(x.replace(/,/g, ''))).filter(v => isFinite(v));
+    const facts = grab(factsText);
+    const out = [];
+    grab(answer).forEach(v => {
+      if (Math.abs(v) < min) return;
+      const tol = Math.max(1, Math.abs(v) * 0.01);
+      if (facts.some(f => Math.abs(f - v) <= tol)) return;
+      if (out.indexOf(v) < 0) out.push(v);
+    });
+    return out;
+  }
+
   // ---- Supplement cycles: which days a protocol is ON ------------------------
   // A protocol is either "every N days" or "these weekdays". Every-other-day (N=2) is the
   // one nobody can hold in their head, so the ON/OFF parity is made a property of the
@@ -508,7 +698,7 @@
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
     supplementDue, supplementNextDue, supplementWindow, supplementStats, isoWeekdayMon,
-    repairJson,
+    repairJson, assistantDigest, digestFacts, unverifiedNumbers,
     KCAL_PER_KG_FAT, mergeSyncStates, ternary
   };
 });

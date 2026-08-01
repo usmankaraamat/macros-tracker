@@ -460,6 +460,83 @@ group('supplementWindow + supplementStats');
         seeded.map(c=>(c.due?'O':'.')).join(''));
 })();
 
+// ---- assistantDigest: every figure the Ask assistant is allowed to state ----
+// The whole point of the digest is that the model never computes anything, so these
+// assertions ARE the assistant's accuracy guarantee.
+group('assistantDigest — precomputed facts for the Ask assistant');
+(function(){
+  const day = (date, kcal, p, entries) => ({date, totals:{kcal, p, f:20, c:100}, entries: entries||[]});
+  const input = {
+    today: '2026-08-01',
+    targets: {floor:2000, ceil:2400, protein:150, goalLabel:'cut'},
+    open: {date:'2026-08-01', totals:{kcal:900, p:70, f:30, c:60},
+           entries:[{name:'Chicken breast, boiled', grams:200, kcal:330, p:62, f:7, c:0}]},
+    days: [
+      day('2026-07-31', 2200, 160, [{name:'White rice, boiled', grams:300, kcal:390, p:8, f:1, c:85}]),
+      day('2026-07-30', 2600, 120),                       // over ceiling AND short on protein
+      day('2026-07-29', 2100, 155),
+      day('2026-07-28', 1800, 151)                        // under floor
+    ],
+    weights: [{date:'2026-07-04', kg:82}, {date:'2026-07-18', kg:81}, {date:'2026-08-01', kg:80}],
+    tdee: {blended:2500, formula:2600, dataTDEE:2450, w:0.5, sampleDays:28, avgIntake:2200}
+  };
+  const d = C.assistantDigest(input);
+
+  check('7-day average kcal is computed, not guessed', d.windows.d7.avgKcal === 2175,
+        `got ${d.windows.d7.avgKcal}`);
+  check('counts only fully-compliant days as in-corridor', d.windows.d7.inCorridor === 2,
+        `got ${d.windows.d7.inCorridor} (07-31 and 07-29)`);
+  check('names the over-ceiling day', d.windows.d7.overCeilDays.join() === '2026-07-30',
+        `got ${d.windows.d7.overCeilDays.join()||'none'}`);
+  check('names the under-floor day', d.windows.d7.underFloorDays.join() === '2026-07-28',
+        `got ${d.windows.d7.underFloorDays.join()||'none'}`);
+  check('names the protein-miss day', d.windows.d7.missedProteinDays.join() === '2026-07-30',
+        `got ${d.windows.d7.missedProteinDays.join()||'none'}`);
+  check('streak counts back from the newest closed day and stops at the miss', d.streak === 1,
+        `got ${d.streak}`);
+  // The open day must NEVER enter the rolling averages — it's still being logged.
+  check('open day is excluded from the windows', d.windows.d7.days === 4, `got ${d.windows.d7.days}`);
+  check('open day is reported separately', d.openDay.totals.kcal === 900 && d.openDay.items === 1,
+        `got ${d.openDay.totals.kcal} kcal / ${d.openDay.items} items`);
+  check('remaining budget is precomputed', d.remaining.kcalToCeil === 1500 && d.remaining.proteinToTarget === 80,
+        `got ${d.remaining.kcalToCeil} kcal / ${d.remaining.proteinToTarget} g`);
+  check('weight change and rate come from the fitted trend',
+        d.weight.changeKg === -2 && approx(d.weight.ratePerWeek, -0.5, 0.06),
+        `got ${d.weight.changeKg} kg, ${d.weight.ratePerWeek} kg/wk`);
+  check('top foods are tallied across days including the open one',
+        d.topFoods.length === 2 && d.topFoods.every(f=>f.times===1), `got ${d.topFoods.length} foods`);
+
+  // With no weigh-ins the digest must say nothing rather than invent a trend.
+  const bare = C.assistantDigest({today:'2026-08-01', targets:{floor:2000,ceil:2400,protein:150}, days:[]});
+  check('no weigh-ins → weight is null, not zero', bare.weight === null, `got ${JSON.stringify(bare.weight)}`);
+  check('no history → window reports zero days', bare.windows.d30.days === 0 && bare.windows.d30.avgKcal === null,
+        `got ${bare.windows.d30.days} days`);
+
+  const facts = C.digestFacts(d);
+  check('facts block states the corridor', facts.indexOf('corridor 2000-2400 kcal/day') >= 0);
+  check('facts block carries per-day entries for lookups', facts.indexOf('ENTRIES 2026-07-31') >= 0);
+  check('facts block admits missing weigh-ins',
+        C.digestFacts(bare).indexOf('no weigh-ins logged') >= 0);
+})();
+
+// ---- unverifiedNumbers: catches the model doing arithmetic anyway ----
+group('unverifiedNumbers — screening an answer against the facts');
+(function(){
+  const facts = 'LAST 7 DAYS (4 logged): avg 2175 kcal, 148 g protein\nWEIGHT: latest 80 kg';
+  check('a figure copied from the facts passes',
+        C.unverifiedNumbers('You averaged 2175 kcal last week.', facts).length === 0);
+  check('comma formatting still matches',
+        C.unverifiedNumbers('You averaged 2,175 kcal.', facts).length === 0);
+  check('rounding within 1% is tolerated',
+        C.unverifiedNumbers('About 2180 kcal.', facts).length === 0);
+  check('an invented total is flagged',
+        C.unverifiedNumbers('Your weekly total was 15230 kcal.', facts).join() === '15230',
+        `got ${C.unverifiedNumbers('Your weekly total was 15230 kcal.', facts).join()||'none'}`);
+  // Small counts ("2 eggs", "3 days") would drown the signal, so they're out of scope.
+  check('small counts are ignored',
+        C.unverifiedNumbers('You logged 4 days and ate 2 eggs.', facts).length === 0);
+})();
+
 // ---- summary ----
 const sum = document.getElementById('summary');
 sum.className = failed === 0 ? 'allpass' : 'anyfail';
