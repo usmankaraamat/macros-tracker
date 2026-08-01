@@ -850,8 +850,10 @@
   <div id="liftTrends"><div class="empty">Log a few sessions and the trends appear here.</div></div>
   <div class="tactical" style="margin-top:10px">
     Strength lifts are judged on best-set e1RM; high-rep work on capacity (load × reps-to-failure),
-    because an estimated 1RM stops meaning anything past 12 reps. Only the <i>change</i> in your RIR
-    is ever read, so guessing it consistently is fine — a constant bias cancels out of a trend.
+    because an estimated 1RM stops meaning anything past 12 reps. Log reps-in-reserve for your
+    <i>hardest</i> set — the last one is the most fatigued and its RIR moves with set count and rest,
+    which is noise. Only the <i>change</i> in your RIR is ever read, so guessing it consistently is
+    fine: a constant bias cancels out of a trend.
   </div>
 </div>
 
@@ -3446,7 +3448,7 @@ function renderLiftPending(){
         ${x.viaAI ? '<span class="lift-tag">read by AI — check it</span>' : ''}
       </div>
       <div class="lift-sets">${x.sets.map(SET_TXT).join('  ·  ')}</div>
-      <div class="lift-rir"><label for="plr${i}">Reps left in the tank</label>
+      <div class="lift-rir"><label for="plr${i}" title="How many more reps you had in you on your hardest set. Guess it — only the change over time is ever read, so a consistent personal bias cancels out.">Reps left in the tank on your hardest set</label>
         <input type="number" id="plr${i}" data-pr="${i}" min="0" max="10" step="1"
                value="${x.rir==null?'':x.rir}" placeholder="–"></div>
     </div>`).join('') +
@@ -3546,7 +3548,7 @@ function renderLiftSession(all, W){
       <div class="lift-sub">${m.sets} set${m.sets===1?'':'s'} · ${Math.round(m.volume).toLocaleString()} kg volume`
       + (m.bestE1RM ? ` · best e1RM ${m.bestE1RM.toFixed(1)} kg` : '')
       + (m.incomplete ? ` · <span style="color:var(--warn)">log a weight to score this</span>` : '') + `</div>
-      <div class="lift-rir"><label for="slr${i}">Reps left in the tank on the last set</label>
+      <div class="lift-rir"><label for="slr${i}" title="How many more reps you had in you on your hardest set. Guess it — only the change over time is ever read, so a consistent personal bias cancels out.">Reps left in the tank on your hardest set</label>
         <input type="number" id="slr${i}" data-lr="${i}" min="0" max="10" step="1"
                value="${ex.rir==null?'':ex.rir}" placeholder="–"></div>
     </div>`;
