@@ -359,6 +359,41 @@
   .spark-wrap svg { width:100%; height:auto; display:block; }
   .spark-cap { font-size:9px; text-transform:uppercase; letter-spacing:0.1em; color:var(--ink-faint); margin-bottom:6px; }
 
+  /* ---- LIFT: session logging + progression ---- */
+  .lift-ex { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+    margin-bottom: 8px; background: var(--panel-2); }
+  .lift-ex-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .lift-ex-name { font-weight: 600; font-size: 13px; }
+  .lift-sets { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); margin-top: 5px; }
+  .lift-sub { font-size: 11px; color: var(--ink-faint); margin-top: 4px; font-family: var(--mono); }
+  .lift-tag { font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em;
+    padding: 2px 6px; border-radius: 999px; background: rgba(245,158,11,0.16); color: var(--warn); }
+  .lift-del { color: var(--ink-faint); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
+  .lift-del:hover { color: var(--bad); }
+  .lift-rir { display: flex; align-items: center; gap: 6px; margin-top: 7px;
+    font-size: 11px; color: var(--ink-faint); }
+  .lift-rir input { width: 58px; padding: 4px 6px; font-size: 12px; }
+  .verdict { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+    padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+  .v-progressing { background: rgba(16,185,129,0.16); color: var(--ok); }
+  .v-stalled, .v-grinding { background: rgba(245,158,11,0.16); color: var(--warn); }
+  .v-effort-drift { background: rgba(59,130,246,0.16); color: var(--accent); }
+  .v-regressing { background: rgba(239,68,68,0.16); color: var(--bad); }
+  .v-thin { background: rgba(100,116,139,0.2); color: var(--ink-faint); }
+  /* Volume-class lifts are health/maintenance work — dimmed so they read as context,
+     not as evidence, exactly as they are treated by the maths. */
+  .lift-ex.low-signal { opacity: 0.72; }
+  .recomp { border-left: 3px solid var(--line); padding: 10px 0 10px 12px; }
+  .recomp.good { border-color: var(--ok); }
+  .recomp.warn { border-color: var(--warn); }
+  .recomp.bad { border-color: var(--bad); }
+  .recomp-head { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .recomp.good .recomp-head { color: var(--ok); }
+  .recomp.warn .recomp-head { color: var(--warn); }
+  .recomp.bad .recomp-head { color: var(--bad); }
+  .recomp-body { font-size: 12px; color: var(--ink-dim); line-height: 1.55; }
+  .recomp-body b { color: var(--ink); font-weight: 600; }
+
   /* ---- BOTTOM NAV + TAB VIEWS ---- */
   body { padding-bottom: 88px; }   /* clear the fixed nav */
   .tabview { animation: fadeInUp 0.4s cubic-bezier(0.16,1,0.3,1) both; }
@@ -794,6 +829,51 @@
 
 </main><!-- /tabEngineer -->
 
+<main id="tabLift" class="tabview" style="display:none">
+<!-- SESSION LOG: free text in, sets out. Parsed by the grammar in core.js, not by a model. -->
+<div class="panel">
+  <div class="panel-title">Session · <span id="liftDate">today</span><span id="liftSplit"></span></div>
+  <div class="chips" id="liftChips" style="display:none"></div>
+  <textarea id="liftInput" rows="2" placeholder="One exercise per line — e.g. bicep curls 20x12, 20x8, 15x14&#10;bench 60kg 8, 8, 6 rir 2"></textarea>
+  <div class="omni-actions">
+    <button id="liftBtn" class="omni-primary">Log sets</button>
+    <button class="omni-chip" id="liftAiBtn" style="display:none" title="Have the AI read a line the parser could not">🤖 Ask AI to read it</button>
+  </div>
+  <div class="tactical" id="liftStatus" style="margin-top:8px;display:none"></div>
+  <div id="liftPending" style="margin-top:10px"></div>
+  <div id="liftSession" style="margin-top:12px"></div>
+</div>
+
+<!-- PROGRESSION: is each lift still moving? -->
+<div class="panel">
+  <div class="panel-title">Progression · <span id="liftWindowLbl">last 8 weeks</span></div>
+  <div id="liftTrends"><div class="empty">Log a few sessions and the trends appear here.</div></div>
+  <div class="tactical" style="margin-top:10px">
+    Strength lifts are judged on best-set e1RM; high-rep work on capacity (load × reps-to-failure),
+    because an estimated 1RM stops meaning anything past 12 reps. Only the <i>change</i> in your RIR
+    is ever read, so guessing it consistently is fine — a constant bias cancels out of a trend.
+  </div>
+</div>
+
+<!-- CATALOGUE: the alias map that keeps one lift on one trend line -->
+<details class="panel">
+  <summary class="panel-title" style="cursor:pointer;margin-bottom:0">Exercises ▸</summary>
+  <div style="margin-top:12px">
+    <div class="tactical" style="margin-top:0;margin-bottom:10px">
+      Every way you write a lift has to resolve to one entry here, or its history splits in two
+      and no trend can be fit. Delete an exercise to drop it from the catalogue — logged sessions are untouched.
+    </div>
+    <div id="liftCatalog"></div>
+  </div>
+</details>
+
+<!-- SESSION HISTORY -->
+<details class="panel">
+  <summary class="panel-title" style="cursor:pointer;margin-bottom:0">Past sessions ▸</summary>
+  <div id="liftHistory" style="margin-top:12px"><div class="empty">No sessions logged yet.</div></div>
+</details>
+</main><!-- /tabLift -->
+
 <main id="tabInsights" class="tabview" style="display:none">
 <!-- INTELLIGENCE DASHBOARD -->
 <div class="panel intel-section">
@@ -879,6 +959,13 @@
   </div>
 </div>
 
+<!-- RECOMP: strength against bodyweight. The one reading a lifting app cannot produce,
+     because it does not know what you ate or what you weigh. -->
+<div class="panel intel-section">
+  <div class="panel-title">Recomp check · is the surplus buying muscle?</div>
+  <div id="recompCard"><div class="empty">Needs a weight trend and a few logged sessions.</div></div>
+</div>
+
 <div class="panel intel-section">
   <div class="panel-title">Weekly report card</div>
   <div id="weeklyReport"><div class="empty">Need at least 2 days of data.</div></div>
@@ -919,6 +1006,7 @@
 <nav class="tabnav">
   <button data-tab="today" class="active"><span class="ico">🏠</span>Today</button>
   <button data-tab="engineer"><span class="ico">⚙️<span class="nav-badge" id="suppBadge" style="display:none"></span></span>Engineer</button>
+  <button data-tab="lift"><span class="ico">🏋️</span>Lift</button>
   <button data-tab="insights"><span class="ico">📊</span>Insights</button>
 </nav>
 
@@ -1363,6 +1451,7 @@ function render() {
   renderTernary();
   renderSupps();
   renderSuppManage();
+  renderLift();
 }
 
 // ---- HISTORY PANEL ----
@@ -2773,26 +2862,11 @@ async function openrouterGenerate(prompt, imageB64){
 }
 
 let AI_VIA = '';                               // which provider/model handled the last parse
-async function aiParse(text, imageB64){
+// One completion from whichever provider is configured — Gemini first (auto-detecting a
+// replacement model once if the configured one has gone), OpenRouter as the fallback.
+// Returns raw text; every caller does its own parsing and its own validation.
+async function aiComplete(prompt, imageB64){
   if (!hasAI()) throw new Error('No AI key — add a Gemini or OpenRouter key in ⚙ Settings.');
-  const photoClause = imageB64
-    ? `A photo of the meal is attached. Identify every food visible in it and estimate each portion's grams from visual cues (plate size, utensils, typical serving volumes). The text below adds context or corrections — when it states an amount or names a food, the text wins over your visual guess. If the text is empty, work from the photo alone.\n`
-    : '';
-  const prompt =
-`You convert a meal description into structured food items for a macro tracker.
-${photoClause}
-Break composite or prepared dishes (samosa, biryani, sandwich, burger, pizza slice, curry, paratha, wrap, etc.) into their base single-ingredient components — the nutrient database only has reliable data for simple ingredients, not assembled dishes. Each component gets its own estimated grams; the components of one dish should sum to roughly that dish's total weight. When a dish is fried or oily, add a "cooking oil" component for the absorbed fat.
-Leave naturally single-ingredient foods (an egg, an apple, grilled chicken, rice, milk) as ONE item — never split those. Also keep everyday breads and flatbreads that the database stores as finished items — chapati, roti, naan, tortilla, pita, plain bread, idli, dosa — as ONE item under their common name (e.g. "chapati", "roti"); do NOT split those into flour and water.
-Never output water, ice, plain black coffee or unsweetened tea, or any other zero-calorie liquid as an item — they carry no macros and only distort the totals.
-Return JSON: {"items":[{"name":<short generic single-ingredient name good for a USDA database search>,`+
-`"partOf":<the dish this component came from, or "" if it was logged as a plain food>,`+
-`"grams":<number, estimate a realistic portion if none is stated>,`+
-`"weighed":<boolean, true ONLY if the user gave an explicit weight/measure for THIS component; a decomposed guess is false>,`+
-`"isCurry":<boolean, true if this component sits in curry/gravy/added oil>,`+
-`"est":{"kcal":<per 100g>,"p":<protein g per 100g>,"f":<fat g per 100g>,"c":<carb g per 100g>}}]}.
-"est" is your best per-100g estimate, used only as a fallback. Output JSON only, no prose.
-Meal: """${text}"""`;
-
   let txt = '', gemErr = null;
   if (hasGemini()){
     try {
@@ -2820,6 +2894,29 @@ Meal: """${text}"""`;
     txt = o.txt; AI_VIA = o.via;
   }
   if (!txt) throw gemErr || new Error('No AI provider available.');
+  return txt;
+}
+async function aiParse(text, imageB64){
+  if (!hasAI()) throw new Error('No AI key — add a Gemini or OpenRouter key in ⚙ Settings.');
+  const photoClause = imageB64
+    ? `A photo of the meal is attached. Identify every food visible in it and estimate each portion's grams from visual cues (plate size, utensils, typical serving volumes). The text below adds context or corrections — when it states an amount or names a food, the text wins over your visual guess. If the text is empty, work from the photo alone.\n`
+    : '';
+  const prompt =
+`You convert a meal description into structured food items for a macro tracker.
+${photoClause}
+Break composite or prepared dishes (samosa, biryani, sandwich, burger, pizza slice, curry, paratha, wrap, etc.) into their base single-ingredient components — the nutrient database only has reliable data for simple ingredients, not assembled dishes. Each component gets its own estimated grams; the components of one dish should sum to roughly that dish's total weight. When a dish is fried or oily, add a "cooking oil" component for the absorbed fat.
+Leave naturally single-ingredient foods (an egg, an apple, grilled chicken, rice, milk) as ONE item — never split those. Also keep everyday breads and flatbreads that the database stores as finished items — chapati, roti, naan, tortilla, pita, plain bread, idli, dosa — as ONE item under their common name (e.g. "chapati", "roti"); do NOT split those into flour and water.
+Never output water, ice, plain black coffee or unsweetened tea, or any other zero-calorie liquid as an item — they carry no macros and only distort the totals.
+Return JSON: {"items":[{"name":<short generic single-ingredient name good for a USDA database search>,`+
+`"partOf":<the dish this component came from, or "" if it was logged as a plain food>,`+
+`"grams":<number, estimate a realistic portion if none is stated>,`+
+`"weighed":<boolean, true ONLY if the user gave an explicit weight/measure for THIS component; a decomposed guess is false>,`+
+`"isCurry":<boolean, true if this component sits in curry/gravy/added oil>,`+
+`"est":{"kcal":<per 100g>,"p":<protein g per 100g>,"f":<fat g per 100g>,"c":<carb g per 100g>}}]}.
+"est" is your best per-100g estimate, used only as a fallback. Output JSON only, no prose.
+Meal: """${text}"""`;
+
+  const txt = await aiComplete(prompt, imageB64);
 
   // Models are flaky with strict JSON mode — free ones wrap it in prose, and some paid ones
   // (measured: gemini-3.5-flash) end an otherwise perfect reply one closing brace short.
@@ -3233,11 +3330,389 @@ document.getElementById('grams').addEventListener('keydown', e=>{ if (e.key==='E
 document.getElementById('usdaSearch').addEventListener('keydown', e=>{ if (e.key==='Enter') document.getElementById('usdaBtn').click(); });
 document.getElementById('nlInput').addEventListener('keydown', e=>{ if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) document.getElementById('parseBtn').click(); });
 
+// ---- LIFT: sessions, progression, and the recomp check --------------------
+// Storage mirrors the day-ledger pattern — one key per day — so a session is edited,
+// merged and synced under exactly the same last-write-wins rules the food log uses.
+//   ledger_workout_YYYY-MM-DD  {date, split, exercises:[{id,name,sets:[{kg,reps,bw}],rir}]}
+//   ledger_exercises           the canonical catalogue + aliases (seeded from core.js)
+// An empty session is stored, not deleted: a cleared day is data and must propagate.
+const WK_PREFIX = 'ledger_workout_';
+function workoutFor(ds){
+  try{
+    const w = JSON.parse(localStorage.getItem(WK_PREFIX+ds)||'null');
+    if (w && Array.isArray(w.exercises)) return w;
+  }catch(e){}
+  return { date: ds, split: splitForDate(ds), exercises: [] };
+}
+function allWorkouts(){
+  const out = {};
+  try{
+    for (let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      const m = k && k.match(/^ledger_workout_(\d{4}-\d{2}-\d{2})$/);
+      if (!m) continue;
+      try{ const w = JSON.parse(localStorage.getItem(k)); if (w && Array.isArray(w.exercises)) out[m[1]] = w; }catch(e){}
+    }
+  }catch(e){}
+  return out;
+}
+function workoutMeta(){ try{ return JSON.parse(localStorage.getItem('ledger_workout_meta')||'{}'); }catch(e){ return {}; } }
+function saveWorkoutMeta(m){ try{ localStorage.setItem('ledger_workout_meta', JSON.stringify(m)); }catch(e){} }
+function saveWorkout(w){
+  try{ localStorage.setItem(WK_PREFIX+w.date, JSON.stringify(w)); }catch(e){}
+  const m = workoutMeta(); m[w.date] = new Date().toISOString(); saveWorkoutMeta(m);
+  scheduleSync();
+}
+function exerciseCatalog(){
+  try{
+    const c = JSON.parse(localStorage.getItem('ledger_exercises')||'null');
+    if (Array.isArray(c) && c.length) return c;
+  }catch(e){}
+  return LedgerCore.SEED_EXERCISES.slice();
+}
+function catalogStamp(){ return getKey('ledger_exercises_updated'); }
+function saveCatalog(list){
+  try{ localStorage.setItem('ledger_exercises', JSON.stringify(list)); }catch(e){}
+  setKey('ledger_exercises_updated', new Date().toISOString());
+  scheduleSync();
+}
+// Weigh-ins as an ascending series — what bodyweight movements need to know their load.
+function weightSeries(){
+  const m = weightsMap();
+  return Object.keys(m).filter(d=>+m[d]>0).sort().map(d=>({date:d, kg:+m[d]}));
+}
+// One pass over the stored sessions produces every exercise's history, so a page render
+// scans localStorage once rather than once per exercise.
+function liftTrends(all, W){
+  const byId = {}, names = {}, lastDate = {};
+  Object.keys(all).sort().forEach(d=>{
+    (all[d].exercises||[]).forEach(ex=>{
+      if (!ex || !ex.id) return;
+      names[ex.id] = ex.name || ex.id; lastDate[ex.id] = d;
+      (byId[ex.id] = byId[ex.id] || []).push({date:d, sets:ex.sets||[], rir:ex.rir});
+    });
+  });
+  return Object.keys(byId).map(id=>({
+    id, lastDate: lastDate[id],
+    t: LedgerCore.exerciseTrend(byId[id], {name:names[id], weights:W})
+  }));
+}
+const SET_TXT = s => s.bw ? (s.kg>0 ? `bw+${s.kg} × ${s.reps}` : `bw × ${s.reps}`) : `${s.kg}kg × ${s.reps}`;
+// The form the repeat chip writes back — units are explicit so a light load can never be
+// re-read as a set count on the way in.
+const SET_IN = s => `${s.bw?'bw+':''}${s.kg}kgx${s.reps}`;
+
+function liftStatus(msg, bad){
+  const el = document.getElementById('liftStatus');
+  if (!el) return;
+  el.style.display = msg ? '' : 'none';
+  el.style.color = bad ? 'var(--bad)' : '';
+  el.innerHTML = msg || '';
+}
+
+// ---- logging: parse → confirm → commit ----
+let liftPending = null;
+document.getElementById('liftBtn').onclick = ()=>{
+  const txt = document.getElementById('liftInput').value.trim();
+  if (!txt){ liftStatus('Type your sets — one exercise per line, commas between sets.'); return; }
+  liftPending = LedgerCore.parseWorkout(txt, exerciseCatalog());
+  renderLiftPending();
+};
+document.getElementById('liftInput').addEventListener('keydown', e=>{
+  if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) document.getElementById('liftBtn').click();
+});
+function renderLiftPending(){
+  const el = document.getElementById('liftPending'), aiBtn = document.getElementById('liftAiBtn');
+  if (!el) return;
+  if (!liftPending){ el.innerHTML=''; aiBtn.style.display='none'; liftStatus(''); return; }
+  const ex = liftPending.exercises, errs = liftPending.errors;
+  // The AI is offered only for what the grammar could not read — never as the first resort.
+  aiBtn.style.display = (errs.length && hasAI()) ? '' : 'none';
+  if (!ex.length){
+    el.innerHTML = '';
+    liftStatus(errs.length
+      ? `Couldn't read: ${errs.map(e=>escapeHtml(e.line)+' <span class="ink-dim">('+e.reason+')</span>').join(' · ')}`
+      : 'Nothing to log.', true);
+    return;
+  }
+  liftStatus(errs.length
+    ? `${errs.length} line${errs.length>1?'s':''} unread: ${errs.map(e=>escapeHtml(e.line)).join(' · ')}`
+    : 'Check the sets below, then add them.');
+  el.innerHTML = ex.map((x,i)=>`
+    <div class="lift-ex">
+      <div class="lift-ex-head">
+        <span class="lift-ex-name">${escapeHtml(x.name)}</span>
+        ${x.matched ? '' : '<span class="lift-tag">new exercise</span>'}
+        ${x.viaAI ? '<span class="lift-tag">read by AI — check it</span>' : ''}
+      </div>
+      <div class="lift-sets">${x.sets.map(SET_TXT).join('  ·  ')}</div>
+      <div class="lift-rir"><label for="plr${i}">Reps left in the tank</label>
+        <input type="number" id="plr${i}" data-pr="${i}" min="0" max="10" step="1"
+               value="${x.rir==null?'':x.rir}" placeholder="–"></div>
+    </div>`).join('') +
+    `<div class="footer-actions" style="grid-template-columns:1fr 1fr;margin-top:6px">
+       <button id="liftConfirm">Add to session</button>
+       <button class="ghost" id="liftCancel">Cancel</button></div>`;
+  el.querySelectorAll('input[data-pr]').forEach(inp=>{
+    inp.onchange = ()=>{
+      const v = inp.value.trim();
+      liftPending.exercises[+inp.dataset.pr].rir = v==='' ? null : Math.max(0, Math.min(10, +v||0));
+    };
+  });
+  document.getElementById('liftConfirm').onclick = liftCommit;
+  document.getElementById('liftCancel').onclick = ()=>{ liftPending=null; renderLiftPending(); };
+}
+function liftCommit(){
+  if (!liftPending || !liftPending.exercises.length) return;
+  const w = workoutFor(VIEW_DATE);
+  w.date = VIEW_DATE; w.split = splitForDate(VIEW_DATE);
+  let cat = exerciseCatalog(), added = 0;
+  liftPending.exercises.forEach(x=>{
+    // A lift the catalogue has never seen joins it on first use — that is what keeps
+    // every later spelling of it landing on the same trend line.
+    if (!cat.some(c=>c.id===x.id)){ cat = cat.concat([{id:x.id, name:x.name, aliases:[]}]); added++; }
+    const cur = w.exercises.filter(e=>e.id===x.id)[0];
+    if (cur){ cur.sets = (cur.sets||[]).concat(x.sets); if (x.rir!=null) cur.rir = x.rir; }
+    else w.exercises.push({id:x.id, name:x.name, sets:x.sets.slice(), rir: x.rir==null?null:x.rir});
+  });
+  if (added) saveCatalog(cat);
+  saveWorkout(w);
+  liftPending = null;
+  document.getElementById('liftInput').value = '';
+  haptic(); render();
+}
+// Fallback only: hand the AI the lines the grammar rejected and nothing else. It returns
+// sets, never analysis — every number it emits is shown for confirmation before it lands.
+document.getElementById('liftAiBtn').onclick = async ()=>{
+  const lines = ((liftPending && liftPending.errors) || []).map(e=>e.line).filter(Boolean);
+  if (!lines.length) return;
+  const btn = document.getElementById('liftAiBtn');
+  btn.disabled = true;
+  liftStatus('<span class="spin"></span>Reading those lines…');
+  try {
+    const prompt =
+`You convert gym set logs into structured JSON for a training tracker.
+Transcribe only what is written. Never invent an exercise, a weight or a rep count that is not stated, and never total or average anything.
+Return JSON: {"exercises":[{"name":<the exercise exactly as the user wrote it>,"rir":<reps in reserve if stated, else null>,"sets":[{"kg":<load in kilograms; 0 for a bodyweight movement with no added load>,"reps":<number>,"bw":<true only for a bodyweight movement such as a pull-up, dip or push-up>}]}]}
+Expand shorthand: with a weight stated, "3x12" means three sets of twelve reps. Convert pounds to kilograms. One entry per exercise. Output JSON only, no prose.
+Lines:
+"""${lines.join('\n')}"""`;
+    const txt = await aiComplete(prompt);
+    let parsed;
+    try { parsed = JSON.parse(txt); } catch(e){ parsed = LedgerCore.repairJson(txt); }
+    const list = (parsed && (Array.isArray(parsed) ? parsed : parsed.exercises)) || [];
+    const cat = exerciseCatalog();
+    const got = list.map(e=>{
+      const nm = String((e && e.name) || '').trim();
+      const sets = ((e && e.sets) || []).map(s=>({
+        kg: Math.max(0, +s.kg||0), reps: Math.round(+s.reps||0), bw: !!s.bw
+      })).filter(s => s.reps>0 && (s.bw || s.kg>0));
+      if (!nm || !sets.length) return null;
+      const m = LedgerCore.matchExercise(nm, cat);
+      return { raw: nm, name: m ? m.exercise.name : nm.charAt(0).toUpperCase()+nm.slice(1),
+               id: m ? m.exercise.id : LedgerCore.exerciseId(nm), matched: !!m,
+               sets: sets.map(s => s.bw ? {kg:s.kg, reps:s.reps, bw:true} : {kg:s.kg, reps:s.reps}),
+               rir: (e.rir==null || e.rir==='') ? null : Math.max(0, Math.min(10, +e.rir||0)),
+               bw: sets.some(s=>s.bw), viaAI: true };
+    }).filter(Boolean);
+    if (!got.length) throw new Error('the AI could not read those lines either');
+    liftPending = { exercises: liftPending.exercises.concat(got), unresolved: [], errors: [] };
+    renderLiftPending();
+    liftStatus(`Read by ${escapeHtml(AI_VIA)} — check the numbers before adding.`);
+  } catch(err){
+    liftStatus('AI read failed: '+escapeHtml(err.message), true);
+  } finally { btn.disabled = false; }
+};
+
+// ---- rendering ----
+function renderLiftSession(all, W){
+  const w = all[VIEW_DATE] || workoutFor(VIEW_DATE);
+  document.getElementById('liftDate').textContent = VIEW_DATE===ACTIVE_DATE ? 'today' : VIEW_DATE;
+  document.getElementById('liftSplit').textContent = ' · ' + splitForDate(VIEW_DATE);
+  const el = document.getElementById('liftSession');
+  if (!(w.exercises||[]).length){
+    el.innerHTML = '<div class="empty">Nothing logged for this day.</div>';
+    return;
+  }
+  const bwKg = LedgerCore.weightAt(W, VIEW_DATE);
+  el.innerHTML = w.exercises.map((ex,i)=>{
+    const m = LedgerCore.sessionMetrics(ex.sets, {bodyweightKg: bwKg, rir: ex.rir});
+    return `<div class="lift-ex">
+      <div class="lift-ex-head">
+        <span class="lift-ex-name">${escapeHtml(ex.name)}</span>
+        <span class="lift-del" data-lx="${i}" title="remove">✕</span>
+      </div>
+      <div class="lift-sets">${(ex.sets||[]).map(SET_TXT).join('  ·  ')}</div>
+      <div class="lift-sub">${m.sets} set${m.sets===1?'':'s'} · ${Math.round(m.volume).toLocaleString()} kg volume`
+      + (m.bestE1RM ? ` · best e1RM ${m.bestE1RM.toFixed(1)} kg` : '')
+      + (m.incomplete ? ` · <span style="color:var(--warn)">log a weight to score this</span>` : '') + `</div>
+      <div class="lift-rir"><label for="slr${i}">Reps left in the tank on the last set</label>
+        <input type="number" id="slr${i}" data-lr="${i}" min="0" max="10" step="1"
+               value="${ex.rir==null?'':ex.rir}" placeholder="–"></div>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('span[data-lx]').forEach(s=>{
+    s.onclick = ()=>{
+      const i = +s.dataset.lx, cur = workoutFor(VIEW_DATE);
+      if (!cur.exercises[i] || !confirm(`Remove ${cur.exercises[i].name} from this session?`)) return;
+      cur.exercises.splice(i,1); saveWorkout(cur); render();
+    };
+  });
+  el.querySelectorAll('input[data-lr]').forEach(inp=>{
+    inp.onchange = ()=>{
+      const i = +inp.dataset.lr, cur = workoutFor(VIEW_DATE), v = inp.value.trim();
+      if (!cur.exercises[i]) return;
+      cur.exercises[i].rir = v==='' ? null : Math.max(0, Math.min(10, +v||0));
+      saveWorkout(cur); render();
+    };
+  });
+}
+function renderLiftChips(all){
+  const el = document.getElementById('liftChips'); if (!el) return;
+  const sp = splitForDate(VIEW_DATE);
+  const past = Object.keys(all).filter(x => x !== VIEW_DATE && (all[x].exercises||[]).length).sort();
+  // The last session for today's split; failing that (a changed split, or early days)
+  // the last session of any kind, which still beats retyping the loads from memory.
+  const d = past.filter(x => (all[x].split||'') === sp).pop() || past.pop();
+  if (!d){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display = 'flex';
+  el.innerHTML = `<span class="chip" id="liftRepeat">↻ Repeat ${escapeHtml(all[d].split || sp)} <small>${d}</small></span>`;
+  document.getElementById('liftRepeat').onclick = ()=>{
+    // Pre-fill last time's loads so logging is mostly confirming numbers, not typing them.
+    document.getElementById('liftInput').value = (all[d].exercises||[]).map(ex=>
+      `${ex.name} ${(ex.sets||[]).map(SET_IN).join(', ')}` + (ex.rir!=null ? ` rir ${ex.rir}` : '')
+    ).join('\n');
+    document.getElementById('liftInput').focus();
+  };
+}
+const VERDICT_LABEL = { progressing:'progressing', stalled:'stalled', grinding:'grinding',
+                        'effort-drift':'effort drift', regressing:'regressing', thin:'building data' };
+function pctTxt(p){ return (p>0?'+':'') + p.toFixed(1) + '%/month'; }
+function renderLiftTrends(rows){
+  const wrap = document.getElementById('liftTrends'); if (!wrap) return;
+  if (!rows.length){ wrap.innerHTML = '<div class="empty">Log a few sessions and the trends appear here.</div>'; return; }
+  // Most recently trained first; strength lifts win a tie, since they carry the verdict.
+  rows = rows.slice().sort((a,b)=>
+    (a.lastDate < b.lastDate ? 1 : a.lastDate > b.lastDate ? -1 : 0) ||
+    (a.t.cls === b.t.cls ? 0 : a.t.cls === 'strength' ? -1 : 1));
+  wrap.innerHTML = rows.map(r=>{
+    const t = r.t;
+    let main, sub = '';
+    if (t.verdict === 'thin'){
+      main = `${t.sessions} session${t.sessions===1?'':'s'} logged · ${t.sessionsNeeded} more before a trend means anything`;
+    } else {
+      main = `${t.metric === 'e1RM' ? 'e1RM' : 'capacity'} ${t.last.toFixed(1)}`
+           + `${t.metric === 'e1RM' ? ' kg' : ''} · ${pctTxt(t.pctPerMonth)} · ${t.n} sessions over ${t.spanDays} days`;
+      if (t.verdict === 'grinding')
+        sub = t.volPctPerMonth > 0
+          ? `Volume is up ${pctTxt(t.volPctPerMonth)} for the same top set — more work, same output.`
+          : `Effort is climbing for the same top set — more work, same output.`;
+      if (t.verdict === 'effort-drift')
+        sub = `You are stopping ${Math.abs(t.rirPerMonth).toFixed(1)} reps further from failure than a month ago — the flat trend may be the reporting, not your strength.`;
+      if (t.verdict === 'stalled')
+        sub = `Output, volume and effort all flat. This is the real thing.`;
+    }
+    const lm = t.latest;
+    const lastLine = lm && lm.sets
+      ? `last: ${Math.round(lm.topLoad)} kg top set · ${lm.sets} set${lm.sets===1?'':'s'} · ${Math.round(lm.volume).toLocaleString()} kg`
+      : '';
+    return `<div class="lift-ex${t.cls==='volume'?' low-signal':''}">
+      <div class="lift-ex-head">
+        <span class="lift-ex-name">${escapeHtml(t.name)}</span>
+        <span class="verdict v-${t.verdict}">${VERDICT_LABEL[t.verdict]||t.verdict}</span>
+      </div>
+      <div class="lift-sub">${main}</div>
+      ${lastLine ? `<div class="lift-sub">${lastLine}</div>` : ''}
+      ${sub ? `<div class="lift-sub" style="color:var(--ink-dim)">${sub}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+function renderLiftCatalog(){
+  const el = document.getElementById('liftCatalog'); if (!el) return;
+  const cat = exerciseCatalog().slice().sort((a,b)=> a.name<b.name?-1:1);
+  el.innerHTML = `<table><thead><tr><th>Exercise</th><th>Also written as</th><th></th></tr></thead><tbody>`
+    + cat.map(c=>`<tr><td>${escapeHtml(c.name)}</td>`
+      + `<td class="ink-dim" style="font-size:11px">${escapeHtml((c.aliases||[]).join(', ')) || '—'}</td>`
+      + `<td style="text-align:right"><span class="lift-del" data-cd="${escapeHtml(c.id)}" title="remove">✕</span></td></tr>`).join('')
+    + `</tbody></table>`;
+  el.querySelectorAll('span[data-cd]').forEach(s=>{
+    s.onclick = ()=>{
+      if (!confirm('Remove this exercise from the catalogue? Logged sessions keep their data.')) return;
+      saveCatalog(exerciseCatalog().filter(c=>c.id !== s.dataset.cd));
+      renderLiftCatalog();
+    };
+  });
+}
+function renderLiftHistory(all, W){
+  const el = document.getElementById('liftHistory'); if (!el) return;
+  const dates = Object.keys(all).filter(d=>(all[d].exercises||[]).length).sort().reverse().slice(0,30);
+  if (!dates.length){ el.innerHTML = '<div class="empty">No sessions logged yet.</div>'; return; }
+  el.innerHTML = dates.map(d=>{
+    const w = all[d], bwKg = LedgerCore.weightAt(W, d);
+    const vol = (w.exercises||[]).reduce((s,ex)=>
+      s + LedgerCore.sessionMetrics(ex.sets, {bodyweightKg:bwKg, rir:ex.rir}).volume, 0);
+    return `<div class="lift-ex"><div class="lift-ex-head">
+        <span class="lift-ex-name">${d}${w.split?` · ${escapeHtml(w.split)}`:''}</span>
+        <span class="ink-dim" style="font-size:11px">${Math.round(vol).toLocaleString()} kg</span></div>
+      <div class="lift-sub">${(w.exercises||[]).map(ex=>
+        escapeHtml(ex.name)+' <span class="ink-dim">'+(ex.sets||[]).length+'×</span>').join(' · ')}</div></div>`;
+  }).join('');
+}
+// The reading no lifting app can produce, because it does not know what you ate.
+const RECOMP_COPY = {
+  building:  ['good', 'Building',
+    w=>`Bodyweight up <b>${w.kg} kg/week</b> and strength up <b>${w.s}</b> across ${w.n} tracked lift${w.n===1?'':'s'}. The surplus is buying strength — leave it alone.`],
+  spinning:  ['warn', 'Spinning',
+    w=>`Bodyweight up <b>${w.kg} kg/week</b> but strength flat at <b>${w.s}</b> across ${w.n} lift${w.n===1?'':'s'}. A surplus that is not buying strength is buying fat — trim the offset, or fix the training before adding more calories.`],
+  retaining: ['good', 'Retaining',
+    w=>`Down <b>${w.kg} kg/week</b> with strength held at <b>${w.s}</b>. That is a cut working as intended.`],
+  shedding:  ['bad', 'Shedding',
+    w=>`Down <b>${w.kg} kg/week</b> and losing strength with it (<b>${w.s}</b>). Too steep, or protein is short — ease the deficit.`],
+  recomping: ['good', 'Recomping',
+    w=>`Bodyweight steady while strength climbs <b>${w.s}</b> across ${w.n} lift${w.n===1?'':'s'}.`],
+  holding:   ['', 'Holding',
+    w=>`Bodyweight steady and strength steady at <b>${w.s}</b>. Nothing is moving in either direction.`]
+};
+function renderRecomp(rows, W){
+  const el = document.getElementById('recompCard'); if (!el) return;
+  // Weight over the last six weeks — the same horizon the lift trends use, so the two
+  // halves of the comparison are talking about the same stretch of time.
+  const last = W.length ? W[W.length-1].date : null;
+  const recent = last ? W.filter(e => (Date.parse(last)-Date.parse(e.date))/86400000 <= 42) : [];
+  const wt = LedgerCore.weightTrend(recent.length>=2 ? recent : W);
+  const r = LedgerCore.liftVsWeight(rows.map(x=>x.t), wt);
+  if (r.status === 'thin'){
+    const need = [];
+    if (!wt) need.push('two weigh-ins on different days');
+    if (!r.n) need.push(`a strength lift with ${LedgerCore.LIFT_MIN_SESSIONS}+ sessions`);
+    el.innerHTML = `<div class="empty">Needs ${need.join(' and ') || 'more history'} before this can be answered.</div>`;
+    return;
+  }
+  const [tone, head, body] = RECOMP_COPY[r.status];
+  const w = { kg: Math.abs(r.kgPerWeek).toFixed(2), s: pctTxt(r.strengthPctPerMonth), n: r.n };
+  const counts = [];
+  if (r.progressing) counts.push(`${r.progressing} progressing`);
+  if (r.stalled) counts.push(`${r.stalled} stalled`);
+  if (r.regressing) counts.push(`${r.regressing} regressing`);
+  el.innerHTML = `<div class="recomp ${tone}">
+    <div class="recomp-head">${head}</div>
+    <div class="recomp-body">${body(w)}${counts.length?` <span class="ink-dim">(${counts.join(' · ')})</span>`:''}</div>
+  </div>`;
+}
+function renderLift(){
+  if (!document.getElementById('liftSession')) return;
+  const all = allWorkouts(), W = weightSeries();
+  const rows = liftTrends(all, W);
+  renderLiftChips(all); renderLiftSession(all, W); renderLiftPending();
+  renderLiftTrends(rows); renderLiftCatalog(); renderLiftHistory(all, W);
+  renderRecomp(rows, W);
+}
+
 // ---- BOTTOM-NAV TABS ------------------------------------------------------
 // Three views share one scroll; the nav swaps which <main> is visible. The
 // live day's maintenance actions ride along with Today only.
 function showTab(name){
-  ['today','engineer','insights'].forEach(t=>{
+  ['today','engineer','lift','insights'].forEach(t=>{
     const view = document.getElementById('tab'+t.charAt(0).toUpperCase()+t.slice(1));
     if (view) view.style.display = t===name ? '' : 'none';
   });
@@ -3431,6 +3906,7 @@ document.getElementById('exportBtn').onclick = async ()=>{
     pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
     weights: weightsMap(), templates: templates(),
     supps: supps(), suppLog: suppLog(),
+    workouts: allWorkouts(), wkMeta: workoutMeta(), exercises: exerciseCatalog(),
     days, date: ACTIVE_DATE, ledger, totals: totals() };   // date/ledger kept for v1 compat
   // Bind the backup to this sync account when one is set, so a shared/leaked export can
   // only be re-imported on the owning passphrase (import refuses a mismatched owner).
@@ -3677,6 +4153,22 @@ async function syncNow(){
       {days: suppLog(), meta: suppLogMeta()},
       {days: (remote && remote.suppLog) || {}, meta: (remote && remote.sMeta) || {}});
     saveSuppLog(sm.days, sm.meta);
+    // Training sessions are one object per day — the same shape the per-day LWW merge
+    // already handles, so logging legs on the phone and arms on the PC is safe.
+    const km = LedgerCore.mergeSyncStates(
+      {days: allWorkouts(), meta: workoutMeta()},
+      {days: (remote && remote.workouts) || {}, meta: (remote && remote.wkMeta) || {}});
+    Object.keys(km.days).forEach(d=>{
+      try { localStorage.setItem(WK_PREFIX+d, JSON.stringify(km.days[d])); } catch(e){}
+    });
+    saveWorkoutMeta(km.meta);
+    // The exercise catalogue is one stamped list, like the supplement protocols.
+    if (remote && Array.isArray(remote.exercises) && (remote.exUpdated||'') > catalogStamp()){
+      try {
+        localStorage.setItem('ledger_exercises', JSON.stringify(remote.exercises));
+        setKey('ledger_exercises_updated', remote.exUpdated);
+      } catch(e){}
+    }
     load(); updateDayLabel(); render();        // reflect whatever the merge decided for the on-screen day
     const state = { v:1, days: merged.days, meta: merged.meta,
       targets: {floor:FLOOR_M, ceil:CEIL_M, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP, maint:MAINT, profile:PROFILE, goal:GOAL, mealPlan:MEAL_PLAN, train:TRAIN},
@@ -3685,6 +4177,8 @@ async function syncNow(){
       templates: templates(), tplUpdated: tplStamp(),
       supps: supps(), suppsUpdated: suppsStamp(),
       suppLog: sm.days, sMeta: sm.meta,
+      workouts: km.days, wkMeta: km.meta,
+      exercises: exerciseCatalog(), exUpdated: catalogStamp(),
       weights: wm.days, wMeta: wm.meta };
     const blob = await syncEncrypt(state);
     const p = await supaFetch('/rest/v1/rpc/sync_put', {
@@ -3779,6 +4273,25 @@ document.getElementById('importFile').onchange = (ev)=>{
           const meta = suppLogMeta(); const now = new Date().toISOString();
           Object.keys(data.suppLog).forEach(d=>{ if(!meta[d]) meta[d]=now; });
           saveSuppLog(map, meta);
+        }
+        // Training sessions restore per-day, same as the food ledger: a day already on
+        // this device wins, so a restore fills gaps rather than overwriting newer work.
+        if (data.workouts && typeof data.workouts === 'object'){
+          const meta = workoutMeta(), now = new Date().toISOString();
+          Object.keys(data.workouts).forEach(d=>{
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
+            const w = data.workouts[d];
+            if (!w || !Array.isArray(w.exercises)) return;
+            if (localStorage.getItem(WK_PREFIX+d)) return;
+            try{ localStorage.setItem(WK_PREFIX+d, JSON.stringify(w)); }catch(e){}
+            meta[d] = (data.wkMeta && data.wkMeta[d]) || now;
+          });
+          saveWorkoutMeta(meta);
+        }
+        if (Array.isArray(data.exercises) && data.exercises.length){
+          const ids = new Set(exerciseCatalog().map(c=>c.id));
+          const add = data.exercises.filter(c=>c && c.id && c.name && !ids.has(c.id));
+          if (add.length) saveCatalog(exerciseCatalog().concat(add));
         }
       } else if (data.ledger && Array.isArray(data.ledger)) {
         // v1 single-day export.

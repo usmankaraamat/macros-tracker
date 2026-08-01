@@ -460,6 +460,300 @@ group('supplementWindow + supplementStats');
         seeded.map(c=>(c.due?'O':'.')).join(''));
 })();
 
+// ---- e1RM / setLoad / weightAt: the primitives every lift number rests on ----
+group('e1RM — Epley, extended by reps-in-reserve');
+(function(){
+  check('5 reps at 100kg → 116.7', approx(C.e1RM(100,5,0), 116.667, 0.01), `got ${C.e1RM(100,5,0)}`);
+  check('RIR counts as reps left in the tank', approx(C.e1RM(100,5,2), 123.333, 0.01), `got ${C.e1RM(100,5,2)}`);
+  check('null above the rep cap — no invented 1RM', C.e1RM(20,14,0) === null, `got ${C.e1RM(20,14,0)}`);
+  check('RIR can push a legal set over the cap', C.e1RM(20,11,2) === null, `got ${C.e1RM(20,11,2)}`);
+  check('12 effective reps is still inside the cap', approx(C.e1RM(20,10,2), 28, 0.01), `got ${C.e1RM(20,10,2)}`);
+  check('no load, no estimate', C.e1RM(0,10,0) === null && C.e1RM(100,0,0) === null);
+
+  check('plain set load is its weight', C.setLoad({kg:20}) === 20);
+  check('bodyweight set adds the body', C.setLoad({kg:10,bw:true}, 80) === 90);
+  check('unloaded bodyweight set is just the body', C.setLoad({kg:0,bw:true}, 80) === 80);
+  check('bodyweight set with no weigh-in is unmeasurable, not zero',
+        C.setLoad({kg:10,bw:true}, 0) === null, `got ${C.setLoad({kg:10,bw:true},0)}`);
+
+  const ws = [{date:'2026-06-01',kg:80},{date:'2026-06-15',kg:81},{date:'2026-07-01',kg:82}];
+  check('weightAt takes the most recent weigh-in at or before the date', C.weightAt(ws,'2026-06-20') === 81);
+  check('a weigh-in on the day itself counts', C.weightAt(ws,'2026-06-15') === 81);
+  check('before the first weigh-in, the first value stands in', C.weightAt(ws,'2026-05-01') === 80);
+  check('after the last, the last stands', C.weightAt(ws,'2026-08-01') === 82);
+  check('no weigh-ins at all → null', C.weightAt([],'2026-06-01') === null);
+})();
+
+// ---- classifyExercise + sessionMetrics ----
+group('classifyExercise / sessionMetrics — one session reduced to numbers');
+(function(){
+  const S = sets => [{date:'2026-06-01', sets}];
+  check('low-rep work is judged on strength', C.classifyExercise(S([{kg:100,reps:8},{kg:100,reps:6}])) === 'strength');
+  check('high-rep isolation is judged on volume', C.classifyExercise(S([{kg:20,reps:25},{kg:20,reps:22}])) === 'volume');
+  check('median exactly at the cap stays strength', C.classifyExercise(S([{kg:40,reps:12},{kg:40,reps:12}])) === 'strength');
+  check('one rep over the cap flips it', C.classifyExercise(S([{kg:40,reps:13},{kg:40,reps:13}])) === 'volume');
+  check('no data defaults to strength', C.classifyExercise([]) === 'strength');
+
+  // The user's own example: 20x12, 20x8, 15x14.
+  const m = C.sessionMetrics([{kg:20,reps:12},{kg:20,reps:8},{kg:15,reps:14}]);
+  check('volume is Σ load × reps', approx(m.volume, 610, 0.01), `got ${m.volume}`);
+  check('top load is the heaviest set', m.topLoad === 20);
+  check('best-set e1RM ignores the over-cap set', approx(m.bestE1RM, 28, 0.01), `got ${m.bestE1RM}`);
+  check('best capacity is load × effective reps', approx(m.bestCapacity, 240, 0.01), `got ${m.bestCapacity}`);
+  check('all three sets counted', m.sets === 3 && m.skipped === 0 && !m.incomplete);
+
+  // Junk sets must not be able to inflate the strength signal.
+  const junk = C.sessionMetrics([{kg:20,reps:12},{kg:20,reps:8},{kg:15,reps:14},{kg:5,reps:12},{kg:5,reps:12}]);
+  check('extra light sets raise volume but not best-set e1RM',
+        junk.volume > m.volume && approx(junk.bestE1RM, m.bestE1RM, 0.01), `got ${junk.bestE1RM}`);
+
+  // Exercise-level RIR applies to every set — biased, but biased identically each session.
+  const r = C.sessionMetrics([{kg:20,reps:12},{kg:20,reps:8},{kg:15,reps:14}], {rir:2});
+  check('RIR pushes the 12-rep set over the cap, so the 8 wins', approx(r.bestE1RM, 26.667, 0.01), `got ${r.bestE1RM}`);
+  check('RIR raises capacity', approx(r.bestCapacity, 280, 0.01), `got ${r.bestCapacity}`);
+  check('median RIR is recorded', r.medianRir === 2 && r.hasRir);
+  const perSet = C.sessionMetrics([{kg:20,reps:8,rir:0},{kg:20,reps:8,rir:4}], {rir:2});
+  check('a per-set RIR overrides the exercise-level one', perSet.medianRir === 2 && approx(perSet.bestE1RM, 20*(1+12/30), 0.01),
+        `got rir ${perSet.medianRir}, e1RM ${perSet.bestE1RM}`);
+
+  const bw = C.sessionMetrics([{kg:10,reps:6,bw:true}], {bodyweightKg:80});
+  check('bodyweight movement carries the body into the load', approx(bw.volume, 540, 0.01) && approx(bw.bestE1RM, 108, 0.01),
+        `got vol ${bw.volume}, e1RM ${bw.bestE1RM}`);
+  const bwNone = C.sessionMetrics([{kg:10,reps:6,bw:true}], {});
+  check('without a weigh-in the set is skipped, not counted as zero',
+        bwNone.sets === 0 && bwNone.skipped === 1 && bwNone.incomplete && bwNone.volume === 0 && bwNone.bestE1RM === null);
+})();
+
+// ---- exerciseTrend: the stall verdict ----
+group('exerciseTrend — progressing, stalled, grinding, drifting');
+(function(){
+  const D = ['2026-06-01','2026-06-08','2026-06-15','2026-06-22','2026-06-29','2026-07-06'];
+  // One top set per session, so the metric moves only when real output moves.
+  const series = (loads, reps, rirs) => D.map((d,i)=>({
+    date:d, sets:[{kg:loads[i], reps:reps||5}], rir: rirs ? rirs[i] : undefined }));
+
+  const up = C.exerciseTrend(series([100,102,104,106,108,110]), {name:'Bench press'});
+  check('rising loads read as progressing', up.verdict === 'progressing', `got ${up.verdict}`);
+  check('trend is +8.16 %/month', approx(up.pctPerMonth, 8.163, 0.01), `got ${up.pctPerMonth}`);
+  check('judged on e1RM with 6 usable sessions', up.cls === 'strength' && up.metric === 'e1RM' && up.n === 6);
+  check('confidence is medium at 6 sessions', up.confidence === 'medium', `got ${up.confidence}`);
+
+  const down = C.exerciseTrend(series([110,108,106,104,102,100]), {});
+  check('falling loads read as regressing', down.verdict === 'regressing', `got ${down.verdict}`);
+  check('trend is −8.16 %/month', approx(down.pctPerMonth, -8.163, 0.01), `got ${down.pctPerMonth}`);
+
+  const flat = C.exerciseTrend(series([100,100,100,100,100,100], 5, [2,2,2,2,2,2]), {});
+  check('flat output with steady effort is a real stall', flat.verdict === 'stalled', `got ${flat.verdict}`);
+  check('a stall reports a zero trend, not a small one', approx(flat.pctPerMonth, 0, 0.001), `got ${flat.pctPerMonth}`);
+
+  // Same top set every week, but the set COUNT climbs: more work, same output.
+  const grind = C.exerciseTrend(D.map((d,i)=>{
+    const n = [3,3,4,4,5,5][i], sets = [];
+    for (let k=0;k<n;k++) sets.push({kg:100, reps:5});
+    return {date:d, sets};
+  }), {});
+  check('flat strength with climbing volume is grinding', grind.verdict === 'grinding', `got ${grind.verdict}`);
+  check('grinding still shows a flat strength trend', approx(grind.pctPerMonth, 0, 0.001), `got ${grind.pctPerMonth}`);
+  check('and a rising volume trend', approx(grind.volPctPerMonth, 48.98, 0.05), `got ${grind.volPctPerMonth}`);
+
+  // Loads fall while reported RIR climbs — capacity nets out flat, but the flatness now
+  // rests on a self-reported number that is drifting, so it must not be called a stall.
+  const drift = C.exerciseTrend(series([100,97.5,95,92.5,90,87.5], 5, [0,1,2,3,4,5]), {});
+  check('flat metric under drifting effort is not called a stall', drift.verdict === 'effort-drift', `got ${drift.verdict}`);
+  check('the RIR drift itself is measured', approx(drift.rirPerMonth, 4.286, 0.01), `got ${drift.rirPerMonth}`);
+  check('and the metric really is flat', approx(drift.pctPerMonth, 0, 0.001), `got ${drift.pctPerMonth}`);
+
+  // Only the CHANGE in RIR is ever read, so a constant personal bias cannot move a verdict.
+  const honest = C.exerciseTrend(series([100,102,104,106,108,110], 5, [1,1,1,1,1,1]), {});
+  const modest = C.exerciseTrend(series([100,102,104,106,108,110], 5, [4,4,4,4,4,4]), {});
+  check('a constant RIR bias leaves the trend identical',
+        approx(honest.pctPerMonth, modest.pctPerMonth, 0.001) && honest.verdict === modest.verdict,
+        `got ${honest.pctPerMonth} vs ${modest.pctPerMonth}`);
+
+  const thin = C.exerciseTrend(series([100,102,104]).slice(0,3), {});
+  check('three sessions is too thin to call', thin.verdict === 'thin', `got ${thin.verdict}`);
+  check('and it says how many more are needed', thin.sessionsNeeded === 2, `got ${thin.sessionsNeeded}`);
+  check('no history at all is thin, not an error', C.exerciseTrend([], {}).verdict === 'thin');
+
+  // High-rep isolation: e1RM is never computed, capacity is.
+  const fp = C.exerciseTrend(D.map((d,i)=>({date:d, sets:[{kg:20, reps:25+i}], rir:3})), {name:'Face pull'});
+  check('high-rep work is tracked on capacity, not e1RM', fp.cls === 'volume' && fp.metric === 'capacity', `got ${fp.cls}`);
+  check('added reps at the same load is progress', fp.verdict === 'progressing', `got ${fp.verdict}`);
+  check('capacity trend is +14.05 %/month', approx(fp.pctPerMonth, 14.05, 0.05), `got ${fp.pctPerMonth}`);
+  check('volume-class confidence never rises above low', fp.confidence === 'low', `got ${fp.confidence}`);
+
+  // Median reps sits at the cap, but every session's RIR pushes it past — no e1RM is
+  // available, so the exercise is judged on capacity rather than reported as thin.
+  const rescue = C.exerciseTrend(D.map(d=>({date:d, sets:[{kg:20,reps:12}], rir:3})), {});
+  check('an exercise that yields no e1RM falls back to capacity', rescue.cls === 'volume', `got ${rescue.cls}`);
+  check('and still returns a verdict', rescue.verdict !== 'thin', `got ${rescue.verdict}`);
+
+  // Bodyweight movements resolve their load from the weight log.
+  const pu = C.exerciseTrend(D.map((d,i)=>({date:d, sets:[{kg:i, reps:6, bw:true}]})),
+                             {weights:[{date:'2026-05-01',kg:80}]});
+  check('bodyweight lifts use the logged bodyweight', pu.verdict === 'progressing' && pu.n === 6, `got ${pu.verdict}, n ${pu.n}`);
+  const puNone = C.exerciseTrend(D.map((d,i)=>({date:d, sets:[{kg:i, reps:6, bw:true}]})), {weights:[]});
+  check('with no weigh-ins a bodyweight lift is thin, not wrong', puNone.verdict === 'thin', `got ${puNone.verdict}`);
+
+  // Sessions older than the window must not drag the current trend.
+  const stale = [{date:'2026-01-05', sets:[{kg:200,reps:5}]}].concat(series([100,102,104,106,108,110]));
+  check('sessions outside the 8-week window are dropped',
+        C.exerciseTrend(stale, {}).n === 6 && C.exerciseTrend(stale, {}).verdict === 'progressing',
+        `got n ${C.exerciseTrend(stale, {}).n}`);
+  check('sessions in any order still fit', approx(C.exerciseTrend(series([100,102,104,106,108,110]).reverse(), {}).pctPerMonth, 8.163, 0.01));
+})();
+
+// ---- liftVsWeight: the reason this lives in a food tracker ----
+group('liftVsWeight — is the surplus buying muscle or fat?');
+(function(){
+  const t = (pct, verdict) => ({cls:'strength', verdict: verdict||'progressing', pctPerMonth: pct});
+  const gaining = {ratePerWeek: 0.4}, losing = {ratePerWeek: -0.4}, steady = {ratePerWeek: 0.05};
+
+  const build = C.liftVsWeight([t(5),t(6),t(7)], gaining);
+  check('weight up + strength up = building', build.status === 'building', `got ${build.status}`);
+  check('the median lift trend is reported', build.strengthPctPerMonth === 6, `got ${build.strengthPctPerMonth}`);
+  check('and the bodyweight rate rides along', build.kgPerWeek === 0.4);
+
+  const spin = C.liftVsWeight([t(0.5,'stalled'),t(0,'stalled'),t(1,'stalled')], gaining);
+  check('weight up + strength flat = spinning', spin.status === 'spinning', `got ${spin.status}`);
+  check('stalled lifts are counted', spin.stalled === 3, `got ${spin.stalled}`);
+
+  check('weight down + strength held = retaining',
+        C.liftVsWeight([t(0,'stalled')], losing).status === 'retaining');
+  check('weight down + strength down = shedding',
+        C.liftVsWeight([t(-5,'regressing')], losing).status === 'shedding');
+  check('weight steady + strength up = recomping',
+        C.liftVsWeight([t(5)], steady).status === 'recomping');
+  check('weight steady + strength steady = holding',
+        C.liftVsWeight([t(0,'stalled')], steady).status === 'holding');
+
+  // One wild lift must not swing the headline — hence the median.
+  check('an outlier lift cannot flip the verdict',
+        C.liftVsWeight([t(0,'stalled'),t(0,'stalled'),t(90)], gaining).status === 'spinning');
+  // Rear-delt and cuff work is health maintenance; its noise must not vote.
+  check('volume-class lifts do not vote',
+        C.liftVsWeight([{cls:'volume',verdict:'progressing',pctPerMonth:50}, t(0,'stalled')], gaining).status === 'spinning');
+  check('thin lifts do not vote',
+        C.liftVsWeight([{cls:'strength',verdict:'thin',pctPerMonth:null}], gaining).status === 'thin');
+  check('no weight trend, no verdict', C.liftVsWeight([t(5)], null).status === 'thin');
+})();
+
+// ---- name canonicalisation: what the whole feature stands on ----
+group('normalizeName / matchExercise — one lift, one trend line');
+(function(){
+  const K = C.SEED_EXERCISES;
+  check('plurals collapse', C.normalizeName('bicep curls') === 'bicep curl', `got "${C.normalizeName('bicep curls')}"`);
+  check('abbreviations expand', C.normalizeName('DB Curls') === 'dumbbell curl', `got "${C.normalizeName('DB Curls')}"`);
+  check('punctuation is not identity', C.normalizeName('Pull-ups') === C.normalizeName('pull ups'), `got "${C.normalizeName('Pull-ups')}"`);
+  check('double-s words survive singularisation', C.normalizeName('bench press') === 'bench press');
+  check('id is the normalised slug', C.exerciseId('DB Curls') === 'dumbbell-curl', `got ${C.exerciseId('DB Curls')}`);
+
+  const same = ['bicep curls','bicep curl','db curls','dumbbell curl','curls'].map(n => {
+    const m = C.matchExercise(n, K); return m && m.exercise.id;
+  });
+  check('five ways of writing a curl land on one exercise',
+        same.every(id => id === 'bicep-curl'), same.join(' / '));
+  check('shorthand resolves', (C.matchExercise('bench', K)||{}).exercise.id === 'bench-press');
+  check('pullups resolves to pull-up', (C.matchExercise('pullups', K)||{}).exercise.id === 'pull-up');
+  check('facepulls resolves to face pull', (C.matchExercise('facepulls', K)||{}).exercise.id === 'face-pull');
+
+  // The failure that would quietly destroy the data: merging two different movements.
+  check('a qualifier makes it a different lift',
+        C.matchExercise('incline bench press', [{id:'bench-press',name:'Bench press',aliases:['bench']}]) === null);
+  check('hammer curl is not a bicep curl',
+        (C.matchExercise('hammer curl', K)||{}).exercise.id === 'hammer-curl');
+  check('an unknown lift stays unknown rather than snapping to a cousin',
+        C.matchExercise('zercher squat', K) === null);
+  check('the seeded incline press is still found',
+        (C.matchExercise('incline db press', K)||{}).exercise.id === 'incline-dumbbell-press');
+})();
+
+// ---- parseWorkout: text in, sets out, no model involved ----
+group('parseWorkout — the grammar');
+(function(){
+  const K = C.SEED_EXERCISES;
+  const P = t => C.parseWorkout(t, K);
+
+  const longhand = P('bicep curls, set 1 20kg 12 reps, set 2 20kg 8 reps, set 3 15kg 14 reps');
+  const lh = longhand.exercises[0];
+  check('longhand parses to one exercise', longhand.exercises.length === 1 && lh.id === 'bicep-curl', JSON.stringify(longhand.unresolved));
+  check('three sets, in order', lh.sets.length === 3 &&
+        lh.sets[0].kg === 20 && lh.sets[0].reps === 12 &&
+        lh.sets[1].kg === 20 && lh.sets[1].reps === 8 &&
+        lh.sets[2].kg === 15 && lh.sets[2].reps === 14, JSON.stringify(lh.sets));
+  check('"set 1" is a label, not a set count', lh.sets.length === 3);
+
+  const short = P('bicep curls 20x12, 20x8, 15x14').exercises[0];
+  check('shorthand gives the identical sets', JSON.stringify(short.sets) === JSON.stringify(lh.sets), JSON.stringify(short.sets));
+
+  const atW = P('bench 3x12 @20kg').exercises[0];
+  check('a stated weight makes NxM mean sets × reps',
+        atW.sets.length === 3 && atW.sets.every(s => s.kg === 20 && s.reps === 12), JSON.stringify(atW.sets));
+  const bare = P('bench 20x12').exercises[0];
+  check('with no weight stated, WxR means weight × reps',
+        bare.sets.length === 1 && bare.sets[0].kg === 20 && bare.sets[0].reps === 12, JSON.stringify(bare.sets));
+  const fives = P('squat 5x5');
+  check('a small first number is a set count, so 5x5 is not a 5kg squat',
+        fives.exercises.length === 0 && fives.errors.length === 1, JSON.stringify(fives.exercises));
+  const heavy = P('squat 100x5').exercises[0];
+  check('but 100x5 is a load', heavy.sets[0].kg === 100 && heavy.sets[0].reps === 5, JSON.stringify(heavy.sets));
+
+  const carry = P('bench 60kg 8, 8, 6').exercises[0];
+  check('a bare rep count carries the last stated load forward',
+        carry.sets.length === 3 && carry.sets.every(s => s.kg === 60) &&
+        carry.sets.map(s=>s.reps).join() === '8,8,6', JSON.stringify(carry.sets));
+
+  const wxrxs = P('incline db press 22.5x10x3').exercises[0];
+  check('W×R×sets expands', wxrxs.sets.length === 3 &&
+        wxrxs.sets.every(s => s.kg === 22.5 && s.reps === 10), JSON.stringify(wxrxs.sets));
+
+  const pu = P('pullups bw+10 3x6').exercises[0];
+  check('bodyweight plus added load', pu.id === 'pull-up' && pu.bw === true &&
+        pu.sets.length === 3 && pu.sets.every(s => s.kg === 10 && s.bw === true), JSON.stringify(pu.sets));
+
+  const puPlain = P('pullups bw 3x8').exercises[0];
+  check('bodyweight with no added load still logs',
+        puPlain.sets.length === 3 && puPlain.sets.every(s => s.kg === 0 && s.reps === 8 && s.bw === true),
+        JSON.stringify(puPlain.sets));
+  // The form the "repeat last session" chip writes back, round-tripped.
+  const rt = P('pullups bw+10kgx6, bw+10kgx6, bw+10kgx5').exercises[0];
+  check('the repeat-chip format round-trips',
+        rt.sets.length === 3 && rt.sets.every(s => s.kg === 10 && s.bw === true) &&
+        rt.sets.map(s=>s.reps).join() === '6,6,5', JSON.stringify(rt.sets));
+  const rtLight = P('lateral raise 5kgx12, 5kgx12').exercises[0];
+  check('an explicit unit keeps a light load from reading as a set count',
+        rtLight.sets.length === 2 && rtLight.sets.every(s => s.kg === 5 && s.reps === 12), JSON.stringify(rtLight.sets));
+
+  const fp = P('facepulls 20kg 25 reps rir 3').exercises[0];
+  check('trailing RIR is captured, not read as a set',
+        fp.rir === 3 && fp.sets.length === 1 && fp.sets[0].reps === 25, JSON.stringify(fp.sets)+' rir '+fp.rir);
+  const fp2 = P('bicep curl 20kg 12 reps 2 rir').exercises[0];
+  check('"2 rir" reads the same way', fp2.rir === 2 && fp2.sets.length === 1 && fp2.sets[0].reps === 12,
+        JSON.stringify(fp2.sets)+' rir '+fp2.rir);
+
+  const lbs = P('bench 135lbs 5 reps').exercises[0];
+  check('pounds convert to kg', approx(lbs.sets[0].kg, 61.235, 0.01), `got ${lbs.sets[0].kg}`);
+
+  const multi = P('bench 100x5\nsquat\ncurls 20x12');
+  check('one exercise per line', multi.exercises.length === 2, JSON.stringify(multi.exercises.map(e=>e.id)));
+  check('a line with no sets is reported, not silently dropped',
+        multi.errors.length === 1 && /squat/.test(multi.errors[0].line), JSON.stringify(multi.errors));
+  check('semicolons separate exercises too', P('bench 100x5; squat 120x5').exercises.length === 2);
+  check('commas never separate exercises', P('bench 100x5, 100x5').exercises.length === 1);
+
+  const nu = P('zercher squat 60x8');
+  check('an unknown lift is offered, not dropped',
+        nu.exercises.length === 1 && nu.exercises[0].matched === false && nu.unresolved.length === 1,
+        JSON.stringify(nu.unresolved));
+  check('and it gets a usable id and display name',
+        nu.exercises[0].id === 'zercher-squat' && nu.exercises[0].name === 'Zercher squat', nu.exercises[0].name);
+
+  check('empty input is empty, not an error', P('').exercises.length === 0 && P('').errors.length === 0);
+  // End to end: the parse feeds the metrics with no reinterpretation in between.
+  check('parsed sets drop straight into sessionMetrics',
+        approx(C.sessionMetrics(lh.sets).volume, 610, 0.01), `got ${C.sessionMetrics(lh.sets).volume}`);
+})();
+
 // ---- summary ----
 const sum = document.getElementById('summary');
 sum.className = failed === 0 ? 'allpass' : 'anyfail';

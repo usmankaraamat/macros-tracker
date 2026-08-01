@@ -282,14 +282,10 @@
   function weightTrend(entries) {
     if (!entries || entries.length < 2) return null;
     const t0 = Date.parse(entries[0].date + 'T00:00:00Z');
-    const pts = entries.map(e => ({ x: (Date.parse(e.date + 'T00:00:00Z') - t0) / 86400000, y: e.kg }));
-    const n = pts.length;
-    const mx = pts.reduce((s, p) => s + p.x, 0) / n;
-    const my = pts.reduce((s, p) => s + p.y, 0) / n;
-    const den = pts.reduce((s, p) => s + (p.x - mx) * (p.x - mx), 0);
-    if (den === 0) return null;
-    const slope = pts.reduce((s, p) => s + (p.x - mx) * (p.y - my), 0) / den;
-    return { ratePerWeek: slope * 7, latest: entries[n - 1].kg };
+    const fit = linearTrend(entries.map(e =>
+      ({ x: (Date.parse(e.date + 'T00:00:00Z') - t0) / 86400000, y: e.kg })));
+    if (!fit) return null;
+    return { ratePerWeek: fit.slope * 7, latest: entries[entries.length - 1].kg };
   }
 
   // ---- Salvage a truncated / unbalanced JSON reply --------------------------
@@ -407,6 +403,395 @@
              rate: due ? hit / due : null };
   }
 
+  // ---- Lifting: progression, stalling, and the recomp check ------------------
+  // The question this answers is "am I still growing, or just getting heavier?", so
+  // every number here is computed from the logs and nothing is asked of a model.
+  //
+  // Above this many effective reps an estimated 1RM is fantasy: Epley is calibrated on
+  // low-rep work and inflates badly out at 20+. High-rep exercises get a different
+  // metric entirely rather than a bad e1RM (see classifyExercise).
+  const LIFT_REP_CAP = 12;
+  // Fewer sessions than this and a slope is noise wearing a trend's clothes. At the
+  // usual weekly frequency that is about five weeks before the app will call anything.
+  const LIFT_MIN_SESSIONS = 5;
+  // Dead band: a trend inside ±this is "flat". Session-to-session output swings ~5% on
+  // sleep, food and how warm you were, so only a sustained move outside the band counts.
+  const LIFT_FLAT_PCT = 1.5;          // % per month
+  // A month-over-month change in reported RIR this large is effort drift, not a strength
+  // change. Only the CHANGE is ever read — a constant personal bias (calling it 3 when
+  // it is really 1) cancels out of a slope, which is what makes a guessed RIR usable.
+  const LIFT_RIR_DRIFT = 1.0;         // RIR per month
+  const LIFT_WINDOW_DAYS = 56;        // 8 weeks of history feed a trend
+  const LIFT_MAX_SESSIONS = 12;
+  const LIFT_WEIGHT_FLAT = 0.1;       // kg/week dead band on bodyweight
+
+  function median(xs) {
+    if (!xs || !xs.length) return null;
+    const a = xs.slice().sort((p, q) => p - q), m = Math.floor(a.length / 2);
+    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+  }
+  // Least-squares slope of y over x. Shared by the weight trend and every lift trend so
+  // "is this going up" is answered the same way everywhere. Null when nothing can be fit.
+  function linearTrend(pts) {
+    const n = (pts || []).length;
+    if (n < 2) return null;
+    const mx = pts.reduce((s, p) => s + p.x, 0) / n;
+    const my = pts.reduce((s, p) => s + p.y, 0) / n;
+    const den = pts.reduce((s, p) => s + (p.x - mx) * (p.x - mx), 0);
+    if (den === 0) return null;
+    return { slope: pts.reduce((s, p) => s + (p.x - mx) * (p.y - my), 0) / den, mean: my, n: n };
+  }
+  // Epley, extended by reps-in-reserve: a set stopped n reps short of failure is treated
+  // as a set of (reps + n) taken to failure. Returns null when the effective rep count is
+  // too high for the formula to mean anything — the caller must not substitute a guess.
+  function e1RM(kg, reps, rir) {
+    if (!(kg > 0) || !(reps > 0)) return null;
+    const eff = reps + Math.max(0, +rir || 0);
+    if (eff > LIFT_REP_CAP) return null;
+    return kg * (1 + eff / 30);
+  }
+  // What the body actually moved. For a bodyweight movement `kg` is ADDED load, so the
+  // real load needs the day's bodyweight; without one the set is unmeasurable and the
+  // honest answer is null, not zero (zero would quietly erase real work from the trend).
+  function setLoad(set, bodyweightKg) {
+    const added = +(set && set.kg) || 0;
+    if (!(set && set.bw)) return added;
+    return bodyweightKg > 0 ? bodyweightKg + added : null;
+  }
+  // Bodyweight on a given date: the most recent weigh-in at or before it. Before the first
+  // weigh-in, that first value is the closest thing to the truth available.
+  function weightAt(entries, dateISO) {
+    if (!entries || !entries.length) return null;
+    let best = null, earliest = null;
+    entries.forEach(e => {
+      if (!e || !e.date || !(e.kg > 0)) return;
+      if (!earliest || e.date < earliest.date) earliest = e;
+      if (e.date <= dateISO && (!best || e.date > best.date)) best = e;
+    });
+    return best ? best.kg : (earliest ? earliest.kg : null);
+  }
+  // Which metric an exercise can honestly be judged on, decided by its own history rather
+  // than by asking the user to classify anything. Median working reps at or under the cap
+  // means e1RM is meaningful ('strength'); above it the exercise is high-rep isolation
+  // ('volume') where e1RM would be invented and capacity is tracked instead.
+  function classifyExercise(sessions) {
+    const reps = [];
+    (sessions || []).forEach(s => (s.sets || []).forEach(t => { if (+t.reps > 0) reps.push(+t.reps); }));
+    const m = median(reps);
+    return m != null && m > LIFT_REP_CAP ? 'volume' : 'strength';
+  }
+  // One session of one exercise, reduced to comparable numbers.
+  //   bestE1RM     — strength signal. Best SET, so adding junk sets cannot inflate it.
+  //   bestCapacity — load × (reps + RIR) of the best set: the high-rep equivalent, up when
+  //                  you add reps, add load, or finish further from failure.
+  //   volume       — Σ load × reps. Total work; rises with set count, so it is read only
+  //                  alongside the best-set metric, never on its own.
+  // opts.rir is the exercise-level RIR for the session. It is applied to every set: that
+  // overstates the easier sets, but it overstates them the same way every session, and
+  // only the slope is ever read.
+  function sessionMetrics(sets, opts) {
+    const o = opts || {};
+    let volume = 0, topLoad = 0, best = null, cap = 0, counted = 0, skipped = 0, reps = 0;
+    const rirs = [];
+    (sets || []).forEach(s => {
+      const load = setLoad(s, o.bodyweightKg);
+      const r = +s.reps || 0;
+      if (load == null || !(load > 0) || !(r > 0)) { skipped++; return; }
+      counted++; reps += r; volume += load * r;
+      if (load > topLoad) topLoad = load;
+      const rir = s.rir != null ? +s.rir : (o.rir != null ? +o.rir : null);
+      if (rir != null && isFinite(rir)) rirs.push(rir);
+      const one = e1RM(load, r, rir);
+      if (one != null && (best == null || one > best)) best = one;
+      const c = load * (r + Math.max(0, rir || 0));
+      if (c > cap) cap = c;
+    });
+    return { sets: counted, skipped: skipped, reps: reps, volume: volume, topLoad: topLoad,
+             bestE1RM: best, bestCapacity: counted ? cap : null,
+             medianRir: median(rirs), hasRir: rirs.length > 0, incomplete: skipped > 0 };
+  }
+  // Is this exercise still moving? sessions = [{date, sets:[{kg,reps,bw,rir}], rir}] in any
+  // order. opts.weights = [{date,kg}] so bodyweight movements resolve their real load.
+  // Verdicts are deliberately few and mean one thing each:
+  //   thin         — not enough sessions yet; the app says how many more rather than
+  //                  drawing a confident line through three points.
+  //   progressing  — the metric is climbing beyond the noise band.
+  //   regressing   — it is falling beyond it.
+  //   effort-drift — flat, but you are stopping further from failure than you were, so
+  //                  this is not evidence of a plateau.
+  //   grinding     — flat while volume climbs or RIR falls: more work for the same output.
+  //   stalled      — flat, with effort and volume steady. The real thing.
+  function exerciseTrend(sessions, opts) {
+    const o = opts || {};
+    const minN = o.minSessions > 0 ? o.minSessions : LIFT_MIN_SESSIONS;
+    const all = (sessions || []).filter(s => s && s.date).slice().sort((a, b) => a.date < b.date ? -1 : 1);
+    const empty = { name: o.name || '', cls: 'strength', metric: 'e1RM', n: 0, sessions: 0,
+                    first: null, last: null, pctPerMonth: null, volPctPerMonth: null,
+                    rirPerMonth: null, verdict: 'thin', confidence: 'none',
+                    sessionsNeeded: minN, spanDays: 0, latest: null };
+    if (!all.length) return empty;
+    const end = isoDay(all[all.length - 1].date);
+    const windowDays = o.windowDays > 0 ? o.windowDays : LIFT_WINDOW_DAYS;
+    let win = all.filter(s => end - isoDay(s.date) <= windowDays);
+    if (win.length > LIFT_MAX_SESSIONS) win = win.slice(win.length - LIFT_MAX_SESSIONS);
+    if (!win.length) return empty;
+    const t0 = isoDay(win[0].date);
+
+    const build = cls => {
+      const pts = [], vol = [], rir = [];
+      let last = null;
+      win.forEach(s => {
+        const m = sessionMetrics(s.sets, {
+          bodyweightKg: o.weights ? weightAt(o.weights, s.date) : o.bodyweightKg, rir: s.rir });
+        const x = isoDay(s.date) - t0;
+        const y = cls === 'volume' ? m.bestCapacity : m.bestE1RM;
+        if (y != null && y > 0) pts.push({ x: x, y: y });
+        if (m.volume > 0) vol.push({ x: x, y: m.volume });
+        if (m.hasRir) rir.push({ x: x, y: m.medianRir });
+        last = m;
+      });
+      return { pts: pts, vol: vol, rir: rir, latest: last };
+    };
+    // A 'strength' exercise whose sessions mostly sit above the rep cap yields too few
+    // e1RM points to fit. Rather than mixing units or inventing values, judge it as a
+    // volume exercise — the classification is a means to a metric, not a label to defend.
+    let cls = o.cls || classifyExercise(win);
+    let b = build(cls);
+    if (cls === 'strength' && b.pts.length < Math.min(minN, win.length)) { cls = 'volume'; b = build(cls); }
+
+    const fit = linearTrend(b.pts), volFit = linearTrend(b.vol), rirFit = linearTrend(b.rir);
+    // Expressed as % of the mean so exercises in different units and loads are comparable.
+    const pct = fit && fit.mean > 0 ? fit.slope * 30 / fit.mean * 100 : null;
+    const volPct = volFit && volFit.mean > 0 ? volFit.slope * 30 / volFit.mean * 100 : null;
+    const rirPm = rirFit ? rirFit.slope * 30 : null;
+    const n = b.pts.length;
+
+    let verdict;
+    if (n < minN || pct == null) verdict = 'thin';
+    else if (pct > LIFT_FLAT_PCT) verdict = 'progressing';
+    else if (pct < -LIFT_FLAT_PCT) verdict = 'regressing';
+    else if (rirPm != null && rirPm >= LIFT_RIR_DRIFT) verdict = 'effort-drift';
+    else if ((volPct != null && volPct > LIFT_FLAT_PCT) || (rirPm != null && rirPm <= -LIFT_RIR_DRIFT)) verdict = 'grinding';
+    else verdict = 'stalled';
+    // Volume-class exercises never rate above 'low': rear-delt and cuff work is there for
+    // joint health, and letting its noise vote in the headline would make it meaningless.
+    const confidence = verdict === 'thin' ? 'none'
+      : cls === 'volume' ? 'low' : (n >= minN + 3 ? 'high' : 'medium');
+
+    return { name: o.name || '', cls: cls, metric: cls === 'volume' ? 'capacity' : 'e1RM',
+             n: n, sessions: win.length,
+             first: n ? b.pts[0].y : null, last: n ? b.pts[n - 1].y : null,
+             pctPerMonth: pct, volPctPerMonth: volPct, rirPerMonth: rirPm,
+             verdict: verdict, confidence: confidence,
+             sessionsNeeded: Math.max(0, minN - n),
+             spanDays: end - t0, latest: b.latest };
+  }
+  // The reason this lives in a food tracker: cross-reference strength against bodyweight.
+  // A surplus that is not buying strength is buying fat, and no lifting app can see that
+  // because it does not know what you ate or what you weigh.
+  //   building  — gaining weight, strength climbing. The surplus is doing its job.
+  //   spinning  — gaining weight, strength flat. The surplus is going somewhere else.
+  //   retaining — losing weight, strength held. A well-run cut.
+  //   shedding  — losing weight and strength with it.
+  //   recomping — weight steady, strength climbing.
+  //   holding   — weight steady, strength steady.
+  // Only strength-class exercises with a real trend vote, and the median is taken so one
+  // odd lift cannot swing the verdict.
+  function liftVsWeight(trends, wTrend) {
+    const votes = (trends || []).filter(t =>
+      t && t.cls === 'strength' && t.verdict !== 'thin' && t.pctPerMonth != null);
+    const kgWk = wTrend && wTrend.ratePerWeek != null ? wTrend.ratePerWeek : null;
+    const base = { status: 'thin', n: votes.length, kgPerWeek: kgWk, strengthPctPerMonth: null,
+                   progressing: 0, stalled: 0, regressing: 0 };
+    if (!votes.length || kgWk == null) return base;
+    const s = median(votes.map(t => t.pctPerMonth));
+    let status;
+    if (kgWk > LIFT_WEIGHT_FLAT) status = s > LIFT_FLAT_PCT ? 'building' : 'spinning';
+    else if (kgWk < -LIFT_WEIGHT_FLAT) status = s >= -LIFT_FLAT_PCT ? 'retaining' : 'shedding';
+    else status = s > LIFT_FLAT_PCT ? 'recomping' : 'holding';
+    return { status: status, n: votes.length, kgPerWeek: kgWk, strengthPctPerMonth: s,
+             progressing: votes.filter(t => t.verdict === 'progressing').length,
+             stalled: votes.filter(t => t.verdict === 'stalled' || t.verdict === 'grinding').length,
+             regressing: votes.filter(t => t.verdict === 'regressing').length };
+  }
+
+  // ---- Lift parsing: text → sets, with no model involved ---------------------
+  // Meals need a model because "a bowl of daal" contains no numbers. Lift notation is
+  // almost entirely numbers, so a grammar handles it with no latency, no API cost and no
+  // network — which matters when you are logging between sets on bad reception. The AI is
+  // the fallback for lines this cannot read, never the first resort.
+  const LIFT_ABBR = { db: 'dumbbell', bb: 'barbell', kb: 'kettlebell', ez: 'ez bar',
+                      ohp: 'overhead press', bp: 'bench press', rdl: 'romanian deadlift',
+                      dl: 'deadlift', sldl: 'romanian deadlift' };
+  const LIFT_MATCH_MIN = 60;
+  // Canonicalisation is what makes the whole feature work: "bicep curls", "db curl" and
+  // "dumbbell curls" must land on one exercise or the history fragments into singletons
+  // and a trend can never be fit. Expand abbreviations, drop punctuation, singularise.
+  function normalizeName(s) {
+    return String(s || '').toLowerCase()
+      .replace(/[^a-z0-9 ]+/g, ' ')
+      .split(/\s+/).filter(Boolean)
+      .map(w => LIFT_ABBR[w] || w).join(' ')
+      .split(/\s+/).filter(Boolean)
+      .map(w => w.length > 2 && /s$/.test(w) && !/ss$/.test(w) ? w.slice(0, -1) : w)
+      .join(' ').trim();
+  }
+  function exerciseId(name) { return normalizeName(name).replace(/\s+/g, '-'); }
+  // Every word the user typed must appear in the candidate. Extra words in the QUERY are
+  // qualifiers that change the movement — "incline bench press" is NOT "bench press" — so
+  // a partial match stays unresolved and gets confirmed rather than silently merging two
+  // different lifts into one trend line. Fewer spare words in the candidate scores higher.
+  function matchExercise(name, known) {
+    const q = normalizeName(name);
+    if (!q) return null;
+    const qt = q.split(' ');
+    let best = null, bestScore = 0;
+    (known || []).forEach(ex => {
+      [ex.name].concat(ex.aliases || []).forEach(c => {
+        const nc = normalizeName(c);
+        if (!nc) return;
+        let sc = 0;
+        if (nc === q) sc = 100;
+        else {
+          const ct = nc.split(' ');
+          if (qt.every(t => ct.indexOf(t) >= 0)) sc = 90 - Math.min(25, (ct.length - qt.length) * 5);
+        }
+        if (sc > bestScore) { bestScore = sc; best = ex; }
+      });
+    });
+    return bestScore >= LIFT_MATCH_MIN ? { exercise: best, score: bestScore } : null;
+  }
+  const LB_TO_KG = 0.45359237;
+  // One line = one exercise. Commas separate SETS, so they can never separate exercises;
+  // newlines and semicolons do that. Returns {name, sets, rir, bw, error}.
+  function parseWorkoutLine(line) {
+    let s = String(line || '').trim();
+    if (!s) return null;
+    let rir = null, bw = false;
+    // "rir 2", "rir:2", "@rir2", "2 rir" — the reversed form is checked first, being the
+    // more specific pattern.
+    s = s.replace(/(\d+(?:\.\d+)?)\s*rir\b/i, (m, d) => { rir = +d; return ' '; });
+    if (rir == null) s = s.replace(/\brir\s*[:=@]?\s*(\d+(?:\.\d+)?)/i, (m, d) => { rir = +d; return ' '; });
+    if (/\bbw\b|\bbodyweight\b/i.test(s)) { bw = true; s = s.replace(/\bbodyweight\b|\bbw\b/ig, ' '); }
+
+    // The set list starts at the first digit, or at the word "set" when a line is written
+    // out longhand ("bicep curls, set 1 20kg 12 reps").
+    const iNum = s.search(/\d/), iSet = s.search(/\bsets?\b/i);
+    let cut = iNum;
+    if (iSet >= 0 && (cut < 0 || iSet < cut)) cut = iSet;
+    const name = cut > 0 ? s.slice(0, cut).replace(/[,:;+\-–—\s]+$/, '').trim() : '';
+    if (cut < 0) return { name: s.trim(), sets: [], rir: rir, bw: bw, error: 'no sets found' };
+    if (!name) return { name: '', sets: [], rir: rir, bw: bw, error: 'no exercise name' };
+    const rest = s.slice(cut);
+    // Does the line state a weight anywhere? That decides how a bare "3x12" is read.
+    const hasUnit = /\d\s*(kgs?|kilos?|lbs?|pounds?)\b/i.test(rest) || /@\s*\d/.test(rest);
+
+    const sets = [];
+    let ctxW = null, ctxR = null, bad = 0;
+    rest.split(/[,;]|\band\b|&/i).map(c => c.trim()).filter(Boolean).forEach(chunk => {
+      let c = chunk.replace(/^sets?\s*#?\s*\d+\s*[:.\-]?\s*/i, '');   // "set 1" is a label, not a count
+      let w = null, r = null, count = 1;
+      c = c.replace(/(\d+(?:\.\d+)?)\s*(?:kgs?|kilos?)\b/i, (m, d) => { w = +d; return ' '; });
+      c = c.replace(/(\d+(?:\.\d+)?)\s*(?:lbs?|pounds?)\b/i, (m, d) => { if (w == null) w = +d * LB_TO_KG; return ' '; });
+      c = c.replace(/@\s*(\d+(?:\.\d+)?)/, (m, d) => { if (w == null) w = +d; return ' '; });
+      c = c.replace(/(\d+(?:\.\d+)?)\s*reps?\b/i, (m, d) => { r = +d; return ' '; });
+      c = c.replace(/(\d+)\s*sets?\b/i, (m, d) => { count = +d; return ' '; });
+      // Keep x-joined runs together: "10 3x6" is a 10kg load and a 3×6 structure, which a
+      // flat list of numbers would lose.
+      const groups = (c.match(/\d+(?:\.\d+)?(?:\s*[x×*]\s*\d+(?:\.\d+)?)*/gi) || [])
+        .map(g => g.split(/[x×*]/i).map(v => +v.trim()));
+      const multi = groups.filter(g => g.length > 1);
+      const singles = groups.filter(g => g.length === 1).map(g => g[0]);
+      if (multi.length) {
+        const g = multi[0];
+        if (g.length >= 3) { if (w == null) w = g[0]; r = g[1]; count = g[2]; }        // 22.5x10x3
+        else if (w != null || hasUnit || singles.length) {                             // weight known ⇒ sets × reps
+          count = g[0]; r = g[1];
+          if (w == null && singles.length) w = singles[0];
+        }
+        // No weight anywhere on the line, so A×B is ambiguous. A small first number is a
+        // set count ("5x5", "3x12"); anything larger is a load ("20x12", "60x8"). Nobody
+        // runs twenty sets, and nobody benches five kilos.
+        else if (g[0] <= 6 && g[1] >= 5) { count = g[0]; r = g[1]; }
+        else { w = g[0]; r = g[1]; }
+      } else if (singles.length >= 2) {
+        if (w == null) { w = singles[0]; r = singles[1]; } else if (r == null) r = singles[0];
+      } else if (singles.length === 1) {
+        if (r == null) r = singles[0]; else if (w == null) w = singles[0];
+      }
+      // "bench 60kg 8, 8, 6" — a bare rep count carries the last stated load forward.
+      if (w == null) w = ctxW;
+      if (w == null && bw) w = 0;      // a bodyweight set with no added load is a real set
+      if (r == null) r = ctxR;
+      if (!(r > 0) || (w == null) || (!bw && !(w > 0))) { bad++; return; }
+      ctxW = w; ctxR = r;
+      const n = Math.max(1, Math.min(20, Math.round(count)));
+      for (let i = 0; i < n; i++) sets.push(bw ? { kg: w, reps: r, bw: true } : { kg: w, reps: r });
+    });
+    return { name: name, sets: sets, rir: rir, bw: bw,
+             error: sets.length ? null : (bad ? 'could not read the sets' : 'no sets found') };
+  }
+  function parseWorkout(text, known) {
+    const exercises = [], unresolved = [], errors = [];
+    String(text || '').split(/[\n;]+/).forEach(line => {
+      const p = parseWorkoutLine(line);
+      if (!p) return;
+      if (!p.name || !p.sets.length) {
+        errors.push({ line: String(line).trim(), reason: p.error || 'could not read this line' });
+        return;
+      }
+      const m = matchExercise(p.name, known);
+      const ex = { raw: p.name,
+                   name: m ? m.exercise.name : p.name.charAt(0).toUpperCase() + p.name.slice(1),
+                   id: m ? m.exercise.id : exerciseId(p.name),
+                   matched: !!m, score: m ? m.score : 0,
+                   sets: p.sets, rir: p.rir, bw: p.bw };
+      exercises.push(ex);
+      if (!m) unresolved.push(ex.name);
+    });
+    return { exercises: exercises, unresolved: unresolved, errors: errors };
+  }
+  // A starting catalogue so the first session parses against something. It is a seed, not
+  // a whitelist: anything unrecognised is offered as a new exercise to confirm.
+  const SEED_EXERCISES = [
+    { id: 'bench-press', name: 'Bench press', aliases: ['bench', 'flat bench', 'barbell bench press'] },
+    { id: 'incline-bench-press', name: 'Incline bench press', aliases: ['incline bench', 'incline barbell press'] },
+    { id: 'dumbbell-bench-press', name: 'Dumbbell bench press', aliases: ['db bench', 'db press', 'dumbbell press'] },
+    { id: 'incline-dumbbell-press', name: 'Incline dumbbell press', aliases: ['incline db press'] },
+    { id: 'overhead-press', name: 'Overhead press', aliases: ['ohp', 'military press', 'standing press'] },
+    { id: 'dumbbell-shoulder-press', name: 'Dumbbell shoulder press', aliases: ['db shoulder press', 'seated dumbbell press'] },
+    { id: 'lateral-raise', name: 'Lateral raise', aliases: ['side raise', 'db lateral raise', 'lat raise'] },
+    { id: 'rear-delt-fly', name: 'Rear delt fly', aliases: ['reverse fly', 'rear delt raise'] },
+    { id: 'face-pull', name: 'Face pull', aliases: ['facepull', 'facepulls'] },
+    { id: 'tricep-pushdown', name: 'Tricep pushdown', aliases: ['pushdown', 'cable pushdown', 'tricep extension'] },
+    { id: 'skull-crusher', name: 'Skull crusher', aliases: ['lying tricep extension'] },
+    { id: 'dip', name: 'Dip', aliases: ['dips', 'tricep dip'], bw: true },
+    { id: 'push-up', name: 'Push-up', aliases: ['pushup', 'press up'], bw: true },
+    { id: 'pull-up', name: 'Pull-up', aliases: ['pullup'], bw: true },
+    { id: 'chin-up', name: 'Chin-up', aliases: ['chinup'], bw: true },
+    { id: 'lat-pulldown', name: 'Lat pulldown', aliases: ['pulldown', 'lat pull down'] },
+    { id: 'barbell-row', name: 'Barbell row', aliases: ['bent over row', 'bb row', 'pendlay row'] },
+    { id: 'dumbbell-row', name: 'Dumbbell row', aliases: ['db row', 'one arm row', 'single arm row'] },
+    { id: 'seated-cable-row', name: 'Seated cable row', aliases: ['cable row'] },
+    { id: 'bicep-curl', name: 'Bicep curl', aliases: ['curl', 'db curl', 'dumbbell curl', 'barbell curl'] },
+    { id: 'hammer-curl', name: 'Hammer curl', aliases: [] },
+    { id: 'preacher-curl', name: 'Preacher curl', aliases: [] },
+    { id: 'shrug', name: 'Shrug', aliases: ['barbell shrug', 'db shrug'] },
+    { id: 'squat', name: 'Squat', aliases: ['back squat', 'barbell squat'] },
+    { id: 'front-squat', name: 'Front squat', aliases: [] },
+    { id: 'leg-press', name: 'Leg press', aliases: [] },
+    { id: 'lunge', name: 'Lunge', aliases: ['walking lunge', 'db lunge'] },
+    { id: 'bulgarian-split-squat', name: 'Bulgarian split squat', aliases: ['split squat'] },
+    { id: 'deadlift', name: 'Deadlift', aliases: ['conventional deadlift'] },
+    { id: 'romanian-deadlift', name: 'Romanian deadlift', aliases: ['stiff leg deadlift'] },
+    { id: 'leg-curl', name: 'Leg curl', aliases: ['hamstring curl', 'lying leg curl'] },
+    { id: 'leg-extension', name: 'Leg extension', aliases: ['quad extension'] },
+    { id: 'calf-raise', name: 'Calf raise', aliases: ['standing calf raise', 'seated calf raise'] },
+    { id: 'hip-thrust', name: 'Hip thrust', aliases: ['glute bridge'] },
+    { id: 'plank', name: 'Plank', aliases: [], bw: true },
+    { id: 'hanging-leg-raise', name: 'Hanging leg raise', aliases: ['leg raise'], bw: true }
+  ];
+
   // ---- Sync merge: last-write-wins per DAY ----------------------------------
   // A sync state is {days:{'YYYY-MM-DD':[entries]}, meta:{'YYYY-MM-DD':isoStamp}}.
   // Per-day (not per-blob) LWW makes "phone logs lunch, PC logs dinner on another
@@ -508,7 +893,10 @@
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
     supplementDue, supplementNextDue, supplementWindow, supplementStats, isoWeekdayMon,
-    repairJson,
+    repairJson, median, linearTrend,
+    e1RM, setLoad, weightAt, classifyExercise, sessionMetrics, exerciseTrend, liftVsWeight,
+    normalizeName, exerciseId, matchExercise, parseWorkoutLine, parseWorkout, SEED_EXERCISES,
+    LIFT_REP_CAP, LIFT_MIN_SESSIONS, LIFT_FLAT_PCT, LIFT_RIR_DRIFT, LIFT_WINDOW_DAYS,
     KCAL_PER_KG_FAT, mergeSyncStates, ternary
   };
 });
