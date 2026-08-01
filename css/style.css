@@ -66,7 +66,7 @@ body {
   max-width: 620px;
   margin: 0 auto;
   padding: calc(12px + env(safe-area-inset-top)) var(--gutter)
-           calc(96px + env(safe-area-inset-bottom));
+           calc(32px + env(safe-area-inset-bottom));
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -91,8 +91,8 @@ a { color: var(--chalk); text-underline-offset: 3px; }
 
 /* Section labels are set in the data face so they read as belonging to the
    numbers they head — a ledger column header, not a UI caption. */
-.label, .panel-title, .sub, .spark-cap, .pfix-head,
-.stat .k, .avg-label, .rm-label, .rbw-label, .heatmap-days span {
+.label, .panel-title, .sub, .trend-cap, .pfix-head,
+.stat .k, .avg-label, .rbw-label, .heatmap-days span, .sidebar-title {
   font-family: var(--data);
   font-size: 10px;
   font-weight: 500;
@@ -113,7 +113,7 @@ h1 {
 }
 
 .data, td, .rmeta, .supp-sub, .lift-sets, .lift-sub, .sr-sub,
-.avg-sub, .rbw-val, .donut-legend-val, .donut-legend-pct, .hm-tip {
+.avg-sub, .rbw-val, .hm-tip {
   font-family: var(--data);
 }
 
@@ -130,6 +130,18 @@ header {
 }
 
 .head-right { display: flex; gap: 10px; align-items: center; }
+
+#navToggle {
+  width: 34px; height: 34px; padding: 0;
+  flex: none;
+  display: grid; place-items: center;
+  background: none; border: none; box-shadow: none;
+  color: var(--faint); font-size: 16px;
+}
+#navToggle:hover { color: var(--chalk); background: var(--chalk-wash); }
+#navToggle[aria-expanded="true"] { color: var(--chalk); background: var(--chalk-wash); }
+
+header h1 { flex: none; margin-right: auto; }
 
 /* Date is a control, not a caption: ‹ and › step the logical day. */
 .daynav { display: flex; align-items: center; gap: 2px; }
@@ -227,7 +239,7 @@ details:not(.panel)[open] > summary::before { transform: rotate(45deg); }
 /* Emoji render in full colour whatever the palette says, so every emoji-bearing
    control is desaturated. Colour in this app means out-of-tolerance, and a
    camera button is not a tolerance state. */
-.omni-chip.icon-chip, .tern-find, .budget-icon, .supp-take .ico {
+.cm-ico, .omni-chip.icon-chip, .tern-find, .budget-icon, .supp-take .ico {
   filter: grayscale(1);
 }
 
@@ -248,13 +260,19 @@ details:not(.panel)[open] > summary::before { transform: rotate(45deg); }
   z-index: 20;
 }
 
+/* The stamp wraps to its own line rather than being pushed off the fascia: at
+   the widest reading ("2,470 KCAL" beside "CEILING BREACH") the two do not fit
+   across a 360px phone, and a nowrap flex child with nothing to shrink simply
+   overflows. min-width:0 lets the readout column give way first. */
 .instrument-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   margin-bottom: 14px;
 }
+.instrument-readout { flex: 1 1 auto; min-width: 0; }
 
 /* The readout. Archivo at full expansion is the app's voice — it should read
    as a machine display, not a heading. */
@@ -262,7 +280,7 @@ details:not(.panel)[open] > summary::before { transform: rotate(45deg); }
   font-family: var(--display);
   font-weight: 800;
   font-stretch: 125%;
-  font-size: clamp(42px, 13vw, 58px);
+  font-size: clamp(34px, 11vw, 56px);
   line-height: 0.86;
   letter-spacing: -0.03em;
   color: var(--chalk);
@@ -300,7 +318,8 @@ details:not(.panel)[open] > summary::before { transform: rotate(45deg); }
   border-radius: 3px;
   color: var(--graphite);
   white-space: nowrap;
-  flex: none;
+  flex: 0 0 auto;
+  margin-left: auto;     /* stays right-aligned on the line it lands on */
 }
 .verdict-stamp.is-under  { color: var(--brass);     border-color: var(--brass);     background: var(--brass-wash); }
 .verdict-stamp.is-inside { color: var(--chalk);     border-color: var(--rule-lit); }
@@ -1010,23 +1029,12 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .avg-trend.down { color: var(--hot); }
 .avg-trend.neutral { color: var(--faint); }
 
-.donut-wrap { display: flex; align-items: center; gap: 22px; }
-.donut-svg { flex: none; }
-.donut-legend { display: flex; flex-direction: column; gap: 9px; flex: 1; }
-.donut-legend-item { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
-.donut-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.donut-legend-val { font-weight: 600; font-size: 14px; color: var(--chalk); }
-.donut-legend-pct { font-size: 10.5px; color: var(--faint); }
-.donut-center { font-family: var(--display); font-stretch: 115%; font-weight: 700; font-size: 17px; fill: var(--chalk); }
-.donut-center-sub { font-family: var(--data); font-size: 8px; fill: var(--faint); letter-spacing: 0.12em; }
-
-.ghost-wrap { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--rule); }
-.ghost-bar-track { position: relative; height: 3px; background: var(--well); border-radius: 2px; overflow: hidden; }
-.ghost-bar-fill { height: 100%; background: var(--graphite); transition: width 0.45s ease; }
-.ghost-bar-ghost { position: absolute; top: 0; height: 100%; background: var(--rule-lit); border-right: 1px dashed var(--graphite); transition: width 0.45s ease; }
-.ghost-labels { display: flex; justify-content: space-between; margin-top: 8px; font-family: var(--data); font-size: 10.5px; color: var(--faint); }
-.ghost-labels .ahead { color: var(--chalk); }
-.ghost-labels .behind { color: var(--brass); }
+/* Weight and intake, stacked on one shared date axis. Stacked rather than
+   side-by-side on purpose: a common x is what makes a run of heavy days and the
+   scale's answer to it readable as one pattern. */
+.trend-pair { display: flex; flex-direction: column; gap: 16px; margin-top: 12px; }
+.trend-chart svg { width: 100%; height: auto; display: block; }
+.trend-cap { margin-bottom: 7px; }
 
 .heatmap-wrap { overflow-x: auto; }
 .heatmap-grid, .heatmap-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
@@ -1080,10 +1088,6 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .topfood-bar span { font-size: 11px; color: var(--chalk); white-space: nowrap; }
 .topfood-count { font-family: var(--data); font-size: 10.5px; color: var(--faint); width: 28px; text-align: right; flex: none; }
 
-.report-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--rule); border: 1px solid var(--rule); margin-bottom: 14px; }
-.report-metric { background: var(--bench); text-align: center; padding: 14px 8px; }
-.rm-val { font-family: var(--display); font-stretch: 115%; font-weight: 700; font-size: 22px; color: var(--chalk); }
-.rm-label { margin-top: 5px; }
 .report-best-worst { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .rbw-label { margin-bottom: 5px; }
 .rbw-val { font-size: 12px; color: var(--chalk); }
@@ -1103,10 +1107,6 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .hist-day > summary::-webkit-details-marker { display: none; }
 .hist-day .hd-date { color: var(--faint); }
 .hist-day .hd-body { padding: 2px 0 14px; }
-
-.spark-wrap { margin-bottom: 16px; }
-.spark-wrap svg { width: 100%; height: auto; display: block; }
-.spark-cap { margin-bottom: 7px; }
 
 /* ================================= lift ================================= */
 
@@ -1170,44 +1170,71 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .recomp-body { font-size: 12.5px; color: var(--graphite); line-height: 1.6; }
 .recomp-body b { color: var(--chalk); font-weight: 600; }
 
-/* =============================== tab bar ================================ */
+/* =============================== sidebar ================================ */
 
-.tabbar {
+/* Sections moved off the bottom edge, which now belongs to the composer. The
+   drawer is an overlay at every width — a persistent rail would fight the
+   620px measure the whole sheet is set to. */
+.nav-backdrop {
   position: fixed;
-  left: 0; right: 0; bottom: 0;
-  z-index: 40;
-  display: flex;
-  max-width: 620px;
-  margin: 0 auto;
-  background: var(--bench);
-  border-top: 1px solid var(--rule);
-  padding: 0 8px env(safe-area-inset-bottom);
+  inset: 0;
+  z-index: 44;
+  background: rgba(6, 9, 8, 0.6);
+  animation: fadeIn 0.14s ease-out;
 }
-.tabbar button {
-  flex: 1;
-  width: auto;
-  min-height: 0;
-  padding: 9px 0 10px;
-  background: none;
-  border: none;
-  border-top: 2px solid transparent;
-  border-radius: 0;
-  margin-top: -1px;
+
+.sidebar {
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  z-index: 45;
+  width: 224px;
+  max-width: 78vw;
+  background: var(--slab);
+  border-right: 1px solid var(--rule-lit);
+  padding: calc(14px + env(safe-area-inset-top)) 0 env(safe-area-inset-bottom);
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  animation: navIn 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes navIn { from { transform: translateX(-100%); } }
+
+.sidebar-head {
+  display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 10px;
+  padding: 0 14px 14px;
+  border-bottom: 1px solid var(--rule);
+}
+.sidebar-title { flex: 1; }
+
+.sidebar-tabs { display: flex; flex-direction: column; padding: 8px; }
+.sidebar-tabs button {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 11px 12px;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  display: flex;
+  align-items: center;
+  gap: 13px;
   color: var(--faint);
   font-family: var(--data);
-  font-size: 9px;
+  font-size: 10.5px;
   font-weight: 500;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
-.tabbar button .ico { font-size: 17px; line-height: 1; position: relative; opacity: 0.75; }
-.tabbar button:hover:not([aria-selected="true"]) { background: none; color: var(--graphite); }
-.tabbar button[aria-selected="true"] { color: var(--chalk); border-top-color: var(--chalk); background: none; }
-.tabbar button[aria-selected="true"] .ico { opacity: 1; }
+.sidebar-tabs button .ico { font-size: 16px; line-height: 1; position: relative; opacity: 0.75; }
+.sidebar-tabs button:hover:not([aria-selected="true"]) { background: var(--chalk-wash); color: var(--graphite); }
+.sidebar-tabs button[aria-selected="true"] {
+  color: var(--chalk);
+  border-left-color: var(--chalk);
+  background: var(--chalk-wash);
+}
+.sidebar-tabs button[aria-selected="true"] .ico { opacity: 1; }
 
 .nav-badge {
   position: absolute;
@@ -1224,6 +1251,91 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
   text-align: center;
   letter-spacing: 0;
 }
+
+/* ============================ meal composer ============================= */
+
+/* This is a meal-logging app, so the thing you do fifteen times a day sits
+   where your thumb already is. Everything else about logging (review, manual
+   search, one-tap repeats) stays in the page; only the input is pinned. */
+.composer {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 42;
+  max-width: 620px;
+  margin: 0 auto;
+  background: var(--bench);
+  border-top: 1px solid var(--rule);
+  padding: 10px var(--gutter) calc(10px + env(safe-area-inset-bottom));
+}
+
+.composer-bar { display: flex; align-items: flex-end; gap: 8px; }
+.composer-bar textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  max-height: 132px;
+  padding: 11px 12px;
+  resize: none;
+  overflow-y: auto;
+}
+
+/* Send is a key, the way every primary action in the app is. It is deliberately
+   compact — the ⌃ beside it has to fit on the same line on a 320px phone. */
+.composer-send,
+.composer-more {
+  flex: none;
+  width: var(--tap);
+  min-height: var(--tap);
+  padding: 0;
+  font-size: 17px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+.composer-more {
+  background: transparent;
+  border-color: var(--rule-lit);
+  color: var(--graphite);
+  font-size: 13px;
+  transition: transform 0.15s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.composer-more:hover:not(:disabled) { background: var(--chalk-wash); color: var(--chalk); border-color: var(--graphite); }
+.composer-more[aria-expanded="true"] { color: var(--chalk); border-color: var(--graphite); transform: rotate(180deg); }
+
+.composer-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+  padding: 6px;
+  border: 1px solid var(--rule-lit);
+  border-radius: var(--radius);
+  animation: menuIn 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes menuIn { from { transform: translateY(6px); opacity: 0; } }
+.cm-item {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--graphite);
+  font-size: 13px;
+  font-weight: 500;
+}
+.cm-item:hover:not(:disabled) { background: var(--chalk-wash); color: var(--chalk); }
+.cm-item[aria-expanded="true"] { color: var(--chalk); background: var(--chalk-wash); }
+.cm-ico { font-size: 15px; line-height: 1; flex: none; }
+
+.composer .photo-chip { margin: 0 0 10px; }
+
+/* The composer only exists on Today, so only Today reserves room for it. */
+body.with-composer { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
+body.with-composer .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
 
 /* ======================= sheets, toasts, undo =========================== */
 
@@ -1266,7 +1378,7 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(78px + env(safe-area-inset-bottom));
+  bottom: calc(22px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   z-index: 55;
   display: flex;
@@ -1335,7 +1447,8 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
    stick after a tap, so they are simply not defined there. */
 @media (hover: none) {
   .chip:hover, .omni-chip:hover, button.ghost:hover:not(:disabled),
-  .icon-btn:hover, #gear:hover, .row-actions button:hover { background: transparent; }
+  .icon-btn:hover, #gear:hover, #navToggle:hover,
+  .row-actions button:hover, .cm-item:hover { background: transparent; }
 }
 
 /* ============================== responsive ============================== */
@@ -1344,8 +1457,19 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
   .tern-foods { grid-template-columns: 1fr; }
 }
 
+/* The wordmark is the first thing to go: on a phone the header has to carry a
+   nav toggle, the day stepper and settings, and those are all controls. */
+@media (max-width: 430px) {
+  header h1 { display: none; }
+  .daynav .date { min-width: 78px; }
+  /* Below this the readout and the stamp cannot share a line at the widest
+     reading, and letting them wrap only sometimes made the instrument jump
+     between states. So on a phone the stamp always sits under the number. */
+  .instrument-readout { flex-basis: 100%; }
+}
+
 @media (max-width: 380px) {
   :root { --gutter: 14px; }
   .targets-grid { grid-template-columns: 1fr; }
-  .report-grid { grid-template-columns: 1fr; }
+  .report-best-worst { grid-template-columns: 1fr; }
 }

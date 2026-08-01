@@ -133,38 +133,102 @@ document.getElementById('csvBtn').onclick = ()=>{
   const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url; a.download=`ledger_log_${ACTIVE_DATE}.csv`; a.click(); URL.revokeObjectURL(url);
 };
+// ---- the two trend charts --------------------------------------------------
+// Weight and intake are drawn over ONE shared date axis and stacked, so a run of
+// heavy days and the scale's answer to it line up column for column. Anything
+// that only appears in one series still sits at its true date on both.
+const TREND_W = 300, TREND_H = 70, TREND_PADL = 4, TREND_PADR = 34,
+      TREND_PADT = 8, TREND_PADB = 14, TREND_DAYS = 45;
+
+function trendSeries(){
+  const map = weightsMap(), tot = {};
+  closedDays().forEach(d => { tot[d.date] = totalsOf(d.ledger); });   // open day excluded, as elsewhere
+  const dates = Array.from(new Set(Object.keys(map).concat(Object.keys(tot))))
+    .filter(d => (+map[d] > 0) || (tot[d] && tot[d].kcal > 0)).sort();
+  if (!dates.length) return null;
+  // Window the last TREND_DAYS, but never draw empty axis: with three weeks of
+  // history the charts should span three weeks, not sit squashed into a corner.
+  const end = dates[dates.length - 1];
+  const start = [addDaysISO(end, -(TREND_DAYS - 1)), dates[0]].sort().pop();
+  const inWin = d => d >= start && d <= end;
+  return { start, end,
+    w: dates.filter(d => inWin(d) && +map[d] > 0).map(d => ({ date:d, kg:+map[d] })),
+    k: dates.filter(d => inWin(d) && tot[d] && tot[d].kcal > 0).map(d => ({ date:d, kcal:tot[d].kcal })) };
+}
+// The shared x-mapping. Both charts call this, which is the whole point.
+function trendX(s){
+  const t0 = Date.parse(s.start), t1 = Date.parse(s.end);
+  const uW = TREND_W - TREND_PADL - TREND_PADR;
+  return d => TREND_PADL + (t1 === t0 ? uW/2 : uW * (Date.parse(d) - t0) / (t1 - t0));
+}
+function trendAxis(s){
+  return `<text x="${TREND_PADL}" y="${TREND_H-2}" font-size="8" fill="var(--faint)" font-family="var(--data)">${s.start}</text>`
+       + `<text x="${TREND_W-2}" y="${TREND_H-2}" text-anchor="end" font-size="8" fill="var(--faint)" font-family="var(--data)">${s.end}</text>`;
+}
+function trendSVG(inner){
+  return `<svg viewBox="0 0 ${TREND_W} ${TREND_H}" style="width:100%;display:block">${inner}</svg>`;
+}
+function weightChartSVG(s, X){
+  const pts = s.w;
+  if (pts.length < 2) return '';
+  const uH = TREND_H - TREND_PADT - TREND_PADB;
+  const kMin = Math.min(...pts.map(p=>p.kg)), kMax = Math.max(...pts.map(p=>p.kg));
+  const yPad = Math.max(0.3, (kMax-kMin)*0.15);
+  const Y = k => TREND_PADT + uH*(1-(k-kMin+yPad)/((kMax-kMin)+2*yPad));
+  const path = pts.map((p,i)=>`${i?'L':'M'}${X(p.date).toFixed(1)},${Y(p.kg).toFixed(1)}`).join(' ');
+  const dots = pts.map(p=>`<circle cx="${X(p.date).toFixed(1)}" cy="${Y(p.kg).toFixed(1)}" r="2" fill="var(--chalk)"/>`).join('');
+  const last = pts[pts.length-1];
+  return trendSVG(
+    `<path d="${path}" fill="none" stroke="var(--chalk)" stroke-width="1.5" stroke-linejoin="round"/>${dots}`
+    + `<text x="${TREND_W-2}" y="${Y(last.kg)+3}" text-anchor="end" font-size="9" fill="var(--graphite)" font-family="var(--data)">${last.kg}kg</text>`
+    + trendAxis(s));
+}
+// Intake against the corridor. The band is the corridor; a dot only takes colour
+// when the day landed out of tolerance, same rule as everything else here.
+function kcalChartSVG(s, X){
+  const pts = s.k;
+  if (pts.length < 2) return '';
+  const uH = TREND_H - TREND_PADT - TREND_PADB;
+  const yMax = Math.max(CEIL*1.15, ...pts.map(p=>p.kcal)) * 1.02;
+  const Y = v => TREND_PADT + uH*(1 - v/yMax);
+  const bTop = Y(CEIL), bBot = Y(FLOOR);
+  const band = `<rect x="${TREND_PADL}" y="${bTop.toFixed(1)}" width="${TREND_W-TREND_PADL-TREND_PADR}" height="${(bBot-bTop).toFixed(1)}" fill="var(--chalk-wash)"/>`
+    + `<line x1="${TREND_PADL}" y1="${bBot.toFixed(1)}" x2="${TREND_W-TREND_PADR}" y2="${bBot.toFixed(1)}" stroke="var(--rule-lit)" stroke-width="1" stroke-dasharray="3 3"/>`
+    + `<line x1="${TREND_PADL}" y1="${bTop.toFixed(1)}" x2="${TREND_W-TREND_PADR}" y2="${bTop.toFixed(1)}" stroke="var(--rule-lit)" stroke-width="1" stroke-dasharray="3 3"/>`;
+  const path = pts.map((p,i)=>`${i?'L':'M'}${X(p.date).toFixed(1)},${Y(p.kcal).toFixed(1)}`).join(' ');
+  const dots = pts.map(p=>{
+    const c = p.kcal > CEIL ? 'var(--hot)' : p.kcal >= FLOOR ? 'var(--chalk)' : 'var(--brass)';
+    return `<circle cx="${X(p.date).toFixed(1)}" cy="${Y(p.kcal).toFixed(1)}" r="2.2" fill="${c}"/>`;
+  }).join('');
+  return trendSVG(band
+    + `<path d="${path}" fill="none" stroke="var(--chalk)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>${dots}`
+    + `<text x="${TREND_W-2}" y="${(bTop+3).toFixed(1)}" text-anchor="end" font-size="8" fill="var(--faint)" font-family="var(--data)">${Math.round(CEIL)}</text>`
+    + trendAxis(s));
+}
+
 function renderWeight(){
   document.getElementById('wDate').textContent = VIEW_DATE===ACTIVE_DATE ? 'today' : VIEW_DATE;
   const map = weightsMap();
   const inEl = document.getElementById('wIn');
   if (document.activeElement !== inEl) inEl.value = map[VIEW_DATE] || '';
   const entries = Object.keys(map).sort().map(d=>({date:d, kg:+map[d]})).filter(e=>e.kg>0);
-  const chart = document.getElementById('wChart'), stats = document.getElementById('wStats');
+  const chart = document.getElementById('wChart'), kChart = document.getElementById('kcalChart');
+  const stats = document.getElementById('wStats');
+
+  const s = trendSeries();
+  const X = s ? trendX(s) : null;
+  chart.innerHTML  = s ? (weightChartSVG(s, X) || '<div class="empty">Two weigh-ins draw the trend.</div>') : '';
+  kChart.innerHTML = s ? (kcalChartSVG(s, X)   || '<div class="empty">Close two days to draw intake.</div>') : '';
+  document.getElementById('wChartCap').textContent = 'Weight · kg';
+  document.getElementById('kChartCap').textContent = `Intake · kcal vs ${Math.round(FLOOR)}–${Math.round(CEIL)}`;
+
   if (entries.length < 2){
-    chart.innerHTML = '';
     stats.hidden = false;
     stats.textContent = entries.length ? 'One weigh-in logged — a second gives you a trend.'
                                        : 'Log a morning weight to see whether the corridor is actually moving it.';
     return;
   }
-  const pts = entries.slice(-30);
-  // Chart: same idiom as the kcal sparkline — inline SVG, no deps.
-  const W=300, H=70, padT=8, padB=14, padL=4, padR=34;
-  const uW=W-padL-padR, uH=H-padT-padB;
-  const t0=Date.parse(pts[0].date), t1=Date.parse(pts[pts.length-1].date);
-  const kMin=Math.min(...pts.map(p=>p.kg)), kMax=Math.max(...pts.map(p=>p.kg));
-  const yPad=Math.max(0.3,(kMax-kMin)*0.15);
-  const X=d=> padL + (t1===t0 ? uW/2 : uW*(Date.parse(d)-t0)/(t1-t0));
-  const Y=k=> padT + uH*(1-(k-kMin+yPad)/((kMax-kMin)+2*yPad));
-  const path=pts.map((p,i)=>`${i?'L':'M'}${X(p.date).toFixed(1)},${Y(p.kg).toFixed(1)}`).join(' ');
-  const dots=pts.map(p=>`<circle cx="${X(p.date).toFixed(1)}" cy="${Y(p.kg).toFixed(1)}" r="2" fill="var(--chalk)"/>`).join('');
-  const last=pts[pts.length-1];
-  chart.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block">
-    <path d="${path}" fill="none" stroke="var(--chalk)" stroke-width="1.5" stroke-linejoin="round"/>${dots}
-    <text x="${W-2}" y="${Y(last.kg)+3}" text-anchor="end" font-size="9" fill="var(--graphite)" font-family="var(--data)">${last.kg}kg</text>
-    <text x="${padL}" y="${H-2}" font-size="8" fill="var(--faint)" font-family="var(--data)">${pts[0].date}</text>
-    <text x="${W-2}" y="${H-2}" text-anchor="end" font-size="8" fill="var(--faint)" font-family="var(--data)">${last.date}</text>
-  </svg>`;
+  const last = entries[entries.length-1];
   // Rate over the last ~3 weeks + kcal average over the same window = the verdict.
   const recent = entries.filter(e => (Date.parse(last.date)-Date.parse(e.date))/86400000 <= 21);
   const tr = LedgerCore.weightTrend(recent.length>=2 ? recent : entries);
@@ -224,7 +288,7 @@ function renderFatEstimate(){
     maintTxt = maintLow===maintHigh ? `${maintLow}` : `${maintLow}–${maintHigh}`;
   } else {
     const td=computeTDEE();
-    if (!(td.blended>0)){ out.className='tactical'; out.innerHTML='Fill in your <b>profile</b> above (or a maintenance range) to estimate fat change.'; return; }
+    if (!(td.blended>0)){ out.className='tactical'; out.innerHTML='Fill in your <b>body profile</b> in ⚙ Settings (or a maintenance range above) to estimate fat change.'; return; }
     const m=Math.round(150 - 75*td.w);            // ±150 early, tightening to ±75 fully calibrated
     maintLow=td.blended-m; maintHigh=td.blended+m;
     maintTxt = `adaptive TDEE ${td.blended.toLocaleString()} ±${m}`;
@@ -308,20 +372,32 @@ function computeTDEE(){
   const cal = LedgerCore.calibrateTDEE(formula, avgIntake, tr?tr.ratePerWeek:null, sampleDays);
   return Object.assign(cal, {kg, avgIntake:Math.round(avgIntake), sampleDays});
 }
+// The profile inputs live in Settings; Trends keeps a one-line echo (#tdeeMini) so
+// the number is still where you look at your weight trend.
 function renderTDEE(){
   const sexEl=document.getElementById('pfSex'), ageEl=document.getElementById('pfAge'),
         hEl=document.getElementById('pfHeight'), actEl=document.getElementById('pfActivity'),
-        out=document.getElementById('tdeeReadout');
+        out=document.getElementById('tdeeReadout'), mini=document.getElementById('tdeeMini');
   if (!out) return;
   if (document.activeElement!==sexEl) sexEl.value=PROFILE.sex;
   if (document.activeElement!==ageEl) ageEl.value=PROFILE.age>0?PROFILE.age:'';
   if (document.activeElement!==hEl)   hEl.value=PROFILE.height>0?PROFILE.height:'';
   if (document.activeElement!==actEl) actEl.value=PROFILE.activity;
 
+  const echo = (cls, html)=>{ if (!mini) return; mini.hidden=false; mini.className=cls; mini.innerHTML=html; };
   const td=computeTDEE();
   const hasProfile = +PROFILE.age>0 && +PROFILE.height>0;
-  if (!td.kg){ out.className='tactical'; out.textContent='Log a weight (above) to compute your BMR and TDEE.'; return; }
-  if (!hasProfile && td.dataTDEE==null){ out.className='tactical'; out.textContent='Enter age & height for a formula estimate — or log ~7 days of weigh-ins and it derives maintenance from your data.'; return; }
+  if (!td.kg){
+    out.className='tactical'; out.textContent='Log a weight on Trends to compute your BMR and TDEE.';
+    if (mini) mini.hidden = true;
+    return;
+  }
+  if (!hasProfile && td.dataTDEE==null){
+    const msg='Enter age &amp; height for a formula estimate — or log ~7 days of weigh-ins and it derives maintenance from your data.';
+    out.className='tactical'; out.innerHTML=msg;
+    echo('tactical', 'Add your age and height in <b>⚙ Settings</b> to get an adaptive TDEE.');
+    return;
+  }
   const bits=[];
   if (hasProfile) bits.push(`formula ${td.formula.toLocaleString()}`);
   bits.push(td.dataTDEE!=null
@@ -329,6 +405,7 @@ function renderTDEE(){
     : `measured pending — needs ~7+ days of weigh-ins`);
   out.className='tactical good';
   out.innerHTML = `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${bits.join(' · ')}.`;
+  echo('tactical good', `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${bits.join(' · ')}. Edit your profile in ⚙ Settings.`);
 }
 // Goal readout: the corridor the goal will impose + suggested protein for the phase.
 function renderGoal(){
@@ -341,7 +418,7 @@ function renderGoal(){
   if (GOAL.mode==='off'){ out.hidden = true; return; }
   out.hidden = false;
   const td=computeTDEE();
-  if (!(td.blended>0)){ out.className='tactical'; out.textContent='Fill in your profile and log a weight to activate the auto corridor.'; return; }
+  if (!(td.blended>0)){ out.className='tactical'; out.textContent='Fill in the body profile above and log a weight on Trends to activate the auto corridor.'; return; }
   const off=effectiveOffset();
   const c=LedgerCore.corridorFromTDEE(td.blended, off, GOAL.band||100);
   const kg=latestWeight(), perKg=GOAL_PROTEIN_PER_KG[GOAL.mode]||1.8;
@@ -543,37 +620,11 @@ function renderTrendsTab(){
   renderHeatmap();
   renderWeight();
   renderWeightLog();
-  renderTDEE();
-  renderGoal();
-  renderFatEstimate();
+  renderFatEstimate();   // TDEE + goal readouts are refreshed by render(), not here
   renderWeeklyReport();
   renderTopFoods();
   renderRecompFromLifts();
   renderHistory();
-}
-
-// SPARKLINE: last ~14 days of kcal against the corridor band (inline SVG, no deps).
-function renderSparkline() {
-  const all = closedDays().sort((a,b)=> a.date<b.date ? -1 : 1);   // oldest → newest, open day excluded
-  const pts = all.slice(-14).map(d => ({ date: d.date, kcal: totalsOf(d.ledger).kcal }));
-  if (pts.length < 2) return '';
-  const W = 300, H = 64, padT = 6, padB = 10, padL = 4, padR = 4;
-  const uH = H - padT - padB, uW = W - padL - padR;
-  const yMax = Math.max(CEIL * 1.15, ...pts.map(p => p.kcal)) * 1.02;
-  const Y = v => padT + uH * (1 - v / yMax);
-  const X = i => padL + uW * i / (pts.length - 1);
-  const bTop = Y(CEIL), bBot = Y(FLOOR);
-  const band = `<rect x="${padL}" y="${bTop}" width="${uW}" height="${bBot - bTop}" fill="rgba(16,185,129,0.12)"/>`;
-  const fLine = `<line x1="${padL}" y1="${bBot}" x2="${W - padR}" y2="${bBot}" stroke="rgba(16,185,129,0.4)" stroke-width="1" stroke-dasharray="3 3"/>`;
-  const cLine = `<line x1="${padL}" y1="${bTop}" x2="${W - padR}" y2="${bTop}" stroke="rgba(239,68,68,0.32)" stroke-width="1" stroke-dasharray="3 3"/>`;
-  const path = pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(p.kcal).toFixed(1)}`).join(' ');
-  const line = `<path d="${path}" fill="none" stroke="var(--chalk)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-  const dots = pts.map((p, i) => {
-    const c = p.kcal > CEIL ? '#ef4444' : p.kcal >= FLOOR ? '#10b981' : '#f59e0b';
-    return `<circle cx="${X(i).toFixed(1)}" cy="${Y(p.kcal).toFixed(1)}" r="2.6" fill="${c}"/>`;
-  }).join('');
-  return `<div class="spark-wrap"><div class="spark-cap">Last ${pts.length} days · kcal vs corridor</div>
-    <svg viewBox="0 0 ${W} ${H}">${band}${fLine}${cLine}${line}${dots}</svg></div>`;
 }
 
 // 6. WEEKLY REPORT CARD
@@ -585,7 +636,6 @@ function renderWeeklyReport() {
   const week = all.slice(0, Math.min(7, all.length));
   const tots = week.map(d => ({ date: d.date, ...totalsOf(d.ledger) }));
   const avgK = tots.reduce((s,t) => s+t.kcal, 0) / tots.length;
-  const avgP = tots.reduce((s,t) => s+t.p, 0) / tots.length;
   const okDays = tots.filter(dayOk).length;
 
   // Best and worst days
@@ -597,12 +647,10 @@ function renderWeeklyReport() {
   const best = sorted[0];
   const worst = sorted[sorted.length - 1];
 
-  wrap.innerHTML = weeklyNarrative(avgK, tots.length, okDays) + renderSparkline() + `
-    <div class="report-grid">
-      <div class="report-metric"><div class="rm-val">${Math.round(avgK)}</div><div class="rm-label">Avg Kcal</div></div>
-      <div class="report-metric"><div class="rm-val">${Math.round(avgP)}g</div><div class="rm-label">Avg Protein</div></div>
-      <div class="report-metric"><div class="rm-val" style="color:${okDays >= tots.length * 0.7 ? 'var(--verdigris)' : 'var(--brass)'}">${okDays}/${tots.length}</div><div class="rm-label">Days ✓</div></div>
-    </div>
+  // The averages themselves are not repeated here — Rolling averages at the top of
+  // this tab is the one place for them. This card carries the narrative and the
+  // two days worth naming.
+  wrap.innerHTML = weeklyNarrative(avgK, tots.length, okDays) + `
     <div class="report-best-worst">
       <div class="report-bw"><div class="rbw-label">🏆 Best day</div><div class="rbw-val">${best.date}<br>${Math.round(best.kcal)} kcal · ${best.p.toFixed(0)}g P</div></div>
       <div class="report-bw"><div class="rbw-label">⚠️ Worst day</div><div class="rbw-val">${worst.date}<br>${Math.round(worst.kcal)} kcal · ${worst.p.toFixed(0)}g P</div></div>

@@ -20,6 +20,8 @@
 <div id="srLive" class="sr-only" role="status" aria-live="polite"></div>
 
 <header>
+  <button type="button" id="navToggle" aria-label="Open navigation"
+          aria-expanded="false" aria-controls="sidebar" title="Sections">&#9776;</button>
   <h1>Ledger</h1>
   <div class="head-right">
     <span id="syncDot" class="sync-dot off" role="img" aria-label="Sync off"
@@ -34,6 +36,23 @@
             aria-controls="settingsPanel" title="Settings">&#9881;</button>
   </div>
 </header>
+
+<!-- ============================ NAVIGATION ============================== -->
+<!-- Sections live in a drawer rather than a bottom bar: the bottom edge now
+     belongs to the meal composer, which is what this app is actually for. -->
+<div class="nav-backdrop" id="navBackdrop" hidden></div>
+<nav class="sidebar" id="sidebar" hidden>
+  <div class="sidebar-head">
+    <span class="sidebar-title">Sections</span>
+    <button type="button" class="icon-btn" id="navClose" aria-label="Close navigation">✕</button>
+  </div>
+  <div class="sidebar-tabs" role="tablist" aria-orientation="vertical" aria-label="Sections">
+    <button type="button" role="tab" id="tabbtn-today" data-tab="today" aria-selected="true" aria-controls="tabToday"><span class="ico">▤</span>Today</button>
+    <button type="button" role="tab" id="tabbtn-plan" data-tab="plan" aria-selected="false" aria-controls="tabPlan"><span class="ico">◈<span class="nav-badge" id="suppBadge" hidden></span></span>Plan</button>
+    <button type="button" role="tab" id="tabbtn-lift" data-tab="lift" aria-selected="false" aria-controls="tabLift"><span class="ico">▦</span>Lift</button>
+    <button type="button" role="tab" id="tabbtn-trends" data-tab="trends" aria-selected="false" aria-controls="tabTrends"><span class="ico">◧</span>Trends</button>
+  </div>
+</nav>
 
 <!-- End-of-day verdict, shown once after Close day. -->
 <div class="notice" id="digestCard" hidden>
@@ -103,6 +122,36 @@
     </div>
   </details>
   <div class="tactical" id="syncStatus">Set a passphrase to sync across devices. Logs and targets sync encrypted — the server never sees readable data. API keys never sync.</div>
+
+  <!-- Body profile lives here, not on Trends: it is configuration you set once,
+       not a reading you check. Trends shows what it produces. -->
+  <span class="panel-title">Body profile · feeds the adaptive TDEE</span>
+  <div class="targets-grid">
+    <div><label for="pfSex">Sex</label><select id="pfSex"><option value="male">male</option><option value="female">female</option></select></div>
+    <div><label for="pfAge">Age (years)</label><input type="number" id="pfAge" min="0" step="1" inputmode="numeric" placeholder="28"></div>
+    <div><label for="pfHeight">Height (cm)</label><input type="number" id="pfHeight" min="0" step="1" inputmode="numeric" placeholder="178"></div>
+    <div><label for="pfActivity">Activity</label><select id="pfActivity">
+      <option value="sedentary">sedentary</option>
+      <option value="light">light</option>
+      <option value="moderate">moderate</option>
+      <option value="active">active</option>
+      <option value="athlete">athlete</option>
+    </select></div>
+  </div>
+  <div class="tactical" id="tdeeReadout">Enter your age and height and log a weight to estimate maintenance.</div>
+
+  <span class="panel-title">Goal · auto-sets the corridor from your TDEE</span>
+  <div class="targets-grid">
+    <div><label for="goalMode">Goal</label><select id="goalMode">
+      <option value="off">off · manual corridor</option>
+      <option value="cut">cut (−500/day)</option>
+      <option value="maintain">maintain (±0)</option>
+      <option value="bulk">lean bulk (+300/day)</option>
+      <option value="custom">custom…</option>
+    </select></div>
+    <div id="goalCustomWrap" hidden><label for="goalOffset">Custom offset (kcal/day)</label><input type="number" id="goalOffset" step="25" inputmode="numeric" placeholder="250"></div>
+  </div>
+  <div class="tactical" id="goalReadout" hidden></div>
 
   <span class="panel-title">Targets · protocol defaults shown, edit deliberately</span>
   <div class="targets-grid">
@@ -199,11 +248,11 @@
   <!-- THE INSTRUMENT — the calibrated corridor this whole app is built around. -->
   <section class="instrument" id="instrument" aria-label="Caloric corridor">
     <div class="instrument-head">
-      <div>
+      <div class="instrument-readout">
         <div class="readout" id="readout">0</div>
         <div class="readout-sub" id="readoutSub"></div>
       </div>
-      <span class="verdict-stamp empty" id="verdictStamp">no entries</span>
+      <span class="verdict-stamp is-empty" id="verdictStamp">no entries</span>
     </div>
 
     <div class="scale" id="scale" role="meter" aria-label="Calories against the corridor">
@@ -227,19 +276,7 @@
   <section class="panel">
     <span class="panel-title">Macros consumed</span>
     <div id="macroRows"></div>
-    <div id="donutWrap" style="margin-top:18px" hidden></div>
     <div id="microLine" style="margin-top:16px" hidden></div>
-    <div class="ghost-wrap" id="ghostWrap" hidden>
-      <span class="panel-title" style="margin-bottom:8px">Pace vs. yesterday</span>
-      <div class="ghost-bar-track">
-        <div class="ghost-bar-ghost" id="ghostBar"></div>
-        <div class="ghost-bar-fill" id="ghostFill" style="width:0%"></div>
-      </div>
-      <div class="ghost-labels">
-        <span id="ghostLabel">—</span>
-        <span id="ghostPct">—</span>
-      </div>
-    </div>
   </section>
 
   <!-- Supplements that are ON today. "Is today an ON day?" is a Today question,
@@ -249,31 +286,20 @@
     <div class="supp-strip-today" id="suppTodayStrip"></div>
   </section>
 
-  <!-- ADD FOOD -->
+  <!-- LOGGING. The meal composer itself is pinned to the bottom of the screen;
+       what stays here is everything that needs room: one-tap repeats, the AI's
+       parse output awaiting review, and the manual USDA search. -->
   <section class="panel" id="addPanel">
-    <span class="panel-title">Add food</span>
+    <span class="panel-title">Log a meal</span>
     <div class="chips" id="tplChips" hidden></div>
     <div class="chips" id="freqChips" hidden></div>
-    <label for="nlInput" class="sr-only">Describe a meal</label>
-    <textarea id="nlInput" rows="3" placeholder="Describe a meal — two boiled eggs, a glass of skimmed milk, 150g grilled chicken. Or snap a photo and add notes."></textarea>
-    <div id="photoChip" class="photo-chip" hidden>
-      <img id="photoThumb" alt="">
-      <span id="photoName" class="grow"></span>
-      <button type="button" class="icon-btn" id="photoClear" aria-label="Remove photo">✕</button>
-    </div>
     <!-- Two pickers: camera (capture) forces the camera on mobile; gallery opens the library. -->
     <input type="file" id="photoFile" accept="image/*" capture="environment" hidden>
     <input type="file" id="photoGallery" accept="image/*" hidden>
-    <div class="omni-actions">
-      <button type="button" id="parseBtn" class="omni-primary">Parse meal</button>
-      <button type="button" class="omni-chip icon-chip" id="photoBtn" aria-label="Take a photo" title="Take a photo of the meal">📷</button>
-      <button type="button" class="omni-chip icon-chip" id="galleryBtn" aria-label="Choose a photo" title="Choose a meal photo">🖼️</button>
-      <button type="button" class="omni-chip" id="manualToggle" aria-expanded="false" aria-controls="manualBlock">Search</button>
-    </div>
     <div class="tactical" id="parseStatus" hidden></div>
     <div id="pending" style="margin-top:12px"></div>
 
-    <!-- Manual USDA logging — revealed on demand -->
+    <!-- Manual USDA logging — revealed from the composer's ⌃ menu -->
     <div id="manualBlock" hidden style="margin-top:16px;border-top:1px solid var(--rule);padding-top:16px">
       <div class="row" style="grid-template-columns:1fr 84px">
         <div>
@@ -480,7 +506,7 @@
   </details>
 
   <section class="panel">
-    <span class="panel-title">Weight · is the corridor working?</span>
+    <span class="panel-title">Weight and intake · is the corridor working?</span>
     <div class="row" style="grid-template-columns:1fr 84px">
       <div>
         <label for="wIn">Weight on <span id="wDate">today</span> (kg)</label>
@@ -490,34 +516,14 @@
         <button type="button" id="wSaveBtn">Log</button>
       </div>
     </div>
-    <div id="wChart" style="margin-top:12px"></div>
+    <!-- Both series over one shared date axis, stacked, so a run of high days and
+         the scale's answer to it line up column for column. -->
+    <div class="trend-pair">
+      <div class="trend-chart"><div class="trend-cap" id="wChartCap">Weight · kg</div><div id="wChart"></div></div>
+      <div class="trend-chart"><div class="trend-cap" id="kChartCap">Intake · kcal vs corridor</div><div id="kcalChart"></div></div>
+    </div>
     <div class="tactical" id="wStats" hidden></div>
-
-    <span class="panel-title" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--rule)">Adaptive TDEE · learns your maintenance from weight and intake</span>
-    <div class="targets-grid">
-      <div><label for="pfSex">Sex</label><select id="pfSex"><option value="male">male</option><option value="female">female</option></select></div>
-      <div><label for="pfAge">Age (years)</label><input type="number" id="pfAge" min="0" step="1" inputmode="numeric" placeholder="28"></div>
-      <div><label for="pfHeight">Height (cm)</label><input type="number" id="pfHeight" min="0" step="1" inputmode="numeric" placeholder="178"></div>
-      <div><label for="pfActivity">Activity</label><select id="pfActivity">
-        <option value="sedentary">sedentary</option>
-        <option value="light">light</option>
-        <option value="moderate">moderate</option>
-        <option value="active">active</option>
-        <option value="athlete">athlete</option>
-      </select></div>
-    </div>
-    <div class="tactical" id="tdeeReadout">Enter your age and height and log a weight to estimate maintenance.</div>
-    <div class="targets-grid" style="margin-top:12px">
-      <div><label for="goalMode">Goal — auto-sets your corridor</label><select id="goalMode">
-        <option value="off">off · manual corridor</option>
-        <option value="cut">cut (−500/day)</option>
-        <option value="maintain">maintain (±0)</option>
-        <option value="bulk">lean bulk (+300/day)</option>
-        <option value="custom">custom…</option>
-      </select></div>
-      <div id="goalCustomWrap" hidden><label for="goalOffset">Custom offset (kcal/day)</label><input type="number" id="goalOffset" step="25" inputmode="numeric" placeholder="250"></div>
-    </div>
-    <div class="tactical" id="goalReadout" hidden></div>
+    <div class="tactical" id="tdeeMini" hidden></div>
 
     <details style="margin-top:16px">
       <summary>Daily log · weight, calories and macros</summary>
@@ -532,7 +538,7 @@
       <div><label for="fatStart">From</label><input type="date" id="fatStart"></div>
       <div><label for="fatEnd">To</label><input type="date" id="fatEnd"></div>
     </div>
-    <div class="tactical" id="fatEstimate">Fill in your profile above, or a maintenance range, to estimate fat gained or lost.</div>
+    <div class="tactical" id="fatEstimate">Fill in your profile in Settings, or a maintenance range, to estimate fat gained or lost.</div>
   </section>
 
   <!-- Strength against bodyweight — the reading a lifting app cannot produce,
@@ -547,10 +553,10 @@
     <div id="weeklyReport"><div class="empty">Needs at least 2 days of data.</div></div>
   </section>
 
-  <section class="panel">
-    <span class="panel-title">Most logged foods</span>
-    <div class="topfoods-list" id="topFoodsList"><div class="empty">No history yet.</div></div>
-  </section>
+  <details class="panel">
+    <summary><span class="panel-title" style="margin:0">Most logged foods</span></summary>
+    <div class="topfoods-list" id="topFoodsList" style="margin-top:12px"><div class="empty">No history yet.</div></div>
+  </details>
 
   <details class="panel">
     <summary><span class="panel-title" style="margin:0">History</span></summary>
@@ -563,13 +569,28 @@
 
 <input type="file" id="importFile" accept="application/json" hidden>
 
-<!-- ============================== NAVIGATION ============================= -->
-<nav class="tabbar" role="tablist" aria-label="Sections">
-  <button type="button" role="tab" id="tabbtn-today" data-tab="today" aria-selected="true" aria-controls="tabToday"><span class="ico">▤</span>Today</button>
-  <button type="button" role="tab" id="tabbtn-plan" data-tab="plan" aria-selected="false" aria-controls="tabPlan"><span class="ico">◈<span class="nav-badge" id="suppBadge" hidden></span></span>Plan</button>
-  <button type="button" role="tab" id="tabbtn-lift" data-tab="lift" aria-selected="false" aria-controls="tabLift"><span class="ico">▦</span>Lift</button>
-  <button type="button" role="tab" id="tabbtn-trends" data-tab="trends" aria-selected="false" aria-controls="tabTrends"><span class="ico">◧</span>Trends</button>
-</nav>
+<!-- ============================ MEAL COMPOSER ============================ -->
+<!-- Pinned to the bottom, because describing a meal is what this app is for.
+     Enter sends; the ⌃ opens the other ways in (camera, gallery, USDA). -->
+<div class="composer" id="composer">
+  <div class="composer-menu" id="composerMenu" hidden>
+    <button type="button" class="cm-item" id="photoBtn"><span class="cm-ico">📷</span>Take a photo</button>
+    <button type="button" class="cm-item" id="galleryBtn"><span class="cm-ico">🖼️</span>Choose a photo</button>
+    <button type="button" class="cm-item" id="manualToggle" aria-expanded="false" aria-controls="manualBlock"><span class="cm-ico">🔍</span>Search USDA manually</button>
+  </div>
+  <div id="photoChip" class="photo-chip" hidden>
+    <img id="photoThumb" alt="">
+    <span id="photoName" class="grow"></span>
+    <button type="button" class="icon-btn" id="photoClear" aria-label="Remove photo">✕</button>
+  </div>
+  <div class="composer-bar">
+    <label for="nlInput" class="sr-only">Describe a meal</label>
+    <textarea id="nlInput" rows="1" placeholder="Describe a meal…"></textarea>
+    <button type="button" id="parseBtn" class="composer-send" title="Parse meal (Enter)" aria-label="Parse meal">↵</button>
+    <button type="button" id="composerMore" class="composer-more" aria-expanded="false"
+            aria-controls="composerMenu" aria-label="More ways to log" title="Photo, gallery, USDA search">⌃</button>
+  </div>
+</div>
 
 <script src="core.js"></script>
 <script src="js/state.js"></script>

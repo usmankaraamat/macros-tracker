@@ -17,7 +17,13 @@ function refreshKeyUI(){
   if (hasOR()) bits.push('OpenRouter ✓');
   st.textContent = bits.join('  ·  ') + (hasUSDA()&&hasAI() ? '  · all systems go.' : '  · AI parse disabled until a Gemini or OpenRouter key is set.');
   document.getElementById('usdaBtn').disabled = !hasUSDA();
-  document.getElementById('parseBtn').disabled = !hasAI();
+  // A dead send button with no explanation is a dead end — say why it is off.
+  const send = document.getElementById('parseBtn');
+  send.disabled = !hasAI();
+  send.title = hasAI() ? 'Parse meal (Enter)' : 'Add a Gemini or OpenRouter key in ⚙ Settings to parse meals';
+  document.getElementById('nlInput').placeholder = hasAI()
+    ? 'Describe a meal…'
+    : 'No AI key — use ⌃ to search USDA';
 }
 document.getElementById('saveKeys').onclick = ()=>{
   setKey(LS.usda,  document.getElementById('usdaKey').value.trim());
@@ -100,9 +106,33 @@ document.getElementById('usdaBtn').onclick = async ()=>{
   } catch(err){ out.innerHTML = `<div class="tactical bad">${err.message}</div>`; }
 };
 
+// ---- NAVIGATION DRAWER ----------------------------------------------------
+// Sections live in a drawer so the bottom edge can belong to the composer.
+const navToggleBtn = document.getElementById('navToggle');
+const sidebarEl = document.getElementById('sidebar');
+const navBackdropEl = document.getElementById('navBackdrop');
+function navOpen(){
+  if (!sidebarEl.hidden) return;
+  sidebarEl.hidden = false;
+  navBackdropEl.hidden = false;
+  navToggleBtn.setAttribute('aria-expanded', 'true');
+  const cur = sidebarEl.querySelector('[aria-selected="true"]');
+  (cur || sidebarEl.querySelector('button')).focus();
+}
+function navClose(returnFocus){
+  if (sidebarEl.hidden) return;
+  sidebarEl.hidden = true;
+  navBackdropEl.hidden = true;
+  navToggleBtn.setAttribute('aria-expanded', 'false');
+  if (returnFocus) navToggleBtn.focus();
+}
+navToggleBtn.onclick = ()=> sidebarEl.hidden ? navOpen() : navClose(true);
+document.getElementById('navClose').onclick = ()=> navClose(true);
+navBackdropEl.onclick = ()=> navClose(true);
+
 // ---- TABS -----------------------------------------------------------------
-// Four views share one scroll; the bar swaps which <main> is visible. Only the
-// visible tab is rendered, so a keystroke on Today no longer rebuilds the
+// Four views share one scroll; the drawer swaps which <main> is visible. Only
+// the visible tab is rendered, so a keystroke on Today no longer rebuilds the
 // heatmap, the ternary plot and every lift trend.
 const TABS = { today:'tabToday', plan:'tabPlan', lift:'tabLift', trends:'tabTrends' };
 function showTab(name){
@@ -112,28 +142,42 @@ function showTab(name){
     const view = document.getElementById(TABS[t]);
     if (view) view.hidden = (t !== name);
   });
-  document.querySelectorAll('.tabbar button').forEach(b=>
+  document.querySelectorAll('.sidebar-tabs button').forEach(b=>
     b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+  // The composer is a Today control — it is hidden, and its space reclaimed,
+  // everywhere else.
+  const onToday = name === 'today';
+  document.getElementById('composer').hidden = !onToday;
+  document.body.classList.toggle('with-composer', onToday);
+  if (!onToday) closeComposerMenu();
   try{ localStorage.setItem('ledger_tab', name); }catch(e){}
   window.scrollTo({top:0, behavior:'auto'});
   render();   // charts that measure layout (ternary) size correctly when first revealed
 }
-document.querySelectorAll('.tabbar button').forEach(b=>{
-  b.onclick = ()=> showTab(b.dataset.tab);
+document.querySelectorAll('.sidebar-tabs button').forEach(b=>{
+  b.onclick = ()=>{ showTab(b.dataset.tab); navClose(true); };
 });
-// Arrow keys move between tabs, which is what a tablist is expected to do.
-document.querySelector('.tabbar').addEventListener('keydown', ev=>{
+// Arrow keys move between tabs, which is what a vertical tablist is expected to do.
+document.querySelector('.sidebar-tabs').addEventListener('keydown', ev=>{
   const keys = Object.keys(TABS);
   const i = keys.indexOf(ACTIVE_TAB);
   let next = null;
-  if (ev.key === 'ArrowRight') next = keys[(i + 1) % keys.length];
-  else if (ev.key === 'ArrowLeft') next = keys[(i - 1 + keys.length) % keys.length];
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowRight') next = keys[(i + 1) % keys.length];
+  else if (ev.key === 'ArrowUp' || ev.key === 'ArrowLeft') next = keys[(i - 1 + keys.length) % keys.length];
   else if (ev.key === 'Home') next = keys[0];
   else if (ev.key === 'End') next = keys[keys.length - 1];
   if (!next) return;
   ev.preventDefault();
   showTab(next);
   document.getElementById('tabbtn-' + next).focus();
+});
+// Escape closes whichever overlay is open, drawer first. A bottom sheet owns
+// Escape while it is up (openSheet handles it), so defer to it.
+document.addEventListener('keydown', ev=>{
+  if (ev.key !== 'Escape' || _sheetClose) return;
+  if (!sidebarEl.hidden){ ev.preventDefault(); navClose(true); return; }
+  const menu = document.getElementById('composerMenu');
+  if (menu && !menu.hidden){ ev.preventDefault(); closeComposerMenu(true); }
 });
 
 // ---- DAY NAVIGATION -------------------------------------------------------
@@ -142,22 +186,68 @@ document.querySelector('.tabbar').addEventListener('keydown', ev=>{
 document.getElementById('dayPrev').onclick = ()=> viewDay(prevDayStr(VIEW_DATE), true);
 document.getElementById('dayNext').onclick = ()=> viewDay(nextDay(VIEW_DATE), true);
 
-// ---- OMNI-INPUT: reveal the manual USDA search on demand ------------------
+// ---- THE COMPOSER ---------------------------------------------------------
+// One input pinned to the bottom. Enter parses; the ⌃ opens the other ways in —
+// camera, gallery, and the manual USDA search, which used to be a separate
+// button competing with Parse for the same row.
+const nlInputEl = document.getElementById('nlInput');
+const composerMenuEl = document.getElementById('composerMenu');
+const composerMoreBtn = document.getElementById('composerMore');
+
+function closeComposerMenu(returnFocus){
+  if (composerMenuEl.hidden) return;
+  composerMenuEl.hidden = true;
+  composerMoreBtn.setAttribute('aria-expanded', 'false');
+  if (returnFocus) composerMoreBtn.focus();
+}
+composerMoreBtn.onclick = ()=>{
+  const open = composerMenuEl.hidden;
+  composerMenuEl.hidden = !open;
+  composerMoreBtn.setAttribute('aria-expanded', String(open));
+  if (open) composerMenuEl.querySelector('button').focus();
+};
+
+// The bar grows with the text up to a few lines, then scrolls — a chat bar that
+// stays one line when you have typed one line. An empty box drops back to its
+// min-height rather than sizing itself to a placeholder that wraps.
+function autoGrow(){
+  nlInputEl.style.height = '';
+  if (!nlInputEl.value) return;
+  nlInputEl.style.height = 'auto';
+  nlInputEl.style.height = Math.min(nlInputEl.scrollHeight, 132) + 'px';
+}
+nlInputEl.addEventListener('input', autoGrow);
+autoGrow();
+
+// Reveal the manual USDA block (in the page, where it has room) and take the
+// user to it. Called from the ⌃ menu and from the frequent-food chips.
 function openManual(){
-  document.getElementById('manualBlock').hidden = false;
-  const t = document.getElementById('manualToggle');
-  t.classList.add('on');
-  t.setAttribute('aria-expanded', 'true');
+  const blk = document.getElementById('manualBlock');
+  blk.hidden = false;
+  document.getElementById('manualToggle').setAttribute('aria-expanded', 'true');
+  blk.scrollIntoView({ block:'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  return blk;
 }
 document.getElementById('manualToggle').onclick = ()=>{
   const blk = document.getElementById('manualBlock');
-  const open = blk.hidden;
-  blk.hidden = !open;
-  const t = document.getElementById('manualToggle');
-  t.classList.toggle('on', open);
-  t.setAttribute('aria-expanded', String(open));
-  if (open) document.getElementById('usdaSearch').focus();
+  closeComposerMenu();
+  if (blk.hidden){
+    openManual();
+    document.getElementById('usdaSearch').focus({ preventScroll: true });
+  } else {
+    blk.hidden = true;
+    document.getElementById('manualToggle').setAttribute('aria-expanded', 'false');
+  }
 };
+// The photo pickers are wired in food.js; they only need the menu to get out of
+// the way once they have fired.
+['photoBtn','galleryBtn'].forEach(id =>
+  document.getElementById(id).addEventListener('click', ()=> closeComposerMenu()));
+// A click anywhere else dismisses the menu, the way a menu is expected to behave.
+document.addEventListener('click', ev=>{
+  if (composerMenuEl.hidden) return;
+  if (!document.getElementById('composer').contains(ev.target)) closeComposerMenu();
+});
 
 // Ghost needle: while the manual grams field holds a value, show where the
 // instrument will land once this item is added — errors caught before they happen.

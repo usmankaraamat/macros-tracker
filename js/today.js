@@ -355,6 +355,9 @@ function render(){
   computePTarget();          // resolve % protein against the current floor
   refreshTargetLabels();
   updateSuppBadge();         // the nav badge is visible from every tab
+  // Body profile and goal live in Settings now, which is reachable from every
+  // tab — so their readouts are refreshed here rather than by the Trends view.
+  renderTDEE(); renderGoal();
 
   if (ACTIVE_TAB === 'today')       renderToday();
   else if (ACTIVE_TAB === 'plan')   renderPlanTab();
@@ -367,8 +370,6 @@ function renderToday(){
   renderInstrument(t);
   renderMacros(t);
   renderMicros(t);
-  renderDonut();
-  renderGhost();
   renderSuppToday();
   renderLedgerTable();
   renderFrequents();
@@ -575,78 +576,3 @@ function renderMicros(t){
     </div></details>`;
 }
 
-// ---- macro split donut -----------------------------------------------------
-// Achromatic by design: the three macros are distinguished by value on a single
-// chalk ramp, so no hue here competes with the corridor's signal colours.
-function renderDonut() {
-  const wrap = document.getElementById('donutWrap');
-  const t = totals();
-  const pKcal = t.p * 4, fKcal = t.f * 9, cKcal = t.c * 4;
-  const total = pKcal + fKcal + cKcal;
-  if (total < 1) { wrap.innerHTML = ''; wrap.hidden = true; return; }
-  wrap.hidden = false;
-
-  const data = [
-    { label: 'Protein', val: pKcal, color: 'var(--chalk)',    pct: Math.round(pKcal/total*100) },
-    { label: 'Fat',     val: fKcal, color: 'var(--graphite)', pct: Math.round(fKcal/total*100) },
-    { label: 'Carbs',   val: cKcal, color: 'var(--rule-lit)', pct: Math.round(cKcal/total*100) },
-  ];
-
-  const r = 50, cx = 60, cy = 60, sw = 12;
-  let cumAngle = -90;
-  const arcs = data.map(d => {
-    const angle = (d.val / total) * 360;
-    if (angle <= 0) return '';
-    const startRad = cumAngle * Math.PI / 180;
-    const endRad = (cumAngle + Math.min(angle, 359.9)) * Math.PI / 180;
-    cumAngle += angle;
-    const x1 = cx + r * Math.cos(startRad), y1 = cy + r * Math.sin(startRad);
-    const x2 = cx + r * Math.cos(endRad),   y2 = cy + r * Math.sin(endRad);
-    const large = angle > 180 ? 1 : 0;
-    return `<path d="M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2}" fill="none" stroke="${d.color}" stroke-width="${sw}"/>`;
-  });
-
-  const legend = data.map(d =>
-    `<div class="donut-legend-item">
-      <span class="donut-legend-dot" style="background:${d.color}"></span>
-      <span><span class="donut-legend-val">${Math.round(d.val)}</span>
-        <span class="donut-legend-pct">${d.pct}%</span><br>
-        <span class="donut-legend-pct">${d.label}</span></span>
-    </div>`).join('');
-
-  wrap.innerHTML = `<div class="donut-wrap">
-    <svg class="donut-svg" width="120" height="120" viewBox="0 0 120 120" role="img"
-         aria-label="Calorie split: ${data.map(d=>`${d.label} ${d.pct} percent`).join(', ')}">
-      ${arcs.join('')}
-      <text x="${cx}" y="${cy-1}" text-anchor="middle" class="donut-center">${Math.round(t.kcal)}</text>
-      <text x="${cx}" y="${cy+13}" text-anchor="middle" class="donut-center-sub">KCAL</text>
-    </svg>
-    <div class="donut-legend">${legend}</div>
-  </div>`;
-}
-
-// ---- pace vs. yesterday ----------------------------------------------------
-function renderGhost() {
-  const wrap = document.getElementById('ghostWrap');
-  const days = allDays(false);
-  if (!days.length) { wrap.hidden = true; return; }
-
-  const yTotals = totalsOf(days[0].ledger);     // most recent past day
-  const tTotals = totals();
-  if (yTotals.kcal < 1) { wrap.hidden = true; return; }
-  wrap.hidden = false;
-
-  const yPct = Math.min(100, (yTotals.kcal / CEIL) * 100);
-  const tPct = Math.min(100, (tTotals.kcal / CEIL) * 100);
-  document.getElementById('ghostBar').style.width = yPct + '%';
-  const fill = document.getElementById('ghostFill');
-  fill.style.width = tPct + '%';
-  fill.style.background = tTotals.kcal <= CEIL ? 'var(--graphite)' : 'var(--hot)';
-
-  const diff = Math.round(tTotals.kcal - yTotals.kcal);
-  const label = document.getElementById('ghostLabel');
-  if (diff > 0)      label.innerHTML = `<span class="behind">${diff} kcal ahead of yesterday</span>`;
-  else if (diff < 0) label.innerHTML = `<span class="ahead">${Math.abs(diff)} kcal behind yesterday</span>`;
-  else               label.textContent = 'Level with yesterday';
-  document.getElementById('ghostPct').textContent = `${Math.round(tPct)}% of ceiling`;
-}

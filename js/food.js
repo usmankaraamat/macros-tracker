@@ -408,6 +408,7 @@ function commitPending(){
   if (added){
     haptic(); save(); render();
     document.getElementById('nlInput').value = '';
+    autoGrow();                                // collapse the composer back to one line
     setMealPhoto(null);
     toast(`Logged ${added} ${added === 1 ? 'item' : 'items'}`,
       { undo: ()=>{ ledger = before; save(); render(); } });
@@ -463,7 +464,8 @@ document.getElementById('photoGallery').onchange = handlePhotoPick;
 document.getElementById('parseBtn').onclick = async ()=>{
   const text = document.getElementById('nlInput').value.trim();
   const status = document.getElementById('parseStatus');
-  if (!text && !mealPhotoB64){ return; }
+  if (!text && !mealPhotoB64){ document.getElementById('nlInput').focus(); return; }
+  closeComposerMenu();
   busy(status, mealPhotoB64 ? 'Reading photo with AI…' : 'Parsing with AI…');
   const btn = document.getElementById('parseBtn'); btn.disabled = true;
   try {
@@ -495,6 +497,10 @@ document.getElementById('parseBtn').onclick = async ()=>{
     setStatus(status, `${pending.length} item(s) ready via ${AI_VIA} · ${nUsda} matched to USDA, ${pending.length-nUsda} AI-estimated. Check each match in the dropdown, then add.`);
     setMealPhoto(null);                        // consumed — don't leak into the next parse
     renderPending();
+    // The composer is at the bottom of the screen but the review list is up in
+    // the page, so take the user to what they now have to check.
+    document.getElementById('parseStatus').scrollIntoView(
+      { block:'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
   } catch(err){
     setStatus(status, err.message, 'bad');
     pending = []; renderPending();
@@ -517,7 +523,12 @@ document.getElementById('addBtn').onclick = ()=>{
     { undo: ()=>{ ledger.pop(); save(); render(); } });
 };
 
-// Keyboard: Enter logs / searches; Ctrl+Enter parses the meal text.
+// Keyboard: Enter logs / searches. In the composer Enter sends, the way a chat
+// bar does; Shift+Enter is the newline.
 document.getElementById('grams').addEventListener('keydown', e=>{ if (e.key==='Enter') document.getElementById('addBtn').click(); });
 document.getElementById('usdaSearch').addEventListener('keydown', e=>{ if (e.key==='Enter') document.getElementById('usdaBtn').click(); });
-document.getElementById('nlInput').addEventListener('keydown', e=>{ if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) document.getElementById('parseBtn').click(); });
+document.getElementById('nlInput').addEventListener('keydown', e=>{
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  e.preventDefault();
+  document.getElementById('parseBtn').click();
+});
