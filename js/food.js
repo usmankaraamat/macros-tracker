@@ -97,7 +97,7 @@ function pickModel(list){
 }
 
 // ---- Gemini natural-language parse ----
-// Returns items: {name, partOf, grams, weighed, isCurry, est:{per-100g}}. Composite
+// Returns items: {name, partOf, grams, weighed, est:{per-100g}}. Composite
 // dishes are decomposed into base ingredients (USDA only has clean data for simple
 // foods); partOf groups a dish's components in review. est is a fallback used only
 // when USDA has no match — flagged so it never masquerades as authoritative.
@@ -187,14 +187,13 @@ async function aiParse(text, imageB64){
   const prompt =
 `You convert a meal description into structured food items for a macro tracker.
 ${photoClause}
-Break composite or prepared dishes (samosa, biryani, sandwich, burger, pizza slice, curry, paratha, wrap, etc.) into their base single-ingredient components — the nutrient database only has reliable data for simple ingredients, not assembled dishes. Each component gets its own estimated grams; the components of one dish should sum to roughly that dish's total weight. When a dish is fried or oily, add a "cooking oil" component for the absorbed fat.
+Break composite or prepared dishes (samosa, biryani, sandwich, burger, pizza slice, curry, paratha, wrap, etc.) into their base single-ingredient components — the nutrient database only has reliable data for simple ingredients, not assembled dishes. Each component gets its own estimated grams; the components of one dish should sum to roughly that dish's total weight. When a dish is fried, oily, or served in a curry or gravy, add a "cooking oil" component for the absorbed fat — with a realistic gram estimate, since this is the only place that fat gets counted.
 Leave naturally single-ingredient foods (an egg, an apple, grilled chicken, rice, milk) as ONE item — never split those. Also keep everyday breads and flatbreads that the database stores as finished items — chapati, roti, naan, tortilla, pita, plain bread, idli, dosa — as ONE item under their common name (e.g. "chapati", "roti"); do NOT split those into flour and water.
 Never output water, ice, plain black coffee or unsweetened tea, or any other zero-calorie liquid as an item — they carry no macros and only distort the totals.
 Return JSON: {"items":[{"name":<short generic single-ingredient name good for a USDA database search>,`+
 `"partOf":<the dish this component came from, or "" if it was logged as a plain food>,`+
 `"grams":<number, estimate a realistic portion if none is stated>,`+
 `"weighed":<boolean, true ONLY if the user gave an explicit weight/measure for THIS component; a decomposed guess is false>,`+
-`"isCurry":<boolean, true if this component sits in curry/gravy/added oil>,`+
 `"est":{"kcal":<per 100g>,"p":<protein g per 100g>,"f":<fat g per 100g>,"c":<carb g per 100g>}}]}.
 "est" is your best per-100g estimate, used only as a fallback. Output JSON only, no prose.
 Meal: """${text}"""`;
@@ -245,7 +244,6 @@ function syncPendingFromDOM(){
     const g=document.getElementById('pg'+i); if(g && g.value!=='') p.grams=parseFloat(g.value);
     const s=document.getElementById('ps'+i); if(s) p.include=s.checked;
     const w=document.getElementById('pw'+i); if(w) p.weighed=w.checked;
-    const c=document.getElementById('pc'+i); if(c) p.isCurry=c.checked;
     const f=document.getElementById('pf'+i); if(f) p.sel=f.value;
   });
 }
@@ -255,7 +253,7 @@ function pendingTotals(){
   return pending.reduce((t,p)=>{
     if (!p.include || !p.grams || p.grams<=0) return t;
     const r = pendResolve(p);
-    const e = computeEntry(p.name, p.grams, p.weighed, p.isCurry, false, r.base, r.source);
+    const e = computeEntry(p.name, p.grams, p.weighed, r.base, r.source);
     t.kcal+=e.kcal; t.p+=e.p; t.f+=e.f; t.c+=e.c; t.n++;
     return t;
   }, {kcal:0,p:0,f:0,c:0,n:0});
@@ -267,7 +265,7 @@ function pendItemMacroStr(p){
   const g = +p.grams || 0;
   if (!g || g <= 0) return '—';
   const r = pendResolve(p);
-  const e = computeEntry(p.name, g, p.weighed, p.isCurry, false, r.base, r.source);
+  const e = computeEntry(p.name, g, p.weighed, r.base, r.source);
   return `${Math.round(e.kcal)} kcal · ${e.p.toFixed(1)}P · ${e.f.toFixed(1)}F · ${e.c.toFixed(1)}C`;
 }
 // Refresh just the per-item macro lines (grams typing keeps focus, so no full rebuild).
@@ -328,7 +326,6 @@ function renderPendItem(p, i){
     </div>
     <div class="pend-tog">
       <label class="chk"><input type="checkbox" id="pw${i}" ${p.weighed?'checked':''}> weighed</label>
-      <label class="chk"><input type="checkbox" id="pc${i}" ${p.isCurry?'checked':''}> curry</label>
     </div>
     ${warnLine}
   </div>`;
@@ -412,7 +409,7 @@ function commitPending(){
     const r = pendResolve(p);
     const name = r.source==='USDA' ? r.label : p.name;   // log under the real matched food name
     registerFood(name, r.base, r.source);
-    pushEntry(computeEntry(name, p.grams, p.weighed, p.isCurry, false, r.base, r.source));
+    pushEntry(computeEntry(name, p.grams, p.weighed, r.base, r.source));
     added++;
   });
   // Nothing to add means the review isn't finished — keep the list up, or the
@@ -501,7 +498,6 @@ document.getElementById('parseBtn').onclick = async ()=>{
         partOf: (it.partOf || '').trim(),         // dish this component was split from ('' = plain food)
         grams: Number(it.grams) || 0,
         weighed: !!it.weighed,
-        isCurry: !!it.isCurry,
         candidates, estBase,
         // Default to the best plausible USDA match; fall back to the AI estimate when the
         // top match's calories are wildly off the estimate (USDA returned the wrong food).
@@ -525,9 +521,8 @@ document.getElementById('addBtn').onclick = ()=>{
   const name = document.getElementById('food').value;
   const grams = parseFloat(document.getElementById('grams').value);
   if (!grams || grams<=0){ document.getElementById('grams').focus(); return; }
-  // Curry / half-oil flags are AI-parse concepts now; manual adds default to plain weighed food.
   const e = computeEntry(name, grams,
-    document.getElementById('weighed').checked, false, false,
+    document.getElementById('weighed').checked,
     getBase(name), foodSource[name] || 'DB');
   pushEntry(e);
   document.getElementById('grams').value='';

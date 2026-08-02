@@ -82,31 +82,28 @@ check('carb cap 40% of 1700 @4kcal/g = 170g', approx(C.capGrams({mode:'pct',val:
 check('cap of 0 = off', C.capGrams({mode:'g',val:0}, 9, 1700) === 0, '');
 
 // ---- computeEntry: penalties ----
-group('computeEntry — penalties & oil tax');
-const PEN = {inflate:1.1, deduct:0.9, oilK:132, oilF:14};
+group('computeEntry — unweighed penalties');
+const PEN = {inflate:1.1, deduct:0.9};
 const chk = {kcal:165, p:31, f:3.6, c:0};
 (function(){
-  const w = C.computeEntry('Chicken', 150, true, false, false, chk, 'DB', PEN);
+  const w = C.computeEntry('Chicken', 150, true, chk, 'DB', PEN);
   check('weighed 150g chicken: 247.5 kcal', approx(w.kcal, 247.5), `got ${w.kcal.toFixed(1)}`);
   check('weighed 150g chicken: 46.5g P', approx(w.p, 46.5), `got ${w.p.toFixed(1)}`);
   check('weighed entry carries no flags', w.flags.length === 0, '');
 
-  const u = C.computeEntry('Chicken', 150, false, false, false, chk, 'DB', PEN);
+  const u = C.computeEntry('Chicken', 150, false, chk, 'DB', PEN);
   check('unweighed +10% kcal = 272.25', approx(u.kcal, 272.25), `got ${u.kcal.toFixed(2)}`);
   check('unweighed −10% P = 41.85', approx(u.p, 41.85), `got ${u.p.toFixed(2)}`);
-
-  const cu = C.computeEntry('Curry', 150, false, true, false, chk, 'DB', PEN);
-  check('unweighed curry adds 132 kcal oil tax', approx(cu.kcal, 272.25 + 132), `got ${cu.kcal.toFixed(2)}`);
-  check('unweighed curry adds 14g fat', approx(cu.f, 3.6*1.5 + 14), `got ${cu.f.toFixed(2)}`);
-
-  const half = C.computeEntry('Curry', 150, false, true, true, chk, 'DB', PEN);
-  check('half oil tax adds 66 kcal', approx(half.kcal, 272.25 + 66), `got ${half.kcal.toFixed(2)}`);
+  // The oil tax is gone: fat is whatever the food's own base says, never a surcharge.
+  // Absorbed cooking oil is logged as its own ingredient by the parser instead.
+  check('unweighed leaves fat untouched', approx(u.f, 3.6*1.5), `got ${u.f.toFixed(2)}`);
+  check('unweighed flags name only the two penalties', u.flags.length === 1, `got ${u.flags.length}`);
 
   // Micronutrients scale with grams like the macros; a legacy base without them → 0, never NaN.
   const micBase = {kcal:100, p:5, f:2, c:10, fib:2, sug:5, na:400};
-  const mic = C.computeEntry('x', 150, true, false, false, micBase, 'DB', PEN);
+  const mic = C.computeEntry('x', 150, true, micBase, 'DB', PEN);
   check('micros scale at 150g: fib 3, sug 7.5, na 600', approx(mic.fib,3)&&approx(mic.sug,7.5)&&approx(mic.na,600), `got fib${mic.fib} sug${mic.sug} na${mic.na}`);
-  const legacy = C.computeEntry('x', 150, true, false, false, {kcal:100,p:5,f:2,c:10}, 'DB', PEN);
+  const legacy = C.computeEntry('x', 150, true, {kcal:100,p:5,f:2,c:10}, 'DB', PEN);
   check('legacy base without micros → 0 (no NaN)', legacy.fib===0 && legacy.sug===0 && legacy.na===0, '');
 })();
 
@@ -345,8 +342,10 @@ group('ternary — barycentric plot');
 // ---- repairJson: salvaging a malformed model reply ----
 group('repairJson — unbalanced / wrapped JSON');
 (function(){
-  // Verbatim capture from gemini-3.5-flash on this app's own prompt: a complete reply that
-  // simply omits the outer closing brace (finishReason was STOP, not a length cutoff).
+  // Verbatim capture from gemini-3.5-flash on an earlier version of this app's prompt (it
+  // still carries the since-removed isCurry field): a complete reply that simply omits the
+  // outer closing brace (finishReason was STOP, not a length cutoff). Kept as captured —
+  // what is under test is bracket balancing, not the schema.
   const real = '{\n  "items": [\n    {\n      "name": "boiled egg",\n      "partOf": "",\n'
     + '      "grams": 100,\n      "weighed": false,\n      "isCurry": false,\n'
     + '      "est": {\n        "kcal": 155,\n        "p": 13.0,\n        "f": 11.0,\n        "c": 1.1\n      }\n    }\n  ]';

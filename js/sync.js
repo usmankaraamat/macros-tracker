@@ -165,7 +165,7 @@ async function syncNow(){
     load(); updateDayLabel(); render();        // reflect whatever the merge decided for the on-screen day
     const state = { v:1, days: merged.days, meta: merged.meta,
       targets: {floor:FLOOR_M, ceil:CEIL_M, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP, maint:MAINT, profile:PROFILE, goal:GOAL, mealPlan:MEAL_PLAN, train:TRAIN},
-      pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
+      pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100)},
       tUpdated: targetsStamp(),
       templates: templates(), tplUpdated: tplStamp(),
       supps: supps(), suppsUpdated: suppsStamp(),

@@ -291,7 +291,7 @@ function updateProjection(){
   const grams = parseFloat(document.getElementById('grams').value);
   const base = getBase(name);
   if (!name || !base || !grams || grams<=0){ proj.hidden = true; return; }
-  const add = computeEntry(name, grams, document.getElementById('weighed').checked, false, false, base, foodSource[name]||'DB');
+  const add = computeEntry(name, grams, document.getElementById('weighed').checked, base, foodSource[name]||'DB');
   proj.style.left = scalePct(totals().kcal + add.kcal) + '%';
   proj.hidden = false;
 }
@@ -310,8 +310,6 @@ function fillTargetInputs(){
   document.getElementById('tFMode').value = F_CAP.mode;
   document.getElementById('penK').value   = Math.round((INFLATE-1)*100);
   document.getElementById('penP').value   = Math.round((1-DEDUCT)*100);
-  document.getElementById('penOK').value  = OIL_KCAL;
-  document.getElementById('penOF').value  = OIL_FAT;
   fillMealPlan(); fillTrain();
 }
 // Meal plan editor: one "HH:MM kcal Name" per line.
@@ -401,17 +399,15 @@ document.getElementById('saveTrain').onclick = ()=>{
 document.getElementById('savePens').onclick = ()=>{
   const st = document.getElementById('targetStatus');
   const k = +document.getElementById('penK').value, p = +document.getElementById('penP').value;
-  const ok = +document.getElementById('penOK').value, of = +document.getElementById('penOF').value;
-  if ([k,p,ok,of].some(v=>isNaN(v)||v<0) || p>=100){ setStatus(st,'Penalties must be ≥0 (protein cut below 100).','bad'); return; }
-  INFLATE = 1 + k/100; DEDUCT = 1 - p/100; OIL_KCAL = ok; OIL_FAT = of;
+  if ([k,p].some(v=>isNaN(v)||v<0) || p>=100){ setStatus(st,'Penalties must be ≥0 (protein cut below 100).','bad'); return; }
+  INFLATE = 1 + k/100; DEDUCT = 1 - p/100;
   savePens(); render();
-  setStatus(st,`Penalties saved: +${k}% kcal / −${p}% P unweighed · oil ${ok} kcal / ${of}g fat per tbsp. Applies to new entries.`,'good');
+  setStatus(st,`Penalties saved: +${k}% kcal / −${p}% P unweighed. Applies to new entries.`,'good');
 };
 document.getElementById('resetPens').onclick = ()=>{
   INFLATE = 1 + PROTOCOL.penK/100; DEDUCT = 1 - PROTOCOL.penP/100;
-  OIL_KCAL = PROTOCOL.oilK; OIL_FAT = PROTOCOL.oilF;
   savePens(); fillTargetInputs(); render();
-  setStatus(document.getElementById('targetStatus'),'Protocol penalties restored (+10% / −10% · 132 kcal / 14g per tbsp).','good');
+  setStatus(document.getElementById('targetStatus'),'Protocol penalties restored (+10% kcal / −10% P).','good');
 };
 
 document.getElementById('resetBtn').onclick = async ()=>{
@@ -437,7 +433,7 @@ document.getElementById('exportBtn').onclick = async ()=>{
   days[VIEW_DATE] = ledger;                       // the on-screen day's live state wins
   const payload = { exported: dateStr(), version: 2,
     targets: {floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN},
-    pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100), oilK:OIL_KCAL, oilF:OIL_FAT},
+    pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100)},
     weights: weightsMap(), templates: templates(),
     supps: supps(), suppLog: suppLog(),
     workouts: allWorkouts(), wkMeta: workoutMeta(), exercises: exerciseCatalog(),
@@ -478,7 +474,7 @@ document.getElementById('importFile').onchange = (ev)=>{
       const rebuild = l => l.map(e => {
         const base = e.base || DB[e.name];
         return (e.name && base && 'weighed' in e)
-          ? computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source)
+          ? computeEntry(e.name, e.grams, e.weighed, base, e.source)
           : e;
       });
       if (data.days && typeof data.days === 'object') {
@@ -509,8 +505,6 @@ document.getElementById('importFile').onchange = (ev)=>{
         }
         if (data.pen){
           INFLATE = 1 + (+data.pen.k||0)/100; DEDUCT = 1 - (+data.pen.p||0)/100;
-          OIL_KCAL = +data.pen.oilK>=0 ? +data.pen.oilK : OIL_KCAL;
-          OIL_FAT  = +data.pen.oilF>=0 ? +data.pen.oilF : OIL_FAT;
           savePens();
         }
         fillTargetInputs();

@@ -4,7 +4,7 @@
 // ---- CONSTANTS (protocol) ----
 // PROTOCOL holds the authoritative defaults; live targets are user-overridable
 // via Settings and persisted separately, so the protocol itself never mutates.
-const PROTOCOL = { floor:1700, ceil:1900, p:120, penK:10, penP:10, oilK:132, oilF:14 };
+const PROTOCOL = { floor:1700, ceil:1900, p:120, penK:10, penP:10 };
 // FLOOR/CEIL are the EFFECTIVE corridor the whole app reads. FLOOR_M/CEIL_M are the manual
 // base the user set in Settings — kept separate so the adaptive goal can drive FLOOR/CEIL
 // each day without ever overwriting (or persisting over) the hand-entered numbers.
@@ -53,7 +53,6 @@ function computePTarget(){ P_TARGET = LedgerCore.resolvePTarget(P_CFG, FLOOR); }
 // floor (the day is engineered to land there), converted at 4 kcal/g carb, 9 fat.
 let C_CAP = {mode:'g', val:0}, F_CAP = {mode:'g', val:0};
 function capGrams(cap, kcalPerG){ return LedgerCore.capGrams(cap, kcalPerG, FLOOR); }
-let OIL_KCAL = PROTOCOL.oilK, OIL_FAT = PROTOCOL.oilF;   // 1 tbsp hidden oil
 // Maintenance calorie band (kcal/day) for the fat-change estimate. 0 = unset. Rides
 // with the targets bundle so it persists and syncs across devices like the other goals.
 let MAINT = {min:0, max:0};
@@ -82,8 +81,8 @@ function loadTargets(){
                         start:String(tn.start||'18:00'), end:String(tn.end||'20:00'),
                         cycle:!!tn.cycle, trainOffset:+tn.trainOffset||0, restOffset:+tn.restOffset||0 }; } }
     const pn = JSON.parse(localStorage.getItem('ledger_pen')||'null');
-    if (pn){ INFLATE = 1 + (+pn.k||0)/100; DEDUCT = 1 - (+pn.p||0)/100;
-             OIL_KCAL = +pn.oilK>=0 ? +pn.oilK : OIL_KCAL; OIL_FAT = +pn.oilF>=0 ? +pn.oilF : OIL_FAT; }
+    // pn.oilK / pn.oilF may still be present from before the oil tax was dropped; ignored.
+    if (pn){ INFLATE = 1 + (+pn.k||0)/100; DEDUCT = 1 - (+pn.p||0)/100; }
   } catch(e){}
 }
 function saveTargets(){
@@ -92,7 +91,7 @@ function saveTargets(){
 }
 function savePens(){
   try { localStorage.setItem('ledger_pen', JSON.stringify({
-    k: Math.round((INFLATE-1)*100), p: Math.round((1-DEDUCT)*100), oilK: OIL_KCAL, oilF: OIL_FAT })); } catch(e){}
+    k: Math.round((INFLATE-1)*100), p: Math.round((1-DEDUCT)*100) })); } catch(e){}
   stampTargets(); scheduleSync();
 }
 function refreshTargetLabels(){

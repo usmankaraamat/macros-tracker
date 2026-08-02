@@ -339,7 +339,7 @@ async function editEntryGrams(i){
     return;
   }
   const prev = ledger[i];
-  const next = computeEntry(e.name, g, e.weighed, e.isCurry, e.halfOil, base, e.source);
+  const next = computeEntry(e.name, g, e.weighed, base, e.source);
   next.at = e.at;
   ledger[i] = next;
   save(); render();
@@ -440,7 +440,7 @@ function wireEmptyLedgerChips(){
       const e = f.e, base = e.base || DB[e.name];
       if (!base) return;
       if (!foodBase[e.name]) registerFood(e.name, base, e.source);
-      pushEntry(computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source));
+      pushEntry(computeEntry(e.name, e.grams, e.weighed, base, e.source));
       haptic(); save(); render();
       toast(`Logged ${e.name} · ${e.grams}g`);
     };
@@ -483,7 +483,7 @@ document.getElementById('saveTplBtn').onclick = async ()=>{
   if (!res) return;
   const name = res.name;
   const items = res.indices.map(i=>snapshot[i]).map(e=>({ name:e.name, grams:e.grams, weighed:e.weighed,
-    isCurry:e.isCurry, halfOil:e.halfOil, base:e.base||getBase(e.name), source:e.source }));
+    base:e.base||getBase(e.name), source:e.source }));
   const existed = templates().some(t => t.name === name);
   const list = templates().filter(t=>t.name!==name);   // same name = overwrite
   list.push({name, items});
@@ -497,7 +497,7 @@ function renderTemplates(){
   wrap.hidden = false;
   syncAddPanel();
   wrap.innerHTML = list.map((t,i)=>{
-    const kcal = Math.round(t.items.reduce((s,e)=> s + (e.base ? computeEntry(e.name,e.grams,e.weighed,e.isCurry,e.halfOil,e.base,e.source).kcal : 0), 0));
+    const kcal = Math.round(t.items.reduce((s,e)=> s + (e.base ? computeEntry(e.name,e.grams,e.weighed,e.base,e.source).kcal : 0), 0));
     return `<span class="chip">
       <button type="button" class="chip-main" data-tpl="${i}" style="all:unset;cursor:pointer">★ ${escapeHtml(t.name)} <small>${t.items.length} items · ${kcal} kcal</small></button>
       <button type="button" class="icon-btn" data-tpldel="${i}" aria-label="Delete usual ${escapeAttr(t.name)}" title="Delete usual">✕</button>
@@ -523,7 +523,7 @@ function renderTemplates(){
         const base = e.base || DB[e.name];
         if (!base) return;
         if (e.base) registerFood(e.name, e.base, e.source);
-        pushEntry(computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source));
+        pushEntry(computeEntry(e.name, e.grams, e.weighed, base, e.source));
         added++;
       });
       if (!added){

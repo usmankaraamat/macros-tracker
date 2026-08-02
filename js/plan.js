@@ -510,7 +510,7 @@ document.getElementById('ternAdd').onclick = ()=>{
   tState.foods.forEach((name,i)=>{
     const g = Math.round(grams[i]);
     if (g < 1) return;
-    pushEntry(computeEntry(name, g, true, false, false, getBase(name), foodSource[name] || 'DB'));
+    pushEntry(computeEntry(name, g, true, getBase(name), foodSource[name] || 'DB'));
     added++;
   });
   if (!added){

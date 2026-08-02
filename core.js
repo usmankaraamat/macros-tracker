@@ -46,12 +46,12 @@
   }
 
   // ---- Per-entry contribution with penalties -------------------------------
-  // base = per-100g nutrients; pen = {inflate, deduct, oilK, oilF}. source tags
-  // provenance so AI estimates read as provisional.
-  function computeEntry(name, grams, weighed, isCurry, halfOil, base, source, pen) {
+  // base = per-100g nutrients; pen = {inflate, deduct}. source tags provenance so
+  // AI estimates read as provisional.
+  function computeEntry(name, grams, weighed, base, source, pen) {
     const s = grams / 100;
     const e = {
-      name, grams, weighed, isCurry, halfOil, base, source: source || 'DB',
+      name, grams, weighed, base, source: source || 'DB',
       kcal: base.kcal * s, p: base.p * s, f: base.f * s,
       c: (base.c || 0) * s, ca: (base.ca || 0) * s, ph: (base.ph || 0) * s,
       fib: (base.fib || 0) * s, sug: (base.sug || 0) * s, na: (base.na || 0) * s,
@@ -61,11 +61,6 @@
     if (!weighed) {
       e.kcal *= pen.inflate; e.p *= pen.deduct;
       e.flags.push(`+${Math.round((pen.inflate - 1) * 100)}% kcal / −${Math.round((1 - pen.deduct) * 100)}% P`);
-    }
-    if (isCurry && !weighed) {
-      const mult = halfOil ? 0.5 : 1;
-      e.kcal += pen.oilK * mult; e.f += pen.oilF * mult;
-      e.flags.push(`+${mult} tbsp oil tax`);
     }
     if (e.source === 'AI est') e.flags.push('AI-estimated nutrition — provisional');
     return e;

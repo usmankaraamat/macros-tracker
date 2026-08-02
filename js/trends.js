@@ -55,7 +55,7 @@ function renderHistory(){
         const base = e.base || DB[e.name];
         if (!base) return;
         if (e.base) registerFood(e.name, e.base, e.source);
-        pushEntry(computeEntry(e.name, e.grams, e.weighed, e.isCurry, e.halfOil, base, e.source));
+        pushEntry(computeEntry(e.name, e.grams, e.weighed, base, e.source));
         added++;
       });
       if (!added){ toast(`Nothing on ${d.date} has usable nutrition data.`, { tone:'warn' }); return; }
