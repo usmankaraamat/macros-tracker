@@ -189,6 +189,109 @@ function alertSheet(o){
   }).then(()=> undefined);
 }
 
+// pickSheet({...}) -> Promise<{name, indices}|null>. Null means cancelled.
+// A prompt with a manifest: choose which of a list of rows the action applies
+// to, and optionally name the result. `o.summary(indices)` supplies the live
+// count line, so this stays ignorant of what is being counted.
+function pickSheet(o){
+  return openSheet((sheet, close)=>{
+    sheetHead(sheet, o.title, o.body);
+
+    const items = o.items || [];
+    const on = items.map(it => it.checked !== false);
+    const boxes = [];
+
+    // All / None, because isolating one meal out of a whole day's ledger should
+    // not mean unticking eleven rows by hand.
+    const head = document.createElement('div');
+    head.className = 'pick-head';
+    const count = document.createElement('span');
+    count.className = 'pick-count';
+    const toggleAll = document.createElement('button');
+    toggleAll.type = 'button';
+    toggleAll.className = 'sm ghost';
+    head.appendChild(count);
+    head.appendChild(toggleAll);
+    sheet.appendChild(head);
+
+    const list = document.createElement('div');
+    list.className = 'sheet-pick';
+    items.forEach((it, i)=>{
+      const row = document.createElement('label');
+      row.className = 'pick-row';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = on[i];
+      box.onchange = ()=>{ on[i] = box.checked; sync(); };
+      boxes.push(box);
+      const label = document.createElement('span');
+      label.className = 'pick-name';
+      label.textContent = it.label;
+      row.appendChild(box);
+      row.appendChild(label);
+      if (it.sub){
+        const sub = document.createElement('span');
+        sub.className = 'pick-sub num';
+        sub.textContent = it.sub;
+        row.appendChild(sub);
+      }
+      list.appendChild(row);
+    });
+    sheet.appendChild(list);
+
+    let input = null;
+    if (o.label != null || o.placeholder != null){
+      const field = document.createElement('div');
+      field.className = 'sheet-field';
+      const id = 'pickField' + Date.now();
+      if (o.label){
+        const lab = document.createElement('label');
+        lab.setAttribute('for', id);
+        lab.textContent = o.label;
+        field.appendChild(lab);
+      }
+      input = document.createElement('input');
+      input.id = id;
+      input.type = 'text';
+      input.value = o.value == null ? '' : String(o.value);
+      input.placeholder = o.placeholder || '';
+      input.autocomplete = 'off';
+      field.appendChild(input);
+      sheet.appendChild(field);
+    }
+
+    const picked = ()=> on.map((v,i)=> v ? i : -1).filter(i => i >= 0);
+    const submit = ()=>{
+      const idx = picked();
+      if (!idx.length) return;                 // guarded by a disabled button too
+      const name = input ? input.value.trim() : '';
+      if (o.required && input && !name){ input.focus(); return; }
+      close({ name, indices: idx });
+    };
+    if (input) input.addEventListener('keydown', ev=>{
+      if (ev.key === 'Enter'){ ev.preventDefault(); submit(); }
+    });
+    const ok = sheetActions(sheet, o.confirmLabel || 'Save', o.cancelLabel, null,
+      submit, ()=> close(null));
+
+    function sync(){
+      const idx = picked();
+      const all = idx.length === items.length;
+      count.textContent = o.summary ? o.summary(idx) : `${idx.length} of ${items.length} selected`;
+      toggleAll.textContent = all ? 'None' : 'All';
+      toggleAll.setAttribute('aria-label', all ? 'Deselect all' : 'Select all');
+      ok.disabled = !idx.length;
+    }
+    toggleAll.onclick = ()=>{
+      const target = picked().length !== items.length;
+      on.forEach((v,i)=>{ on[i] = target; boxes[i].checked = target; });
+      sync();
+    };
+    sync();
+    return input;
+  });
+}
+
 // promptSheet({...}) -> Promise<string|null>. Null means cancelled.
 function promptSheet(o){
   return openSheet((sheet, close)=>{

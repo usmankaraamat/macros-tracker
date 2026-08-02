@@ -351,7 +351,7 @@ async function researchPending(i){
 }
 function renderPending(){
   const wrap = document.getElementById('pending');
-  if (!pending.length){ wrap.innerHTML=''; return; }
+  if (!pending.length){ wrap.innerHTML=''; syncComposerTray(); return; }
   // Order into blocks: each dish (non-empty partOf) collects its components in first-seen
   // order; plain foods are their own singleton blocks. Ids stay keyed on the pending index.
   const blocks = [], seen = {};
@@ -372,14 +372,19 @@ function renderPending(){
       ${items}
     </div>`;
   }).join('')
-  + `<div id="pendSummaryWrap"></div>`
-  + `<div class="footer-actions" style="margin-top:8px">
-       <button id="addPendingBtn">Add selected to ledger</button>
-       <button class="ghost" id="discardBtn">Discard</button>
+  // Totals and the two verdict buttons stay pinned to the foot of the tray: with
+  // a dish split into eight ingredients, "what will this do to my day" and "add
+  // it" must not be something you have to scroll a list to reach.
+  + `<div class="pend-foot">
+       <div id="pendSummaryWrap"></div>
+       <div class="footer-actions">
+         <button id="addPendingBtn">Add selected to ledger</button>
+         <button class="ghost" id="discardBtn">Discard</button>
+       </div>
      </div>`;
   updatePendSummary();
   document.getElementById('addPendingBtn').onclick = commitPending;
-  document.getElementById('discardBtn').onclick = ()=>{ pending=[]; renderPending(); };
+  document.getElementById('discardBtn').onclick = clearParseReview;
   wrap.querySelectorAll('[data-research]').forEach(btn=>{
     btn.onclick = ()=> researchPending(+btn.dataset.research);
   });
@@ -391,6 +396,13 @@ function renderPending(){
   // so an in-progress query isn't wiped when it loses focus.
   wrap.oninput  = ev => { if (ev.target.id && ev.target.id.startsWith('pq')) return; syncPendingFromDOM(); updatePendItemMacros(); updatePendSummary(); };
   wrap.onchange = ev => { if (ev.target.id && ev.target.id.startsWith('pq')) return; syncPendingFromDOM(); renderPending(); };
+  syncComposerTray();
+}
+// Put the composer back to a bare input: no status, no list, tray closed.
+function clearParseReview(){
+  pending = [];
+  setStatus(document.getElementById('parseStatus'), '');
+  renderPending();
 }
 function commitPending(){
   syncPendingFromDOM();
@@ -403,18 +415,20 @@ function commitPending(){
     pushEntry(computeEntry(name, p.grams, p.weighed, p.isCurry, false, r.base, r.source));
     added++;
   });
-  const before = ledger.slice(0, ledger.length - added);
-  pending = []; renderPending();
-  if (added){
-    haptic(); save(); render();
-    document.getElementById('nlInput').value = '';
-    autoGrow();                                // collapse the composer back to one line
-    setMealPhoto(null);
-    toast(`Logged ${added} ${added === 1 ? 'item' : 'items'}`,
-      { undo: ()=>{ ledger = before; save(); render(); } });
-  } else {
+  // Nothing to add means the review isn't finished — keep the list up, or the
+  // advice to tick an item would be about a list that just vanished.
+  if (!added){
     toast('Nothing selected — tick at least one item and give it grams.', { tone:'warn' });
+    return;
   }
+  const before = ledger.slice(0, ledger.length - added);
+  clearParseReview();
+  haptic(); save(); render();
+  document.getElementById('nlInput').value = '';
+  autoGrow();                                  // collapse the composer back to one line
+  setMealPhoto(null);
+  toast(`Logged ${added} ${added === 1 ? 'item' : 'items'}`,
+    { undo: ()=>{ ledger = before; save(); render(); } });
 }
 
 // ---- Meal photo: downscaled client-side, sent to Gemini alongside the text ----
@@ -456,6 +470,7 @@ async function handlePhotoPick(ev){
   const status = document.getElementById('parseStatus');
   try { setMealPhoto(await shrinkImage(file), file.name); setStatus(status, 'Photo attached — add notes if you like, then Parse meal.'); }
   catch(e){ setStatus(status, e.message, 'bad'); }
+  syncComposerTray();
 }
 document.getElementById('photoFile').onchange = handlePhotoPick;
 document.getElementById('photoGallery').onchange = handlePhotoPick;
@@ -467,6 +482,7 @@ document.getElementById('parseBtn').onclick = async ()=>{
   if (!text && !mealPhotoB64){ document.getElementById('nlInput').focus(); return; }
   closeComposerMenu();
   busy(status, mealPhotoB64 ? 'Reading photo with AI…' : 'Parsing with AI…');
+  syncComposerTray();                          // the tray is where progress shows
   const btn = document.getElementById('parseBtn'); btn.disabled = true;
   try {
     const items = await aiParse(text, mealPhotoB64);
@@ -494,13 +510,11 @@ document.getElementById('parseBtn').onclick = async ()=>{
       });
     }
     const nUsda = pending.filter(p=>p.sel!=='est').length;
-    setStatus(status, `${pending.length} item(s) ready via ${AI_VIA} · ${nUsda} matched to USDA, ${pending.length-nUsda} AI-estimated. Check each match in the dropdown, then add.`);
+    // Terse: the tray is short and the list below it now says "check me" on its
+    // own, so the status line reports provenance and gets out of the way.
+    setStatus(status, `${pending.length} item${pending.length>1?'s':''} via ${AI_VIA} · ${nUsda} USDA, ${pending.length-nUsda} AI-estimated`);
     setMealPhoto(null);                        // consumed — don't leak into the next parse
-    renderPending();
-    // The composer is at the bottom of the screen but the review list is up in
-    // the page, so take the user to what they now have to check.
-    document.getElementById('parseStatus').scrollIntoView(
-      { block:'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    renderPending();                           // opens the tray under the bar; no page jump
   } catch(err){
     setStatus(status, err.message, 'bad');
     pending = []; renderPending();

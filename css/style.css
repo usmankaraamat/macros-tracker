@@ -1333,9 +1333,36 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 
 .composer .photo-chip { margin: 0 0 10px; }
 
-/* The composer only exists on Today, so only Today reserves room for it. */
-body.with-composer { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
-body.with-composer .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
+/* The review tray. It scrolls on its own so the bar above it never leaves the
+   screen: however many ingredients the AI split a dish into, the input and the
+   Add button stay reachable without scrolling the document. */
+.composer-tray {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  max-height: min(58vh, 460px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  animation: trayIn 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes trayIn { from { opacity: 0; transform: translateY(8px); } }
+.composer-tray #pending:not(:empty) { margin-top: 12px; }
+.pend-foot {
+  position: sticky;
+  bottom: 0;
+  margin-top: 10px;
+  padding-top: 9px;
+  background: var(--bench);
+  border-top: 1px solid var(--rule);
+}
+.pend-foot .footer-actions { margin-top: 8px; }
+
+/* The composer only exists on Today, so only Today reserves room for it — and
+   it reserves the height the composer actually has, which the tray and a
+   wrapped textarea both change. A fixed number leaves the last ledger row
+   stranded under the bar. */
+body.with-composer { padding-bottom: calc(var(--composer-h, 88px) + 20px); }
+body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
 
 /* ======================= sheets, toasts, undo =========================== */
 
@@ -1372,6 +1399,58 @@ body.with-composer .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
 .sheet p b { color: var(--chalk); font-weight: 600; }
 .sheet .sheet-field { margin-bottom: 16px; }
 .sheet .footer-actions { margin-top: 4px; }
+
+/* Pick list: the manifest a sheet acts on. Rows are the ledger's own reading —
+   name on the left, the numbers right-aligned in the data face — so ticking one
+   here is recognisably the same entry you logged. */
+.pick-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.pick-count {
+  font-family: var(--data);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.sheet-pick {
+  max-height: 42dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+}
+/* A <label> for the whole row so the tap target is the row, not the box — which
+   means undoing the form-label typography it would otherwise inherit. A food
+   name has to read exactly as it does in the ledger, case and all. */
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--tap);
+  margin-bottom: 0;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+  font-family: var(--body);
+  font-size: 13px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--chalk);
+}
+.pick-row:last-child { border-bottom: none; }
+.pick-row:hover { background: var(--chalk-wash); }
+.pick-row input { width: auto; flex: none; }
+.pick-name { flex: 1; min-width: 0; font-size: 13px; }
+.pick-sub { flex: none; font-size: 11px; color: var(--faint); }
+/* Unticked reads as excluded rather than merely unchecked. */
+.pick-row:not(:has(input:checked)) .pick-name,
+.pick-row:not(:has(input:checked)) .pick-sub { color: var(--faint); opacity: 0.55; }
 
 /* Toast carries the undo. Destructive actions are reversible for 6 seconds,
    which is a better guard than a confirm dialog nobody reads. */

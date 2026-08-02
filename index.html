@@ -286,18 +286,14 @@
     <div class="supp-strip-today" id="suppTodayStrip"></div>
   </section>
 
-  <!-- LOGGING. The meal composer itself is pinned to the bottom of the screen;
-       what stays here is everything that needs room: one-tap repeats, the AI's
-       parse output awaiting review, and the manual USDA search. -->
+  <!-- LOGGING. The composer at the bottom owns the AI path end to end, review
+       list included. What stays here is what needs the page's full width and
+       is not part of that flow: one-tap repeats and the manual USDA search.
+       The panel hides itself when it holds neither. -->
   <section class="panel" id="addPanel">
     <span class="panel-title">Log a meal</span>
     <div class="chips" id="tplChips" hidden></div>
     <div class="chips" id="freqChips" hidden></div>
-    <!-- Two pickers: camera (capture) forces the camera on mobile; gallery opens the library. -->
-    <input type="file" id="photoFile" accept="image/*" capture="environment" hidden>
-    <input type="file" id="photoGallery" accept="image/*" hidden>
-    <div class="tactical" id="parseStatus" hidden></div>
-    <div id="pending" style="margin-top:12px"></div>
 
     <!-- Manual USDA logging — revealed from the composer's ⌃ menu -->
     <div id="manualBlock" hidden style="margin-top:16px;border-top:1px solid var(--rule);padding-top:16px">
@@ -568,6 +564,9 @@
 </main>
 
 <input type="file" id="importFile" accept="application/json" hidden>
+<!-- Two pickers: camera (capture) forces the camera on mobile; gallery opens the library. -->
+<input type="file" id="photoFile" accept="image/*" capture="environment" hidden>
+<input type="file" id="photoGallery" accept="image/*" hidden>
 
 <!-- ============================ MEAL COMPOSER ============================ -->
 <!-- Pinned to the bottom, because describing a meal is what this app is for.
@@ -589,6 +588,13 @@
     <button type="button" id="parseBtn" class="composer-send" title="Parse meal (Enter)" aria-label="Parse meal">↵</button>
     <button type="button" id="composerMore" class="composer-more" aria-expanded="false"
             aria-controls="composerMenu" aria-label="More ways to log" title="Photo, gallery, USDA search">⌃</button>
+  </div>
+  <!-- What the AI came back with. It grows downward from the bar, so the bar
+       rises and the items you now have to check land under your thumb — no
+       jump to some panel halfway up the page. -->
+  <div class="composer-tray" id="composerTray" hidden>
+    <div class="tactical" id="parseStatus" hidden></div>
+    <div id="pending"></div>
   </div>
 </div>
 

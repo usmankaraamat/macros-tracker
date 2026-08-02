@@ -150,6 +150,7 @@ function showTab(name){
   document.getElementById('composer').hidden = !onToday;
   document.body.classList.toggle('with-composer', onToday);
   if (!onToday) closeComposerMenu();
+  measureComposer();
   try{ localStorage.setItem('ledger_tab', name); }catch(e){}
   window.scrollTo({top:0, behavior:'auto'});
   render();   // charts that measure layout (ternary) size correctly when first revealed
@@ -219,12 +220,42 @@ function autoGrow(){
 nlInputEl.addEventListener('input', autoGrow);
 autoGrow();
 
+// The review tray is open exactly when the composer has something to say — a
+// status line, a parsed list, or both. Everything that writes either one calls
+// this rather than touching `hidden` itself.
+function syncComposerTray(){
+  const tray = document.getElementById('composerTray');
+  const status = document.getElementById('parseStatus');
+  const wasOpen = !tray.hidden;
+  tray.hidden = status.hidden && !pending.length;
+  if (!tray.hidden && !wasOpen) tray.scrollTop = 0;
+  measureComposer();
+}
+// Publish the composer's real height so the page can reserve it. offsetHeight
+// already includes the safe-area padding, so the CSS must not add it again.
+function measureComposer(){
+  document.documentElement.style.setProperty('--composer-h',
+    Math.round(document.getElementById('composer').offsetHeight) + 'px');
+}
+if (window.ResizeObserver) new ResizeObserver(measureComposer).observe(document.getElementById('composer'));
+window.addEventListener('resize', measureComposer);
+measureComposer();
+
+// "Log a meal" holds only the chips and the manual USDA block now. With both
+// away it is a heading over nothing, so it steps out.
+function syncAddPanel(){
+  const empty = ['tplChips','freqChips','manualBlock']
+    .every(id => document.getElementById(id).hidden);
+  document.getElementById('addPanel').hidden = empty;
+}
+
 // Reveal the manual USDA block (in the page, where it has room) and take the
 // user to it. Called from the ⌃ menu and from the frequent-food chips.
 function openManual(){
   const blk = document.getElementById('manualBlock');
   blk.hidden = false;
   document.getElementById('manualToggle').setAttribute('aria-expanded', 'true');
+  syncAddPanel();
   blk.scrollIntoView({ block:'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
   return blk;
 }
@@ -237,6 +268,7 @@ document.getElementById('manualToggle').onclick = ()=>{
   } else {
     blk.hidden = true;
     document.getElementById('manualToggle').setAttribute('aria-expanded', 'false');
+    syncAddPanel();
   }
 };
 // The photo pickers are wired in food.js; they only need the menu to get out of

@@ -387,8 +387,9 @@ function renderFrequents(){
     if (!last[e.name]) last[e.name] = e;
   }));
   const top = Object.keys(count).sort((a,b)=>count[b]-count[a]).slice(0,6);
-  if (!top.length){ wrap.hidden = true; wrap.innerHTML=''; return; }
+  if (!top.length){ wrap.hidden = true; wrap.innerHTML=''; syncAddPanel(); return; }
   wrap.hidden = false;
+  syncAddPanel();
   wrap.innerHTML = top.map((n,i)=>
     `<button type="button" class="chip" data-n="${i}">${escapeHtml(n)} <small>${last[n].grams}g</small></button>`).join('');
   wrap.querySelectorAll('.chip').forEach((ch,i)=>{
@@ -461,28 +462,40 @@ document.getElementById('saveTplBtn').onclick = async ()=>{
     toast('Log something first — a usual is a saved set of entries.', { tone: 'warn' });
     return;
   }
-  const name = await promptSheet({
+  // A day's ledger is several meals, not one. Pick the entries this usual is
+  // made of — everything is ticked to start, so saving the whole day stays one tap.
+  const snapshot = ledger.slice();
+  const res = await pickSheet({
     title: 'Save as a usual',
-    body: `${ledger.length} ${ledger.length === 1 ? 'entry' : 'entries'} will be saved together and logged in one tap.`,
+    body: 'Tick the entries this usual is made of. Tapping it later logs exactly these.',
+    items: snapshot.map(e=>({
+      label: e.name,
+      sub: `${Math.round(e.grams)}g · ${Math.round(e.kcal)} kcal`,
+      checked: true
+    })),
+    summary: idx => `${idx.length} of ${snapshot.length} · ${Math.round(
+      idx.reduce((s,i)=> s + (snapshot[i].kcal || 0), 0))} kcal`,
     label: 'Name',
     placeholder: 'usual breakfast',
     confirmLabel: 'Save usual',
     required: true
   });
-  if (!name) return;
-  const items = ledger.map(e=>({ name:e.name, grams:e.grams, weighed:e.weighed,
+  if (!res) return;
+  const name = res.name;
+  const items = res.indices.map(i=>snapshot[i]).map(e=>({ name:e.name, grams:e.grams, weighed:e.weighed,
     isCurry:e.isCurry, halfOil:e.halfOil, base:e.base||getBase(e.name), source:e.source }));
   const existed = templates().some(t => t.name === name);
   const list = templates().filter(t=>t.name!==name);   // same name = overwrite
   list.push({name, items});
   saveTemplates(list);
-  toast(existed ? `Updated “${name}”` : `Saved “${name}”`);
+  toast(`${existed ? 'Updated' : 'Saved'} “${name}” · ${items.length} item${items.length>1?'s':''}`);
 };
 function renderTemplates(){
   const wrap = document.getElementById('tplChips');
   const list = templates();
-  if (!list.length){ wrap.hidden = true; wrap.innerHTML=''; return; }
+  if (!list.length){ wrap.hidden = true; wrap.innerHTML=''; syncAddPanel(); return; }
   wrap.hidden = false;
+  syncAddPanel();
   wrap.innerHTML = list.map((t,i)=>{
     const kcal = Math.round(t.items.reduce((s,e)=> s + (e.base ? computeEntry(e.name,e.grams,e.weighed,e.isCurry,e.halfOil,e.base,e.source).kcal : 0), 0));
     return `<span class="chip">
