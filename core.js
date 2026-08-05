@@ -167,15 +167,67 @@
       .sort((a, b) => b.s - a.s || a.i - b.i)      // best score first; USDA relevance breaks ties
       .map(x => x.f);
   }
+  // ---- Pinned USDA entries -------------------------------------------------
+  // A few ingredients resolve wrong no matter how the generic ranker is tuned, because
+  // the ranker's own heuristics fight the right answer. "chicken breast" is the standing
+  // case: USDA's raw entry is shorter (fewer-words bonus) AND collects the +6 `raw` bonus,
+  // so it beats every cooked entry — but nobody logs raw chicken. Raw meat carries the
+  // water that cooking drives off, so per 100g it reads materially lower in both kcal and
+  // protein than the cooked weight actually on the plate: the ledger under-counts both.
+  //
+  // A pin hardcodes the exact USDA description to use for an ingredient. It rewrites the
+  // search query (so the entry is in the result set at all) and then wins the default
+  // pick outright — ahead of ranking and ahead of the plausibility check below.
+  const FOOD_PINS = [{
+    id: 'chicken-breast-cooked',
+    // Any chicken, EXCEPT cuts and preparations that are a genuinely different food.
+    // Forcing breast-meat-only onto "chicken thigh" or "fried chicken" would trade one
+    // wrong number for a worse one, so those keep the normal ranked search.
+    when: /\bchicken\b/,
+    not: /\b(thighs?|drumsticks?|wings?|legs?|livers?|hearts?|gizzards?|skin|whole|ground|minced?|nuggets?|patty|patties|sausages?|salami|bacon|broth|stock|soup|fried|breaded)\b/,
+    // ("grilled" / "roasted" / "tandoori" chicken is still chicken breast in practice and the
+    // cooked entry is the right answer for it — only coatings, organs and other cuts are out.)
+    query: 'Chicken, broilers or fryers, breast, meat only, cooked, stewed',
+    // Must name the cooking method: USDA carries roasted/stewed/fried variants of the
+    // identical cut, and a looser pattern silently pins whichever one ranks first.
+    pick: /chicken.*breast.*meat only.*cooked.*stewed/
+  }];
+  // The pin that applies to a search query, or null. Longest-standing behaviour when
+  // nothing matches: the ordinary ranked search, untouched.
+  function foodPin(query) {
+    const q = ' ' + (query || '').toLowerCase() + ' ';
+    return FOOD_PINS.find(p => p.when.test(q) && !(p.not && p.not.test(q))) || null;
+  }
+  function pinMatches(food, pin) {
+    return !!(pin && food && pin.pick.test((food.name || '').toLowerCase()));
+  }
+  // Move the pinned entry to the front of a ranked list. Returns the list untouched when
+  // USDA didn't return it — a pin expresses a preference among real results, it never
+  // fabricates one.
+  function applyPin(ranked, pin) {
+    if (!pin || !ranked || !ranked.length) return ranked || [];
+    const i = ranked.findIndex(f => pinMatches(f, pin));
+    if (i <= 0) return ranked;
+    const out = ranked.slice();
+    out.unshift(out.splice(i, 1)[0]);
+    return out;
+  }
+
   // Given ranked candidates and a trusted AI per-100g calorie prior, decide the DEFAULT
   // pick. USDA sometimes returns the wrong food entirely — a generic "water" at 40 kcal,
   // a cousin ingredient — and ranking alone can still float it to the top. When the best
   // match's energy density is implausibly far from the prior, prefer the highest-ranked
   // candidate that DOES land near it; if none do, trust the AI estimate over a clearly
   // wrong match. Returns 'u<index>' for candidates[index], or 'est' for the AI estimate.
+  // pin (optional): when the pinned entry is present it is the answer, full stop — it is
+  // a deliberate hardcoding and outranks the estimate-plausibility check.
   const SEL_LN_TOL = Math.log(1.8);   // >1.8x or <0.55x off the prior = wrong food, not mere imprecision
-  function defaultSelection(ranked, estKcal) {
+  function defaultSelection(ranked, estKcal, pin) {
     if (!ranked || !ranked.length) return 'est';
+    if (pin) {
+      const p = ranked.findIndex(f => pinMatches(f, pin));
+      if (p >= 0) return 'u' + p;
+    }
     if (!(estKcal > 0)) return 'u0';                    // no prior to judge against — keep top match
     const within = f => { const k = f.base && f.base.kcal; return k > 0 && Math.abs(Math.log(k / estKcal)) <= SEL_LN_TOL; };
     if (within(ranked[0])) return 'u0';                 // best match already plausible
@@ -886,6 +938,7 @@
   return {
     nutrientsFrom, resolvePTarget, capGrams, computeEntry,
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
+    FOOD_PINS, foodPin, pinMatches, applyPin,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
     supplementDue, supplementNextDue, supplementWindow, supplementStats, isoWeekdayMon,
     repairJson, median, linearTrend,

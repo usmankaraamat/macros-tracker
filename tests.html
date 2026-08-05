@@ -184,6 +184,67 @@ group('defaultSelection — reject a wrong top match, prefer the estimate');
     C.defaultSelection([mk('Water',40), mk('Broth',12)], 300)==='est', 'expected est');
 })();
 
+// ---- Pinned USDA entries: chicken always resolves to the cooked breast ----
+group('foodPin / applyPin — chicken pins to cooked breast, other cuts do not');
+(function(){
+  const mk = (name,kcal)=>({name, base:{kcal, p:0, f:0, c:0}});
+  const RAW    = mk('Chicken, broilers or fryers, breast, meat only, raw', 114);
+  const STEWED = mk('Chicken, broilers or fryers, breast, meat only, cooked, stewed', 151);
+  const FRIED  = mk('Chicken, breaded, fried', 290);
+
+  // --- which queries the pin claims ---
+  const pinned = q => !!C.foodPin(q);
+  check('"chicken breast" is pinned', pinned('chicken breast'), 'expected a pin');
+  check('bare "chicken" is pinned', pinned('chicken'), 'expected a pin');
+  check('"grilled chicken breast" is pinned', pinned('grilled chicken breast'), 'expected a pin');
+  check('"Chicken Breast" (case) is pinned', pinned('Chicken Breast'), 'expected a pin');
+  check('"chicken tikka" is pinned', pinned('chicken tikka'), 'expected a pin');
+  check('"roasted chicken breast" is pinned', pinned('roasted chicken breast'), 'roasting is still breast meat');
+  // Different cuts / preparations are genuinely different foods — the pin must not claim them.
+  check('"chicken thigh" is NOT pinned', !pinned('chicken thigh'), 'thigh must rank normally');
+  check('"chicken wings" is NOT pinned', !pinned('chicken wings'), 'wings must rank normally');
+  check('"fried chicken" is NOT pinned', !pinned('fried chicken'), 'fried must rank normally');
+  check('"ground chicken" is NOT pinned', !pinned('ground chicken'), 'ground must rank normally');
+  check('"chicken liver" is NOT pinned', !pinned('chicken liver'), 'liver must rank normally');
+  check('"chicken broth" is NOT pinned', !pinned('chicken broth'), 'broth must rank normally');
+  check('non-chicken query has no pin', !pinned('basmati rice'), 'expected no pin');
+
+  // --- the pin beats the ranker, which on its own prefers raw ---
+  const ranked = C.rankFoods([RAW, FRIED, STEWED], 'chicken breast', 165);
+  check('ranker alone still floats RAW to the top', ranked[0].name===RAW.name, `got ${ranked[0].name}`);
+  const pin = C.foodPin('chicken breast');
+  const withPin = C.applyPin(ranked, pin);
+  check('applyPin moves the cooked breast to the front', withPin[0].name===STEWED.name, `got ${withPin[0].name}`);
+  check('applyPin keeps every other candidate', withPin.length===3, `got ${withPin.length}`);
+  check('applyPin does not drop the raw entry', withPin.some(f=>f.name===RAW.name), 'raw entry lost');
+
+  // USDA carries several cooked variants of the very same cut. The pin names one method,
+  // so it must not settle for a sibling that merely happens to rank higher.
+  (function(){
+    const ROAST = mk('Chicken, broilers or fryers, breast, meat only, cooked, roasted', 165);
+    const both  = C.applyPin([ROAST, RAW, STEWED], pin);
+    check('cooked-but-roasted does not satisfy the stewed pin', !C.pinMatches(ROAST, pin), 'roasted matched');
+    check('pin picks stewed over roasted', both[0].name===STEWED.name, `got ${both[0].name}`);
+    check('  …and selection agrees', C.defaultSelection(both, 165, pin)==='u0', 'expected u0');
+  })();
+
+  // --- defaultSelection honours the pin regardless of list position or the kcal prior ---
+  check('pin wins from a non-zero index', C.defaultSelection(ranked, 165, pin)==='u1', 'expected u1');
+  check('pin wins after applyPin', C.defaultSelection(withPin, 165, pin)==='u0', 'expected u0');
+  // The whole point of a hardcoded pin: a bad AI estimate can no longer veto it. An est of
+  // 400 kcal is >1.8x off 151, which without the pin would reject the cooked entry outright.
+  check('pin overrides an implausible AI estimate',
+    C.defaultSelection([STEWED, FRIED], 400, pin)==='u0', 'expected u0');
+  check('  …and without the pin that same list does not pick it',
+    C.defaultSelection([STEWED, FRIED], 400)!=='u0', 'expected the pin to be what made the difference');
+  // Pin present but USDA never returned the entry → fall back to normal behaviour, never invent.
+  check('pin absent from results → normal selection', C.defaultSelection([RAW, FRIED], 120, pin)==='u0', 'expected u0');
+  check('applyPin with no match leaves order alone', C.applyPin([RAW, FRIED], pin)[0].name===RAW.name, 'order changed');
+  check('applyPin with no pin is a no-op', C.applyPin([RAW, FRIED], null)[0].name===RAW.name, 'order changed');
+  check('applyPin tolerates an empty list', C.applyPin([], pin).length===0, 'expected []');
+  check('defaultSelection with pin but no candidates → est', C.defaultSelection([], 165, pin)==='est', 'expected est');
+})();
+
 // ---- fatEstimate: energy-balance body-fat change over a maintenance band ----
 group('fatEstimate — 7700 kcal ≈ 1 kg, maintenance as a band');
 (function(){

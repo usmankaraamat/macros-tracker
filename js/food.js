@@ -30,12 +30,27 @@ async function usdaSearch(query, estKcal){
   if (!hasUSDA()) throw new Error('No USDA key — add one in ⚙ Settings.');
   const q = (query||'').trim();
   if (!q) return [];
+  const pin = LedgerCore.foodPin(q);
+  if (!pin) return usdaFetchRanked(q, q, estKcal);
+  // Pinned ingredient: search USDA for the pinned description itself, so the entry we
+  // want is actually in the ten results rather than buried behind the raw cuts. Rank
+  // with the user's own words so the REST of the list still reflects what was asked for.
+  const ranked = await usdaFetchRanked(pin.query, q, estKcal);
+  if (ranked.some(f => LedgerCore.pinMatches(f, pin))) return LedgerCore.applyPin(ranked, pin);
+  // USDA didn't return the pinned entry (description drift, or the dataType filter hid
+  // it). Better a normal search on what the user said than whatever the pinned query
+  // happened to hit — costs one extra call, and only on the failure path.
+  return usdaFetchRanked(q, q, estKcal);
+}
+// apiQuery is what USDA is asked for; rankQuery is what the results are scored against.
+// They differ only for pinned ingredients (see above).
+async function usdaFetchRanked(apiQuery, rankQuery, estKcal){
   // POST with a JSON body — the documented form. Passing dataType as an array here
   // avoids the URL-encoding quirks that make the GET query 400 on spaces/parens.
   const url = 'https://api.nal.usda.gov/fdc/v1/foods/search?api_key='
     + encodeURIComponent(usdaKey());
   const body = JSON.stringify({
-    query: q,
+    query: apiQuery,
     dataType: ['Foundation','SR Legacy','Survey (FNDDS)'],
     pageSize: 10
   });
@@ -63,7 +78,7 @@ async function usdaSearch(query, estKcal){
     + (r.status===403 ? ' — key rejected' : r.status===400 ? ' — bad request' : ''));
   const d = await r.json();
   const foods = (d.foods||[]).map(f => ({ id:f.fdcId, name:f.description, base:nutrientsFrom(f) }));
-  return LedgerCore.rankFoods(foods, q, estKcal);
+  return LedgerCore.rankFoods(foods, rankQuery, estKcal);
 }
 
 // ---- Gemini model discovery ----
@@ -501,7 +516,8 @@ document.getElementById('parseBtn').onclick = async ()=>{
         candidates, estBase,
         // Default to the best plausible USDA match; fall back to the AI estimate when the
         // top match's calories are wildly off the estimate (USDA returned the wrong food).
-        sel: LedgerCore.defaultSelection(candidates, estBase && estBase.kcal),
+        // A pinned ingredient (e.g. chicken → cooked breast) skips both and takes the pin.
+        sel: LedgerCore.defaultSelection(candidates, estBase && estBase.kcal, LedgerCore.foodPin(it.name)),
         include: true
       });
     }
