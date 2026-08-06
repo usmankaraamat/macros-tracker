@@ -325,16 +325,43 @@ function parseMealPlan(txt){
 }
 // Training schedule editor.
 function trainSplitToText(){ return TRAIN.split.map((s,i)=>`${WEEKDAYS[i]} ${s}`).join('\n'); }
+// The day pills and the split textarea edit the SAME thing. The textarea stays the single
+// source of truth — the pills write into it and are re-read from it — so the two can never
+// drift apart, and unchecking a day never loses the split name you typed for it.
+const TRAIN_DEFAULT_SPLIT = 'Train';
+let _lastSplitName = {};                       // day index → name before it was set to Rest
+function renderTrainDays(){
+  const row = document.getElementById('trainDays'); if (!row) return;
+  const split = parseTrainSplit(document.getElementById('trainSplitInput').value);
+  row.innerHTML = WEEKDAYS.map((d,i)=>
+    `<label class="pill"><input type="checkbox" data-trainday="${i}" hidden${
+      LedgerCore.isTrainingSplit(split[i]) ? ' checked' : ''}> ${d}</label>`).join('');
+  row.querySelectorAll('[data-trainday]').forEach(cb=>{
+    cb.onchange = ()=>{
+      const i = +cb.dataset.trainday;
+      const cur = parseTrainSplit(document.getElementById('trainSplitInput').value);
+      if (cb.checked) cur[i] = _lastSplitName[i] || TRAIN_DEFAULT_SPLIT;
+      else { if (LedgerCore.isTrainingSplit(cur[i])) _lastSplitName[i] = cur[i]; cur[i] = 'Rest'; }
+      document.getElementById('trainSplitInput').value =
+        cur.map((s,j)=>`${WEEKDAYS[j]} ${s}`).join('\n');
+      renderTrainDays();
+    };
+  });
+}
 function fillTrain(){
   const el=document.getElementById('trainSplitInput'); if(!el) return;
   if (document.activeElement!==el) el.value = trainSplitToText();
   document.getElementById('trainStart').value  = TRAIN.start;
   document.getElementById('trainEnd').value    = TRAIN.end;
   document.getElementById('trainCycle').checked = TRAIN.cycle;
+  document.getElementById('trainAutoLift').checked = TRAIN.autoLift !== false;
   document.getElementById('trainOffset').value = TRAIN.trainOffset;
   document.getElementById('restOffset').value  = TRAIN.restOffset;
   document.getElementById('cycleOffsets').hidden = !TRAIN.cycle;
+  renderTrainDays();
 }
+// Typing in the textarea is the other direction of the same edit — keep the pills honest.
+document.getElementById('trainSplitInput').addEventListener('input', renderTrainDays);
 function parseTrainSplit(txt){
   const map={mon:0,tue:1,wed:2,thu:3,fri:4,sat:5,sun:6};
   const out = TRAIN.split.slice();
@@ -385,11 +412,13 @@ document.getElementById('saveTrain').onclick = ()=>{
   TRAIN.start       = document.getElementById('trainStart').value || '18:00';
   TRAIN.end         = document.getElementById('trainEnd').value   || '20:00';
   TRAIN.cycle       = document.getElementById('trainCycle').checked;
+  TRAIN.autoLift    = document.getElementById('trainAutoLift').checked;
   TRAIN.trainOffset = +document.getElementById('trainOffset').value || 0;
   TRAIN.restOffset  = +document.getElementById('restOffset').value  || 0;
   saveTargets(); fillTrain(); render();
   const nTrain = TRAIN.split.filter(s=> s && s.trim().toLowerCase()!=='rest').length;
   let msg = `Saved · ${nTrain} training day${nTrain===1?'':'s'} (${TRAIN.start}–${TRAIN.end}).`;
+  if (TRAIN.autoLift && nTrain>0) msg += ` Opens on Lift during the window.`;
   if (TRAIN.cycle && nTrain>0){
     const avg = Math.round((nTrain*TRAIN.trainOffset + (7-nTrain)*TRAIN.restOffset)/7);
     msg += ` Corridor cycles: train ${TRAIN.trainOffset>=0?'+':''}${TRAIN.trainOffset}, rest ${TRAIN.restOffset>=0?'+':''}${TRAIN.restOffset} · weekly avg ${avg>=0?'+':''}${avg}.`;
@@ -627,6 +656,11 @@ updateDayLabel();
 document.getElementById('suppAnchor').value = ACTIVE_DATE;   // "an ON day you're sure of" defaults to today
 renderSuppDayPick();
 loadTargets(); fillTargetInputs(); loadKeys(); initFoods(); load(); requestPersistence();
-showTab('today');   // a logging app always opens on Today (also renders)
+// A logging app opens on Today — except mid-workout, when the thing being logged is sets.
+// Launch-time only: never yank the view out from under someone already using the app.
+const _liftOnBoot = TRAIN.autoLift !== false && inWorkoutWindow();
+showTab(_liftOnBoot ? 'lift' : 'today');   // also renders
+if (_liftOnBoot) toast(`${splitForDate(ACTIVE_DATE)} · ${TRAIN.start}–${TRAIN.end} — opened on Lift.`,
+  { undo: ()=> showTab('today'), undoLabel: 'Today' });
 maybeShowBrief();   // one-line plan for the day, once per day
 if (syncConfigured()) syncNow(); else setSyncDot('off');   // boot pull+push (no-op when unconfigured)

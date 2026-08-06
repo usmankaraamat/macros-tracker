@@ -450,6 +450,51 @@
              rate: due ? hit / due : null };
   }
 
+  // ---- Workout window: when the app should open on Lift ----------------------
+  // Opening a logging app on the food view during a training session is a tab-tap of
+  // friction on every set. The training schedule already knows which days are training
+  // days and when the session runs, so the launch tab can just follow it.
+  //
+  // The window is the user's own start→end, widened slightly at both ends: you reach for
+  // the phone before the first warm-up set and again after racking the last one, and
+  // neither moment is inside a literal start/end reading.
+  const LIFT_OPEN_LEAD_MIN = 15;      // turning up early still counts as workout time
+  const LIFT_OPEN_TAIL_MIN = 30;      // and so does logging the last set on the way out
+  // 'HH:MM' → minutes past midnight, or null when it isn't a time.
+  function hhmmMinutes(hhmm) {
+    const m = /^\s*(\d{1,2}):(\d{2})\s*$/.exec(String(hhmm == null ? '' : hhmm));
+    if (!m) return null;
+    const h = +m[1], mi = +m[2];
+    if (h > 23 || mi > 59) return null;
+    return h * 60 + mi;
+  }
+  function isTrainingSplit(s) {
+    return !!s && String(s).trim() !== '' && String(s).trim().toLowerCase() !== 'rest';
+  }
+  // train = {split:[7 Mon-first labels], start:'HH:MM', end:'HH:MM'}. weekdayMon/minutesOfDay
+  // describe "now" on the same clock the rest of the app uses. Pure: the caller owns both
+  // the clock and the user's opt-in.
+  function liftWindowOpen(train, weekdayMon, minutesOfDay) {
+    if (!train || !Array.isArray(train.split) || train.split.length !== 7) return false;
+    if (!(minutesOfDay >= 0)) return false;
+    const start = hhmmMinutes(train.start);
+    if (start == null) return false;
+    let end = hhmmMinutes(train.end);
+    if (end == null || end === start) end = start + 60;   // no usable end → assume an hour
+    if (end < start) end += 1440;                         // session runs past midnight
+    const from = start - LIFT_OPEN_LEAD_MIN, to = end + LIFT_OPEN_TAIL_MIN;
+    // A session anchored on yesterday can still be open (late workout, or the tail past
+    // midnight); one anchored on tomorrow can already be open when the lead-in crosses
+    // midnight backwards. back = how many days ago the session started.
+    for (let back = -1; back <= 1; back++) {
+      const day = ((weekdayMon - back) % 7 + 7) % 7;
+      if (!isTrainingSplit(train.split[day])) continue;
+      const t = minutesOfDay + back * 1440;               // now, in that session's day-frame
+      if (t >= from && t <= to) return true;
+    }
+    return false;
+  }
+
   // ---- Lifting: progression, stalling, and the recomp check ------------------
   // The question this answers is "am I still growing, or just getting heavier?", so
   // every number here is computed from the logs and nothing is asked of a model.
@@ -945,6 +990,7 @@
     e1RM, setLoad, weightAt, classifyExercise, sessionMetrics, exerciseTrend, liftVsWeight,
     normalizeName, exerciseId, matchExercise, parseWorkoutLine, parseWorkout, SEED_EXERCISES,
     LIFT_REP_CAP, LIFT_MIN_SESSIONS, LIFT_FLAT_PCT, LIFT_RIR_DRIFT, LIFT_WINDOW_DAYS,
+    liftWindowOpen, hhmmMinutes, isTrainingSplit, LIFT_OPEN_LEAD_MIN, LIFT_OPEN_TAIL_MIN,
     KCAL_PER_KG_FAT, mergeSyncStates, ternary
   };
 });

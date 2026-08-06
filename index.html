@@ -198,13 +198,16 @@
   <details>
     <summary>Training schedule · powers the day-type features</summary>
     <div style="margin-top:10px">
-      <label for="trainSplitInput">Weekly split — one per line, "<b>Day Split</b>" (use <b>Rest</b> for off days)</label>
+      <label id="trainDaysLabel">Training days</label>
+      <div class="pill-row" id="trainDays" role="group" aria-labelledby="trainDaysLabel"></div>
+      <label for="trainSplitInput" style="margin-top:10px">Weekly split — one per line, "<b>Day Split</b>" (use <b>Rest</b> for off days)</label>
       <textarea id="trainSplitInput" rows="7" placeholder="Mon Pull&#10;Tue Push&#10;Wed Legs&#10;Thu Upper · pull&#10;Fri Upper · push&#10;Sat Rest&#10;Sun Rest"></textarea>
       <div class="targets-grid" style="margin-top:10px">
         <div><label for="trainStart">Workout start</label><input type="time" id="trainStart"></div>
         <div><label for="trainEnd">Workout end</label><input type="time" id="trainEnd"></div>
       </div>
       <div class="pill-row">
+        <label class="pill"><input type="checkbox" id="trainAutoLift" hidden> Open on Lift during the workout window</label>
         <label class="pill"><input type="checkbox" id="trainCycle" hidden> Cycle the corridor by day type</label>
       </div>
       <div class="targets-grid" id="cycleOffsets" hidden>
