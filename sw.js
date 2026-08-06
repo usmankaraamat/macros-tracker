@@ -1,7 +1,7 @@
 // Service worker for Ledger PWA.
 // Scope is /macros-tracker/ — all cached paths are relative to this file's location,
 // so they resolve correctly under the repo subpath without hardcoding the origin.
-const CACHE = 'ledger-v65';
+const CACHE = 'ledger-v66';
 const FONT_CACHE = 'ledger-fonts-v1';
 const SHELL = [
   './',
@@ -28,8 +28,19 @@ const SHELL = [
 // own cache that an app version bump deliberately does not evict.
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 
+// cache:'reload' is load-bearing, not a nicety. GitHub Pages serves the shell with
+// Cache-Control: max-age=600, and a plain addAll() is an ordinary fetch — so a version
+// bump within ten minutes of the previous visit refilled the NEW cache from the browser's
+// HTTP cache, i.e. with the OLD bytes. The cache name changed, the old cache was evicted,
+// every diagnostic looked right, and the phone went on running the previous deploy with
+// no way to self-correct. 'reload' bypasses the HTTP cache and refreshes it on the way
+// through, so a bumped version always precaches what was actually deployed.
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => c.addAll(SHELL.map(u => new Request(u, {cache: 'reload'}))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', e => {
@@ -76,13 +87,18 @@ self.addEventListener('fetch', e => {
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
-      return fetch(e.request).then(resp => {
+      // The miss path revalidates for the same reason install does: without it, a file
+      // that is not in SHELL gets stored from the HTTP cache and inherits the staleness.
+      return fetch(new Request(e.request, {cache: 'no-cache'})).then(resp => {
         if (resp.ok) {
           const clone = resp.clone();
           caches.open(CACHE).then(c => c.put(e.request, clone));
         }
         return resp;
-      }).catch(() => cached);
+      }).catch(() =>
+        // Uncached and unreachable. Answer explicitly — returning undefined from
+        // respondWith throws a confusing TypeError instead of failing plainly.
+        new Response('Offline and not cached.', {status: 504, statusText: 'Offline'}));
     })
   );
 });
