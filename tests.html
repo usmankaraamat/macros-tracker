@@ -105,6 +105,14 @@ const chk = {kcal:165, p:31, f:3.6, c:0};
   check('micros scale at 150g: fib 3, sug 7.5, na 600', approx(mic.fib,3)&&approx(mic.sug,7.5)&&approx(mic.na,600), `got fib${mic.fib} sug${mic.sug} na${mic.na}`);
   const legacy = C.computeEntry('x', 150, true, {kcal:100,p:5,f:2,c:10}, 'DB', PEN);
   check('legacy base without micros → 0 (no NaN)', legacy.fib===0 && legacy.sug===0 && legacy.na===0, '');
+
+  // The dish an ingredient came from is kept on the entry. Without it, decomposing
+  // "biryani" into six rows loses the biryani, and repeats can only ever offer rice.
+  const comp = C.computeEntry('basmati rice', 180, false, chk, 'USDA', PEN, 'chicken biryani');
+  check('partOf is carried onto the entry', comp.partOf === 'chicken biryani', `got ${comp.partOf}`);
+  check('a plain food has no partOf key at all', !('partOf' in w));
+  check('an empty dish name does not create the key',
+        !('partOf' in C.computeEntry('x', 100, true, chk, 'DB', PEN, '')));
 })();
 
 // ---- solveFridge ----
@@ -761,6 +769,22 @@ group('normalizeName / matchExercise — one lift, one trend line');
   check('abbreviations expand', C.normalizeName('DB Curls') === 'dumbbell curl', `got "${C.normalizeName('DB Curls')}"`);
   check('punctuation is not identity', C.normalizeName('Pull-ups') === C.normalizeName('pull ups'), `got "${C.normalizeName('Pull-ups')}"`);
   check('double-s words survive singularisation', C.normalizeName('bench press') === 'bench press');
+  // The bug this replaces: a lone trailing "s" turned "crunches" into "crunche", a token
+  // no singular spelling can match, so "Cable Crunch" started a SECOND exercise beside
+  // "Cable Crunches" and split the history in half.
+  check('-es after ch drops both', C.normalizeName('cable crunches') === 'cable crunch', `got "${C.normalizeName('cable crunches')}"`);
+  check('-es after ss drops both', C.singularise('presses') === 'press', `got ${C.singularise('presses')}`);
+  check('-es after x drops both', C.singularise('boxes') === 'box', `got ${C.singularise('boxes')}`);
+  check('-ies becomes -y', C.singularise('flies') === 'fly', `got ${C.singularise('flies')}`);
+  check('a stem already ending in e keeps it', C.singularise('raises') === 'raise', `got ${C.singularise('raises')}`);
+  check('lunges keeps its e too', C.singularise('lunges') === 'lunge', `got ${C.singularise('lunges')}`);
+  check('a plain plural still drops one s', C.singularise('curls') === 'curl');
+  check('a singular is left alone', C.singularise('crunch') === 'crunch' && C.singularise('press') === 'press');
+  check('singular and plural now reach the same exercise',
+        C.normalizeName('Cable Crunch') === C.normalizeName('Cable Crunches'));
+  check('an existing crunche-id entry still matches by name',
+        (C.matchExercise('cable crunch', [{id:'cable-crunche', name:'Cable Crunches', aliases:[]}])||{}).exercise
+          ? true : false);
   check('id is the normalised slug', C.exerciseId('DB Curls') === 'dumbbell-curl', `got ${C.exerciseId('DB Curls')}`);
 
   const same = ['bicep curls','bicep curl','db curls','dumbbell curl','curls'].map(n => {
@@ -781,6 +805,98 @@ group('normalizeName / matchExercise — one lift, one trend line');
         C.matchExercise('zercher squat', K) === null);
   check('the seeded incline press is still found',
         (C.matchExercise('incline db press', K)||{}).exercise.id === 'incline-dumbbell-press');
+})();
+
+// ---- mineRepeats: repeats are meals, not ingredients ----
+group('mineRepeats — dishes over ingredients, imports excluded');
+(function(){
+  const mk = (name, grams, extra) => Object.assign({name, grams, kcal:100, p:5, f:2, c:10, source:'USDA'}, extra||{});
+  const days = [
+    {date:'2026-08-03', ledger:[
+      mk('basmati rice', 180, {partOf:'chicken biryani'}),
+      mk('chicken thigh', 150, {partOf:'chicken biryani'}),
+      mk('cooking oil', 20, {partOf:'chicken biryani'}),
+      mk('Milk, whole', 250)]},
+    {date:'2026-08-02', ledger:[
+      mk('basmati rice', 200, {partOf:'chicken biryani'}),
+      mk('chicken thigh', 160, {partOf:'chicken biryani'}),
+      mk('Milk, whole', 250)]},
+    {date:'2026-08-01', ledger:[
+      mk('Gemini import', 0, {source:'import', grams:0}),
+      mk('Milk, whole', 250)]}
+  ];
+  const r = C.mineRepeats(days, {limit:6});
+  const byName = {}; r.forEach(u => byName[u.name] = u);
+  check('a dish counts once per day, not once per ingredient',
+        byName['chicken biryani'] && byName['chicken biryani'].count === 2,
+        `got ${byName['chicken biryani'] && byName['chicken biryani'].count}`);
+  check('the dish carries its components', byName['chicken biryani'].items.length === 3);
+  check('the most recent sighting wins',
+        byName['chicken biryani'].items[0].grams === 180, 'should be the 2026-08-03 portion');
+  check('a plain food is its own unit', byName['Milk, whole'].count === 3);
+  // The bug this replaces: one import row is a whole day's totals wearing a food's name,
+  // and it outranked every real ingredient in the one-tap chips.
+  check('bulk import rows never become a repeat', !byName['Gemini import']);
+  check('an ingredient of a dish is not offered on its own', !byName['basmati rice']);
+  check('zero-gram rows are skipped', C.mineRepeats([{date:'d', ledger:[mk('x', 0)]}]).length === 0);
+  check('ordering is by count, most repeated first', r[0].count >= r[r.length-1].count);
+  check('limit is honoured', C.mineRepeats(days, {limit:1}).length === 1);
+})();
+
+// ---- macrosComplete: absence of measurement vs a measurement of zero ----
+group('macrosComplete — a kcal-only import is not a zero-fat day');
+(function(){
+  check('a fully logged day is complete',
+        C.macrosComplete([{kcal:500, p:30, f:20, c:40}]));
+  check('kcal and protein only is NOT complete',
+        !C.macrosComplete([{kcal:1872, p:122, f:0, c:0}]));
+  check('carbs alone still counts as measured',
+        C.macrosComplete([{kcal:400, p:0, f:0, c:100}]));
+  check('an empty day is not complete', !C.macrosComplete([]));
+  check('a zero-calorie day is not complete', !C.macrosComplete([{kcal:0, p:0, f:0, c:0}]));
+  check('one real entry rescues a day of imports',
+        C.macrosComplete([{kcal:1800, p:120, f:0, c:0}, {kcal:200, p:2, f:11, c:20}]));
+})();
+
+// ---- corridorDrift: has the corridor stopped describing what you eat? ----
+group('corridorDrift — a ceiling passed most days is not a warning');
+(function(){
+  const band = (kcals, floor, ceil) => kcals.map(kcal => ({kcal, floor, ceil}));
+  const over = band(Array.from({length:22}, (_,i) => i < 16 ? 2841 : 2400), 2325, 2525);
+  const d = C.corridorDrift(over);
+  check('a sustained breach is called', d.verdict === 'over', `got ${d.verdict}`);
+  check('it counts the breached days', d.over === 16, `got ${d.over}`);
+  check('the gap is the median overshoot past the ceiling',
+        d.gap === 2841 - 2525, `got ${d.gap}`);
+  check('the median intake is reported', d.median === 2841, `got ${d.median}`);
+
+  const under = band(Array.from({length:14}, () => 1200), 1650, 1900);
+  check('a sustained shortfall is called too', C.corridorDrift(under).verdict === 'under');
+  check('the shortfall gap is negative', C.corridorDrift(under).gap === -450);
+
+  // Being inside is the expected case and must stay silent.
+  check('a corridor that fits says nothing',
+        C.corridorDrift(band(Array.from({length:20}, (_,i) => 2400 + (i%3)*30), 2325, 2525)).verdict === 'aligned');
+  // A handful of days is a bad week, not a mis-set corridor.
+  check('too few days stays thin', C.corridorDrift(band([3000,3000,3000,3000], 2325, 2525)).verdict === 'thin');
+  check('an even split is not drift',
+        C.corridorDrift(band(Array.from({length:20}, (_,i)=> i%2 ? 2800 : 2400), 2325, 2525)).verdict === 'aligned');
+  check('a nonsense corridor is refused', C.corridorDrift(band(over.map(d=>d.kcal), 2500, 2500)).verdict === 'thin');
+
+  // The failure this shape exists to prevent: a training/rest cycle swings the corridor
+  // by 400 kcal a day, so eating to each day's OWN target must not read as drift.
+  // A real week is 2 training days and 5 rest days, so most days sit on the low corridor.
+  const cycled = Array.from({length:21}, (_,i) => i % 7 < 2
+    ? {kcal: 2900, floor: 2800, ceil: 3000}      // training day, eaten to plan
+    : {kcal: 2400, floor: 2300, ceil: 2500});    // rest day, eaten to plan
+  check('cycling to plan is not drift', C.corridorDrift(cycled).verdict === 'aligned',
+        `got ${C.corridorDrift(cycled).verdict}`);
+  check('the same days judged by one corridor WOULD have been called drift',
+        C.corridorDrift(cycled.map(d => ({kcal:d.kcal, floor:2800, ceil:3000}))).verdict === 'under',
+        'this is the false alarm the per-day bounds exist to prevent');
+  // Overshooting a moving corridor is still drift.
+  check('cycling and overeating both is still called',
+        C.corridorDrift(cycled.map(d => ({kcal:d.kcal+500, floor:d.floor, ceil:d.ceil}))).verdict === 'over');
 })();
 
 // ---- parseWorkout: text in, sets out, no model involved ----

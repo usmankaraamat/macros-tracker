@@ -16,3 +16,5 @@ BACKEND_SETUP.md
 server.ps1
 gym_split.md
 Frontend.md
+# Personal data exports — never commit
+ledger_*.json

@@ -275,14 +275,14 @@ function renderLedgerTable(){
     _prevLedgerLen = 0;
     return;
   }
-  body.innerHTML = ledger.map((e,i)=>{
+  const row = (e,i)=>{
     const badge = (e.source && e.source !== 'DB')
       ? `<span class="badge ${e.source === 'USDA' ? 'usda' : 'est'}">${escapeHtml(e.source)}</span>` : '';
     const flags = e.flags && e.flags.length
       ? `<span class="flags">${escapeHtml(e.flags.join(' · '))}</span>` : '';
     // Row actions are real buttons with accessible names — the old ✕/✎ spans
     // were unreachable by keyboard and far too small to hit reliably.
-    return `<tr>
+    return `<tr${e.partOf ? ' class="of-dish"' : ''}>
       <td>
         ${badge}<span class="ename">${escapeHtml(e.name)}</span><span class="egrams">${e.grams}g</span><span class="row-actions">
           <button type="button" class="edit" data-edit="${i}" aria-label="Edit grams for ${escapeAttr(e.name)}" title="Edit grams">✎</button>
@@ -291,12 +291,38 @@ function renderLedgerTable(){
       </td>
       <td>${Math.round(e.kcal)}</td><td>${e.p.toFixed(1)}</td><td>${e.f.toFixed(1)}</td><td>${(e.c||0).toFixed(1)}</td>
     </tr>`;
-  }).join('');
+  };
+  // A decomposed dish is one meal, so it reads as one block with its own total. The
+  // components stay individually editable — the grouping is presentational, which is
+  // what keeps a wrong gram estimate on the rice fixable without unpicking the biryani.
+  const html = [];
+  for (let i = 0; i < ledger.length; i++){
+    const dish = (ledger[i].partOf || '').trim();
+    if (!dish){ html.push(row(ledger[i], i)); continue; }
+    let j = i;
+    while (j < ledger.length && (ledger[j].partOf || '').trim() === dish) j++;
+    const part = ledger.slice(i, j);
+    const sum = part.reduce((s,e)=>({ kcal:s.kcal+e.kcal, p:s.p+e.p, f:s.f+e.f, c:s.c+(e.c||0) }),
+                            {kcal:0,p:0,f:0,c:0});
+    html.push(`<tr class="dish-head">
+      <td><span class="dish-name">🍽️ ${escapeHtml(dish)}</span>
+          <span class="dish-meta">${part.length} ingredient${part.length>1?'s':''} · ${Math.round(part.reduce((s,e)=>s+(+e.grams||0),0))}g</span></td>
+      <td>${Math.round(sum.kcal)}</td><td>${sum.p.toFixed(1)}</td><td>${sum.f.toFixed(1)}</td><td>${sum.c.toFixed(1)}</td>
+    </tr>`);
+    part.forEach((e,k)=> html.push(row(e, i + k)));
+    i = j - 1;
+  }
+  body.innerHTML = html.join('');
 
   // Settle only the row(s) added since the last render — a quiet "logged" confirmation.
+  // Keyed off the entry index rather than row position: dish headers mean the table
+  // now has more rows than the ledger has entries.
   if (ledger.length > _prevLedgerLen && !prefersReducedMotion()){
-    const rows = body.querySelectorAll('tr');
-    for (let i = _prevLedgerLen; i < ledger.length && i < rows.length; i++) rows[i].classList.add('rowNew');
+    for (let i = _prevLedgerLen; i < ledger.length; i++){
+      const btn = body.querySelector(`[data-edit="${i}"]`);
+      const tr = btn && btn.closest('tr');
+      if (tr) tr.classList.add('rowNew');
+    }
   }
   _prevLedgerLen = ledger.length;
 
@@ -339,7 +365,7 @@ async function editEntryGrams(i){
     return;
   }
   const prev = ledger[i];
-  const next = computeEntry(e.name, g, e.weighed, base, e.source);
+  const next = computeEntry(e.name, g, e.weighed, base, e.source, e.partOf);
   next.at = e.at;
   ledger[i] = next;
   save(); render();
@@ -376,74 +402,68 @@ function renderToday(){
   renderTemplates();
 }
 
-// ---- FREQUENT FOODS: mined from history + today, one tap prefills the form ----
+// ---- REPEATS: what you have eaten before, offered as one tap -----------------
+// Mined as MEALS, not ingredients. Decomposition means the raw ledger is full of
+// "Sugar, NFS" and "Vegetable oil, NFS" — real rows, but nothing anyone wants to
+// repeat. LedgerCore.mineRepeats regroups each day by dish first, and drops bulk
+// import rows, which otherwise take the top slot with a whole day's calories
+// wearing a food's name.
+function repeatUnits(n){ return LedgerCore.mineRepeats(allDays(true), {limit: n}); }
+function repeatChipHTML(u, attr, i){
+  const label = u.kind === 'dish'
+    ? `🍽️ ${escapeHtml(u.name)} <small>${u.items.length} items</small>`
+    : `${escapeHtml(u.name)} <small>${Math.round(u.items[0].grams)}g</small>`;
+  return `<button type="button" class="chip${u.kind === 'dish' ? ' dish' : ''}" ${attr}="${i}">${label}</button>`;
+}
+// One tap logs it, whether it is a single food or a five-ingredient dish. Both chip
+// rows behaved differently before — one logged, one prefilled a form — which made an
+// identical-looking control mean two things. The toast carries the undo.
+function logRepeat(u){
+  if (!u) return;
+  const before = ledger.slice();
+  let added = 0;
+  u.items.forEach(e=>{
+    const base = e.base || DB[e.name];
+    if (!base) return;
+    if (!foodBase[e.name]) registerFood(e.name, base, e.source);
+    pushEntry(computeEntry(e.name, e.grams, e.weighed, base, e.source, e.partOf));
+    added++;
+  });
+  if (!added){ toast(`No nutrition data stored for ${u.name}.`, { tone:'warn' }); return; }
+  haptic(); save(); render();
+  toast(u.kind === 'dish' ? `Logged ${u.name} · ${added} items` : `Logged ${u.name} · ${u.items[0].grams}g`,
+    { undo: ()=>{ ledger = before; save(); render(); } });
+}
+
+let _freqTop = [];
 function renderFrequents(){
   const wrap = document.getElementById('freqChips');
-  const count = {}, last = {};
-  allDays(true).forEach(d => d.ledger.forEach(e=>{
-    if (!e.name) return;
-    count[e.name] = (count[e.name]||0) + 1;
-    // days are newest-first, so keep only the first (most recent) sighting
-    if (!last[e.name]) last[e.name] = e;
-  }));
-  const top = Object.keys(count).sort((a,b)=>count[b]-count[a]).slice(0,6);
-  if (!top.length){ wrap.hidden = true; wrap.innerHTML=''; syncAddPanel(); return; }
+  _freqTop = repeatUnits(6);
+  if (!_freqTop.length){ wrap.hidden = true; wrap.innerHTML=''; syncAddPanel(); return; }
   wrap.hidden = false;
   syncAddPanel();
-  wrap.innerHTML = top.map((n,i)=>
-    `<button type="button" class="chip" data-n="${i}">${escapeHtml(n)} <small>${last[n].grams}g</small></button>`).join('');
-  wrap.querySelectorAll('.chip').forEach((ch,i)=>{
-    ch.onclick = ()=>{
-      const e = last[top[i]];
-      const base = e.base || DB[e.name];
-      if (base && !foodBase[e.name]) registerFood(e.name, base, e.source);
-      openManual();
-      document.getElementById('food').value = e.name;
-      document.getElementById('grams').value = e.grams;
-      document.getElementById('weighed').checked = !!e.weighed;
-      updateProjection();
-      document.getElementById('grams').focus();
-    };
+  wrap.innerHTML = _freqTop.map((u,i)=> repeatChipHTML(u, 'data-n', i)).join('');
+  wrap.querySelectorAll('[data-n]').forEach(ch=>{
+    ch.onclick = ()=> logRepeat(_freqTop[+ch.dataset.n]);
   });
 }
 
 // ---- EMPTY-STATE ONE-TAP CHIPS: the fastest path to logging a repeat meal ----
-// Most tracking is the same foods daily; when the ledger is empty, surface the
-// most-logged items as chips that log in a single tap at their last-used grams.
 let _emptyTop = [];
-function topFrequents(n){
-  const count = {}, last = {};
-  allDays(true).forEach(d => d.ledger.forEach(e=>{
-    if (!e.name) return;
-    count[e.name] = (count[e.name]||0) + 1;
-    if (!last[e.name]) last[e.name] = e;   // days are newest-first → first sighting is most recent
-  }));
-  return Object.keys(count).sort((a,b)=>count[b]-count[a]).slice(0,n).map(name=>({name, e:last[name]}));
-}
 function emptyLedgerCell(){
-  _emptyTop = topFrequents(6);
+  _emptyTop = repeatUnits(6);
   if (!_emptyTop.length){
     return `<div class="empty-chips">
       <div class="ec-hint">Nothing logged yet. Describe a meal above, or snap a photo of it —
-      the entries you log most will show up here as one-tap repeats.</div></div>`;
+      the meals you log most will show up here as one-tap repeats.</div></div>`;
   }
-  const chips = _emptyTop.map((f,i)=>
-    `<button type="button" class="chip" data-q="${i}">${escapeHtml(f.e.name)} <small>${f.e.grams}g</small></button>`).join('');
   return `<div class="empty-chips">
     <div class="ec-hint">Nothing logged. Tap a usual to log it instantly.</div>
-    <div class="ec-row">${chips}</div></div>`;
+    <div class="ec-row">${_emptyTop.map((u,i)=> repeatChipHTML(u, 'data-q', i)).join('')}</div></div>`;
 }
 function wireEmptyLedgerChips(){
   document.querySelectorAll('#ledgerBody [data-q]').forEach(ch=>{
-    ch.onclick = ()=>{
-      const f = _emptyTop[+ch.dataset.q]; if (!f) return;
-      const e = f.e, base = e.base || DB[e.name];
-      if (!base) return;
-      if (!foodBase[e.name]) registerFood(e.name, base, e.source);
-      pushEntry(computeEntry(e.name, e.grams, e.weighed, base, e.source));
-      haptic(); save(); render();
-      toast(`Logged ${e.name} · ${e.grams}g`);
-    };
+    ch.onclick = ()=> logRepeat(_emptyTop[+ch.dataset.q]);
   });
 }
 
@@ -483,7 +503,7 @@ document.getElementById('saveTplBtn').onclick = async ()=>{
   if (!res) return;
   const name = res.name;
   const items = res.indices.map(i=>snapshot[i]).map(e=>({ name:e.name, grams:e.grams, weighed:e.weighed,
-    base:e.base||getBase(e.name), source:e.source }));
+    partOf:e.partOf, base:e.base||getBase(e.name), source:e.source }));
   const existed = templates().some(t => t.name === name);
   const list = templates().filter(t=>t.name!==name);   // same name = overwrite
   list.push({name, items});
@@ -497,7 +517,7 @@ function renderTemplates(){
   wrap.hidden = false;
   syncAddPanel();
   wrap.innerHTML = list.map((t,i)=>{
-    const kcal = Math.round(t.items.reduce((s,e)=> s + (e.base ? computeEntry(e.name,e.grams,e.weighed,e.base,e.source).kcal : 0), 0));
+    const kcal = Math.round(t.items.reduce((s,e)=> s + (e.base ? computeEntry(e.name,e.grams,e.weighed,e.base,e.source,e.partOf).kcal : 0), 0));
     return `<span class="chip">
       <button type="button" class="chip-main" data-tpl="${i}" style="all:unset;cursor:pointer">★ ${escapeHtml(t.name)} <small>${t.items.length} items · ${kcal} kcal</small></button>
       <button type="button" class="icon-btn" data-tpldel="${i}" aria-label="Delete usual ${escapeAttr(t.name)}" title="Delete usual">✕</button>
@@ -523,7 +543,7 @@ function renderTemplates(){
         const base = e.base || DB[e.name];
         if (!base) return;
         if (e.base) registerFood(e.name, e.base, e.source);
-        pushEntry(computeEntry(e.name, e.grams, e.weighed, base, e.source));
+        pushEntry(computeEntry(e.name, e.grams, e.weighed, base, e.source, e.partOf));
         added++;
       });
       if (!added){

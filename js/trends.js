@@ -55,7 +55,7 @@ function renderHistory(){
         const base = e.base || DB[e.name];
         if (!base) return;
         if (e.base) registerFood(e.name, e.base, e.source);
-        pushEntry(computeEntry(e.name, e.grams, e.weighed, base, e.source));
+        pushEntry(computeEntry(e.name, e.grams, e.weighed, base, e.source, e.partOf));
         added++;
       });
       if (!added){ toast(`Nothing on ${d.date} has usable nutrition data.`, { tone:'warn' }); return; }
@@ -99,13 +99,16 @@ document.getElementById('wIn').addEventListener('keydown', e=>{ if (e.key==='Ent
 });
 ['fatStart','fatEnd'].forEach(id=> document.getElementById(id).addEventListener('change', renderFatEstimate));
 // Body profile → TDEE, also synced via the targets bundle.
-['pfSex','pfAge','pfHeight','pfActivity'].forEach(id=>{
+['pfSex','pfAge','pfHeight','pfActivity','pfTrendStart'].forEach(id=>{
   document.getElementById(id).addEventListener('change', ()=>{
     PROFILE = { sex:document.getElementById('pfSex').value==='female'?'female':'male',
                 age:+document.getElementById('pfAge').value||0,
                 height:+document.getElementById('pfHeight').value||0,
                 activity:document.getElementById('pfActivity').value };
-    saveTargets(); renderTDEE(); renderFatEstimate();
+    TREND_START = document.getElementById('pfTrendStart').value || '';
+    // The corridor is derived from the TDEE, so this has to be a full render, not just
+    // a readout refresh — the floor and ceiling move the moment the window changes.
+    saveTargets(); render(); renderFatEstimate();
   });
 });
 // Goal → drives the adaptive corridor. Presets set the offset; custom uses the input.
@@ -361,7 +364,10 @@ function computeTDEE(){
   const formula = kg>0 ? LedgerCore.bmrMifflin(PROFILE.sex, kg, +PROFILE.height, +PROFILE.age) * (ACTIVITY_MULT[PROFILE.activity]||1.55) : 0;
   const end=ACTIVE_DATE, start=addDaysISO(end, -27);
   const map=weightsMap();
-  const winW=Object.keys(map).filter(d=>+map[d]>0 && d>=start && d<=end).sort().map(d=>({date:d, kg:+map[d]}));
+  // TREND_START drops the weigh-ins from a diet transition, whose water and glycogen
+  // swing is not fat and must not be read as one. It only ever narrows the window.
+  const from = TREND_START > start ? TREND_START : start;
+  const winW=Object.keys(map).filter(d=>+map[d]>0 && d>=from && d<=end).sort().map(d=>({date:d, kg:+map[d]}));
   const tr = winW.length>=2 ? LedgerCore.weightTrend(winW) : null;
   const sampleDays = winW.length>=2 ? Math.round((Date.parse(winW[winW.length-1].date)-Date.parse(winW[0].date))/86400000)+1 : 0;
   const tot={}; allDays(true).forEach(d=>{ tot[d.date]=totalsOf(d.ledger); });
@@ -372,6 +378,43 @@ function computeTDEE(){
   const cal = LedgerCore.calibrateTDEE(formula, avgIntake, tr?tr.ratePerWeek:null, sampleDays);
   return Object.assign(cal, {kg, avgIntake:Math.round(avgIntake), sampleDays});
 }
+// Has the corridor stopped describing what you actually eat? Reads the last 28 closed
+// days against the corridor now in force. A ceiling breached most days is not a warning
+// any more, so this exists to name the gap once rather than flash the same alarm daily.
+function corridorDriftNow(){
+  const end=ACTIVE_DATE, start=addDaysISO(end, -27);
+  const tot={}; allDays(true).forEach(d=>{ tot[d.date]=totalsOf(d.ledger); });
+  // Each day is judged against the corridor that applied to IT. With the training
+  // cycle on, a rest day's ceiling sits 400 kcal below a session day's, and comparing
+  // both to today's bounds would read a working schedule as a mis-set goal.
+  const td = GOAL.mode!=='off' ? computeTDEE() : null;
+  const boundsFor = date => {
+    if (!td || !(td.blended>0)) return { floor: FLOOR_M, ceil: CEIL_M };
+    const off = TRAIN.cycle
+      ? (isTrainingDay(date) ? (+TRAIN.trainOffset||0) : (+TRAIN.restOffset||0))
+      : goalOffset();
+    return LedgerCore.corridorFromTDEE(td.blended, off, GOAL.band||100);
+  };
+  const days=Object.keys(tot)
+    .filter(d=>d>=start && d<=end && d!==ACTIVE_DATE && tot[d].kcal>0)
+    .map(d=>Object.assign({kcal: tot[d].kcal}, boundsFor(d)));
+  return LedgerCore.corridorDrift(days);
+}
+// One sentence naming the gap and the two ways out of it, or '' when the corridor fits.
+function driftLine(){
+  const dr=corridorDriftNow();
+  if (dr.verdict==='over')
+    return `You have breached the ceiling <b>${dr.over} of the last ${dr.n}</b> days — median `
+      + `<b>${dr.median.toLocaleString()}</b>, typically <b>${dr.gap.toLocaleString()}</b> past that day's ceiling. `
+      + `Either raise the goal to match what you are actually eating, or eat to the corridor; `
+      + `a ceiling you pass most days has stopped telling you anything.`;
+  if (dr.verdict==='under')
+    return `You have come in under the floor <b>${dr.under} of the last ${dr.n}</b> days — median `
+      + `<b>${dr.median.toLocaleString()}</b>, typically <b>${Math.abs(dr.gap).toLocaleString()}</b> under that day's floor. `
+      + `Either lower the goal or eat more; the floor is not describing your intake.`;
+  return '';
+}
+
 // The profile inputs live in Settings; Trends keeps a one-line echo (#tdeeMini) so
 // the number is still where you look at your weight trend.
 function renderTDEE(){
@@ -383,6 +426,8 @@ function renderTDEE(){
   if (document.activeElement!==ageEl) ageEl.value=PROFILE.age>0?PROFILE.age:'';
   if (document.activeElement!==hEl)   hEl.value=PROFILE.height>0?PROFILE.height:'';
   if (document.activeElement!==actEl) actEl.value=PROFILE.activity;
+  const tsEl=document.getElementById('pfTrendStart');
+  if (tsEl && document.activeElement!==tsEl) tsEl.value=TREND_START||'';
 
   const echo = (cls, html)=>{ if (!mini) return; mini.hidden=false; mini.className=cls; mini.innerHTML=html; };
   const td=computeTDEE();
@@ -403,6 +448,8 @@ function renderTDEE(){
   bits.push(td.dataTDEE!=null
     ? `measured ${td.dataTDEE.toLocaleString()} (${Math.round(td.w*100)}% weighted over ${td.sampleDays}d)`
     : `measured pending — needs ~7+ days of weigh-ins`);
+  // Say so when weigh-ins are being excluded, or the number looks unexplained.
+  if (TREND_START) bits.push(`weigh-ins before ${TREND_START} excluded`);
   out.className='tactical good';
   out.innerHTML = `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${bits.join(' · ')}.`;
   echo('tactical good', `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${bits.join(' · ')}. Edit your profile in ⚙ Settings.`);
@@ -431,6 +478,15 @@ function renderGoal(){
   const meals=mealPlanHours(), mt=meals.reduce((s,m)=>s+m.kcal,0);
   if (meals.length && mt>0 && P_TARGET>0)
     out.innerHTML += `<div style="margin-top:6px;font-size:11px;color:var(--graphite)">Protein/meal (g): ${meals.map(m=>`${escapeHtml(m.name)} ${Math.round(P_TARGET*m.kcal/mt)}`).join(' · ')}</div>`;
+  // Drift sits directly under the goal control, because changing the goal is one of
+  // the two answers to it.
+  const drift=document.getElementById('driftNote');
+  if (drift){
+    const line=driftLine();
+    drift.hidden = !line;
+    drift.className = 'tactical bad';
+    drift.innerHTML = line;
+  }
 }
 // Trailing 28-day weight rate (kg/wk) for the brief and weekly narrative.
 function weekRatePerWeek(){
@@ -466,6 +522,9 @@ function maybeShowBrief(){
     const r=weekRatePerWeek();
     if (r!=null) msg += (Math.abs(r)<0.05?'Weight holding steady. ':(r<0?`Trending down ${Math.abs(r).toFixed(2)} kg/wk. `:`Trending up ${r.toFixed(2)} kg/wk. `));
     msg += `Yesterday ${Math.round(yt.kcal)} kcal · ${yMark}.`;
+    const dr=corridorDriftNow();
+    if (dr.verdict==='over') msg += ` Heads up: ${dr.over}/${dr.n} recent days over the ceiling — the corridor may need raising.`;
+    else if (dr.verdict==='under') msg += ` Heads up: ${dr.under}/${dr.n} recent days under the floor — the corridor may need lowering.`;
     const card=document.getElementById('briefCard');
     document.getElementById('briefText').innerHTML=msg;
     card.className='digest-card '+(yMark.includes('✓')?'good':(yt.kcal>CEIL_M?'bad':'meh'));
@@ -550,10 +609,10 @@ function renderHeatmap() {
   const todayStr = dateStr();
 
   // Build lookup of all days
-  const dayMap = {};
-  allDays(true).forEach(d => { dayMap[d.date] = totalsOf(d.ledger); });
+  const dayMap = {}, ledgerMap = {};
+  allDays(true).forEach(d => { dayMap[d.date] = totalsOf(d.ledger); ledgerMap[d.date] = d.ledger; });
   // Overlay the live in-memory state under whichever day is on screen.
-  if (ledger.length) dayMap[VIEW_DATE] = totals();
+  if (ledger.length) { dayMap[VIEW_DATE] = totals(); ledgerMap[VIEW_DATE] = ledger; }
 
   // Generate HEATMAP_WEEKS weeks ending on today's week's Sunday. Widened to 16 so the
   // full imported history (~2.5 months of Gemini logs) is visible, not just recent weeks.
@@ -596,6 +655,10 @@ function renderHeatmap() {
         cls += ' lv1';
         tip += ` · ${Math.round(t.kcal)} kcal · under`;
       }
+      // A bulk-imported day carries kcal and protein and nothing else. Its zeros are
+      // an absence of measurement, not a measurement of zero, and the cell should say
+      // so rather than looking like any other fully-logged day.
+      if (!LedgerCore.macrosComplete(ledgerMap[ds])) tip += ' · macros not logged';
     }
 
     if (!isFuture && ds === VIEW_DATE) cls += ' viewing';
@@ -663,6 +726,10 @@ function renderTopFoods() {
   const count = {};
   allDays(true).forEach(d => d.ledger.forEach(e => {
     if (!e.name) return;
+    // A bulk import row is one day's totals under a placeholder name. Counting it
+    // as a food put "Gemini import" at rank 1 with more sightings than any real
+    // ingredient — a chart of the thing you have never once eaten.
+    if (e.source === 'import') return;
     count[e.name] = (count[e.name] || 0) + 1;
   }));
 
@@ -670,13 +737,13 @@ function renderTopFoods() {
   if (!top.length) { wrap.innerHTML = '<div class="empty">No history yet.</div>'; return; }
 
   const maxCount = top[0][1];
-  const colors = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16'];
-
+  // Bars are chalk. Eight rotating hues said nothing the length and the count did not
+  // already say, and colour in this app means one thing: out of tolerance.
   wrap.innerHTML = top.map(([name, cnt], i) => {
     const pct = Math.max(15, (cnt / maxCount) * 100);
     return `<div class="topfood-item">
       <span class="topfood-rank">${i+1}</span>
-      <div class="topfood-bar-wrap"><div class="topfood-bar" style="width:${pct}%;background:${colors[i % colors.length]}"><span>${escapeHtml(name)}</span></div></div>
+      <div class="topfood-bar-wrap"><div class="topfood-bar" style="width:${pct}%"><span>${escapeHtml(name)}</span></div></div>
       <span class="topfood-count">×${cnt}</span>
     </div>`;
   }).join('');

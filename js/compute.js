@@ -3,10 +3,12 @@
 
 // ---- CORE: compute one entry's contribution with penalties applied ----
 // base = per-100g nutrients; source tags provenance so AI estimates read as provisional.
-function computeEntry(name, grams, weighed, base, source) {
+// partOf (optional): the dish this entry was decomposed out of. Every recompute path
+// must pass it through or a grams edit would quietly orphan an ingredient from its meal.
+function computeEntry(name, grams, weighed, base, source, partOf) {
   base = base || getBase(name);
   return LedgerCore.computeEntry(name, grams, weighed, base, source,
-    {inflate:INFLATE, deduct:DEDUCT});
+    {inflate:INFLATE, deduct:DEDUCT}, partOf);
 }
 
 // Escape untrusted text (food/template/dish names from AI, USDA, imports, sync) before

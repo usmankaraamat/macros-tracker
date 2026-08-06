@@ -66,6 +66,13 @@ function capGrams(cap, kcalPerG){ return LedgerCore.capGrams(cap, kcalPerG, FLOO
 let MAINT = {min:0, max:0};
 // Body profile for the Mifflin-St Jeor BMR → TDEE. Also synced via the targets bundle.
 let PROFILE = {sex:'male', age:0, height:0, activity:'moderate'};
+// Weigh-ins before this date are ignored by the TDEE calibration. Switching between a
+// deficit and a surplus moves 1-2kg of glycogen and water in the first week or two, and
+// energy balance reads that as fat: a real +0.6 kg/wk of mostly water makes maintenance
+// look ~600 kcal lower than it is, which then drags the adaptive corridor down with it.
+// No estimator can spot that from the numbers alone, because the transition is a fact
+// about your diet, not about the series. So it is declared, not inferred. '' = use all.
+let TREND_START = '';
 const ACTIVITY_MULT = {sedentary:1.2, light:1.375, moderate:1.55, active:1.725, athlete:1.9};
 let INFLATE = 1 + PROTOCOL.penK/100, DEDUCT = 1 - PROTOCOL.penP/100;  // unweighed adjustments
 
@@ -82,6 +89,7 @@ function loadTargets(){
             if (t.maint) MAINT={min:+t.maint.min||0, max:+t.maint.max||0};
             if (t.profile) PROFILE={sex:t.profile.sex==='female'?'female':'male', age:+t.profile.age||0,
                                     height:+t.profile.height||0, activity:ACTIVITY_MULT[t.profile.activity]?t.profile.activity:'moderate'};
+            if (typeof t.trendStart === 'string') TREND_START = t.trendStart;
             if (t.goal) GOAL={mode:GOAL_LABEL[t.goal.mode]?t.goal.mode:'off', offset:+t.goal.offset||0, band:+t.goal.band>0?+t.goal.band:100};
             if (Array.isArray(t.mealPlan)) MEAL_PLAN = t.mealPlan.map(m=>({t:String(m.t||''), kcal:+m.kcal||0, name:String(m.name||'meal')}));
             if (t.train){ const tn=t.train;
@@ -97,7 +105,7 @@ function loadTargets(){
   } catch(e){}
 }
 function saveTargets(){
-  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN})); } catch(e){}
+  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,trendStart:TREND_START,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN})); } catch(e){}
   stampTargets(); scheduleSync();              // a genuine local edit — wins LWW until someone edits later
 }
 function savePens(){

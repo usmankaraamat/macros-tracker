@@ -277,9 +277,20 @@ function renderLiftTrends(rows){
     (a.t.cls === b.t.cls ? 0 : a.t.cls === 'strength' ? -1 : 1));
   wrap.innerHTML = rows.map(r=>{
     const t = r.t;
+    // Which metric this lift is judged on, and why. e1RM is only meaningful at low
+    // effective reps; above the cap the app measures capacity instead. That switch used
+    // to happen silently, so a set of 18 looked like it counted toward strength when it
+    // could not contribute to the number at all.
+    const capNote = t.setsTotal && t.setsCapped
+      ? ` · ${t.setsCapped} of ${t.setsTotal} sets past ${LedgerCore.LIFT_REP_CAP} effective reps`
+      : '';
+    const metricNote = t.cls === 'volume'
+      ? `judged on capacity (load × reps), not e1RM${capNote}`
+      : `judged on e1RM${capNote}`;
     let main, sub = '';
     if (t.verdict === 'thin'){
       main = `${t.sessions} session${t.sessions===1?'':'s'} logged · ${t.sessionsNeeded} more before a trend means anything`;
+      sub = metricNote;
     } else {
       main = `${t.metric === 'e1RM' ? 'e1RM' : 'capacity'} ${t.last.toFixed(1)}`
            + `${t.metric === 'e1RM' ? ' kg' : ''} · ${pctTxt(t.pctPerMonth)} · ${t.n} sessions over ${t.spanDays} days`;
@@ -291,6 +302,10 @@ function renderLiftTrends(rows){
         sub = `You are stopping ${Math.abs(t.rirPerMonth).toFixed(1)} reps further from failure than a month ago — the flat trend may be the reporting, not your strength.`;
       if (t.verdict === 'stalled')
         sub = `Output, volume and effort all flat. This is the real thing.`;
+      // Half your sets sitting past the cap means the strength line is fit on the other
+      // half — worth knowing before trusting a slope drawn through it.
+      if (t.setsTotal && t.setsCapped / t.setsTotal >= 0.5)
+        sub = (sub ? sub + ' ' : '') + metricNote.charAt(0).toUpperCase() + metricNote.slice(1) + '.';
     }
     const lm = t.latest;
     const lastLine = lm && lm.sets

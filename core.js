@@ -47,8 +47,10 @@
 
   // ---- Per-entry contribution with penalties -------------------------------
   // base = per-100g nutrients; pen = {inflate, deduct}. source tags provenance so
-  // AI estimates read as provisional.
-  function computeEntry(name, grams, weighed, base, source, pen) {
+  // AI estimates read as provisional. partOf (optional) is the dish this entry was
+  // decomposed out of — kept on the entry so the ledger can still show the meal.
+  // Without it, decomposing "biryani" into six ingredients loses the biryani.
+  function computeEntry(name, grams, weighed, base, source, pen, partOf) {
     const s = grams / 100;
     const e = {
       name, grams, weighed, base, source: source || 'DB',
@@ -63,7 +65,92 @@
       e.flags.push(`+${Math.round((pen.inflate - 1) * 100)}% kcal / −${Math.round((1 - pen.deduct) * 100)}% P`);
     }
     if (e.source === 'AI est') e.flags.push('AI-estimated nutrition — provisional');
+    // Only set when there is one: an absent key keeps plain foods the shape they
+    // have always been, and `partOf` truthiness is what marks a dish component.
+    if (partOf) e.partOf = String(partOf);
     return e;
+  }
+
+  // ---- Repeat units: what "I ate this before" actually means ----------------
+  // The parser decomposes a dish into ingredients, which is right for accuracy and
+  // ruinous for repeats — what recurs in a ledger mined by food name is "Sugar, NFS",
+  // never "chai". Grouping each day's entries by `partOf` puts the dish back, so the
+  // one-tap chips offer meals again. Entries with no dish stay their own unit.
+  //
+  // days = [{date, ledger}] newest-first (the caller's own ordering is preserved).
+  // Rows whose source is in `skipSources` never count — a bulk import row is a day's
+  // total wearing a food's clothes, and it would otherwise dominate every list.
+  function mineRepeats(days, opts) {
+    const o = opts || {};
+    const skip = o.skipSources || ['import'];
+    const count = {}, last = {};
+    (days || []).forEach(d => {
+      const dishes = {};
+      (d.ledger || []).forEach(e => {
+        if (!e || !e.name) return;
+        if (skip.indexOf(e.source) >= 0) return;
+        if (!(+e.grams > 0)) return;                 // nothing to repeat at zero grams
+        const dish = (e.partOf || '').trim();
+        if (dish) (dishes[dish] = dishes[dish] || []).push(e);
+        else {
+          const k = 'f:' + e.name;
+          count[k] = (count[k] || 0) + 1;
+          if (!last[k]) last[k] = { kind: 'food', name: e.name, items: [e] };
+        }
+      });
+      // A dish counts once per day however many ingredients it was split into.
+      Object.keys(dishes).forEach(dish => {
+        const k = 'd:' + dish;
+        count[k] = (count[k] || 0) + 1;
+        if (!last[k]) last[k] = { kind: 'dish', name: dish, items: dishes[dish] };
+      });
+    });
+    return Object.keys(count)
+      .sort((a, b) => count[b] - count[a] || (last[a].name < last[b].name ? -1 : 1))
+      .slice(0, o.limit > 0 ? o.limit : 6)
+      .map(k => Object.assign({ count: count[k] }, last[k]));
+  }
+
+  // A day that reports zero fat AND zero carbs against real calories did not measure
+  // them — it is a kcal/protein-only import. Averaging those zeros in reports fat and
+  // carbs as if they had been observed, which is how 21 imported days can quietly
+  // halve a three-month macro average.
+  function macrosComplete(ledger) {
+    const l = ledger || [];
+    const kcal = l.reduce((s, e) => s + (+(e && e.kcal) || 0), 0);
+    if (!(kcal > 0)) return false;
+    return l.some(e => (+(e && e.f) || 0) > 0 || (+(e && e.c) || 0) > 0);
+  }
+
+  // ---- Corridor drift: has the corridor stopped describing what you eat? -----
+  // A ceiling breached most days is not a warning any more, it is wallpaper — you
+  // stop seeing it, and the one signal the instrument exists to give is gone. This
+  // reports the sustained gap so the app can say "your goal says +300 and you are
+  // running +620; move one of them" instead of flashing the same alarm daily.
+  // days = [{kcal, floor, ceil}] for each CLOSED day in the window. Each day carries its
+  // own bounds because a training/rest cycle moves the corridor by hundreds of calories
+  // between one day and the next — judging a rest day against a training day's ceiling
+  // would manufacture drift out of a schedule that is working exactly as configured.
+  // The reported gap is the median overshoot past the bound each day actually had.
+  const DRIFT_MIN_DAYS = 10;
+  const DRIFT_SHARE = 0.6;          // this fraction of days on one side = not noise
+  function corridorDrift(days) {
+    const xs = (days || []).filter(d => d && +d.kcal > 0 && +d.ceil > +d.floor);
+    const n = xs.length;
+    const base = { n, verdict: 'thin', over: 0, under: 0, inside: 0, median: null, gap: null };
+    if (n < DRIFT_MIN_DAYS) return base;
+    const overs = xs.filter(d => d.kcal > d.ceil);
+    const unders = xs.filter(d => d.kcal < d.floor);
+    const inside = n - overs.length - unders.length;
+    const med = median(xs.map(d => +d.kcal));
+    let verdict = 'aligned', gap = 0;
+    if (overs.length / n >= DRIFT_SHARE) {
+      verdict = 'over';  gap = median(overs.map(d => d.kcal - d.ceil));
+    } else if (unders.length / n >= DRIFT_SHARE) {
+      verdict = 'under'; gap = median(unders.map(d => d.kcal - d.floor));
+    }
+    return { n, verdict, over: overs.length, under: unders.length, inside,
+             median: Math.round(med), gap: Math.round(gap) };
   }
 
   // ---- Fridge solver: rice(r) + chicken(k) grams to LAND at floor kcal ------
@@ -191,6 +278,27 @@
     // Must name the cooking method: USDA carries roasted/stewed/fried variants of the
     // identical cut, and a looser pattern silently pins whichever one ranks first.
     pick: /chicken.*breast.*meat only.*cooked.*stewed/
+  }, {
+    id: 'cooking-oil',
+    // The decomposer emits a "cooking oil" component for anything fried or in gravy,
+    // so this is the single most-logged ingredient in the whole database — and it was
+    // landing on three different names for the same fat. \boil\b matters: an unanchored
+    // "oil" also matches "brOILer", which would pin every chicken entry to fat.
+    when: /\b(cooking|vegetable|frying|refined)?\s*oils?\b/,
+    // Named oils are genuinely different foods with different fatty-acid profiles and,
+    // for the ones people cook with deliberately, different reasons for being logged.
+    not: /\b(olive|coconut|sesame|mustard|peanut|groundnut|avocado|walnut|almond|flax|fish|cod|castor|palm|ghee|butter)\b/,
+    query: 'Vegetable oil, NFS',
+    pick: /^vegetable oil, nfs$/
+  }, {
+    id: 'sugar-white',
+    // Pure consolidation: "Sugar, NFS" and "Sugar, white, granulated or lump" are the
+    // same 387 kcal/100g, so nothing about the numbers changes. What changes is that
+    // 60 entries stop being two foods, so sugar can appear once in the repeat lists.
+    when: /\bsugars?\b/,
+    not: /\b(free|less|substitute|brown|jaggery|gur|palm|coconut|icing|powdered|cane juice|syrup|cookie|cookies|wafer|candy|snap peas?|snap pea)\b/,
+    query: 'Sugar, NFS',
+    pick: /^sugar, nfs$/
   }];
   // The pin that applies to a search query, or null. Longest-standing behaviour when
   // nothing matches: the ordinary ranked search, untouched.
@@ -583,7 +691,7 @@
   // only the slope is ever read.
   function sessionMetrics(sets, opts) {
     const o = opts || {};
-    let volume = 0, topLoad = 0, best = null, cap = 0, counted = 0, skipped = 0, reps = 0;
+    let volume = 0, topLoad = 0, best = null, cap = 0, counted = 0, skipped = 0, reps = 0, capped = 0;
     const rirs = [];
     (sets || []).forEach(s => {
       const load = setLoad(s, o.bodyweightKg);
@@ -594,12 +702,16 @@
       const rir = s.rir != null ? +s.rir : (o.rir != null ? +o.rir : null);
       if (rir != null && isFinite(rir)) rirs.push(rir);
       const one = e1RM(load, r, rir);
+      // A set past the effective-rep cap yields no e1RM at all. Counting those is what
+      // lets the app say WHY an exercise is being judged on capacity instead of strength,
+      // rather than silently switching metric behind the user's back.
+      if (one == null) capped++;
       if (one != null && (best == null || one > best)) best = one;
       const c = load * (r + Math.max(0, rir || 0));
       if (c > cap) cap = c;
     });
     return { sets: counted, skipped: skipped, reps: reps, volume: volume, topLoad: topLoad,
-             bestE1RM: best, bestCapacity: counted ? cap : null,
+             bestE1RM: best, bestCapacity: counted ? cap : null, cappedSets: capped,
              medianRir: median(rirs), hasRir: rirs.length > 0, incomplete: skipped > 0 };
   }
   // Is this exercise still moving? sessions = [{date, sets:[{kg,reps,bw,rir}], rir}] in any
@@ -620,7 +732,8 @@
     const empty = { name: o.name || '', cls: 'strength', metric: 'e1RM', n: 0, sessions: 0,
                     first: null, last: null, pctPerMonth: null, volPctPerMonth: null,
                     rirPerMonth: null, verdict: 'thin', confidence: 'none',
-                    sessionsNeeded: minN, spanDays: 0, latest: null };
+                    sessionsNeeded: minN, spanDays: 0, latest: null,
+                    setsTotal: 0, setsCapped: 0 };
     if (!all.length) return empty;
     const end = isoDay(all[all.length - 1].date);
     const windowDays = o.windowDays > 0 ? o.windowDays : LIFT_WINDOW_DAYS;
@@ -631,10 +744,11 @@
 
     const build = cls => {
       const pts = [], vol = [], rir = [];
-      let last = null;
+      let last = null, setsTotal = 0, setsCapped = 0;
       win.forEach(s => {
         const m = sessionMetrics(s.sets, {
           bodyweightKg: o.weights ? weightAt(o.weights, s.date) : o.bodyweightKg, rir: s.rir });
+        setsTotal += m.sets; setsCapped += m.cappedSets;
         const x = isoDay(s.date) - t0;
         const y = cls === 'volume' ? m.bestCapacity : m.bestE1RM;
         if (y != null && y > 0) pts.push({ x: x, y: y });
@@ -642,7 +756,7 @@
         if (m.hasRir) rir.push({ x: x, y: m.medianRir });
         last = m;
       });
-      return { pts: pts, vol: vol, rir: rir, latest: last };
+      return { pts: pts, vol: vol, rir: rir, latest: last, setsTotal: setsTotal, setsCapped: setsCapped };
     };
     // A 'strength' exercise whose sessions mostly sit above the rep cap yields too few
     // e1RM points to fit. Rather than mixing units or inventing values, judge it as a
@@ -676,7 +790,8 @@
              pctPerMonth: pct, volPctPerMonth: volPct, rirPerMonth: rirPm,
              verdict: verdict, confidence: confidence,
              sessionsNeeded: Math.max(0, minN - n),
-             spanDays: end - t0, latest: b.latest };
+             spanDays: end - t0, latest: b.latest,
+             setsTotal: b.setsTotal, setsCapped: b.setsCapped };
   }
   // The reason this lives in a food tracker: cross-reference strength against bodyweight.
   // A surplus that is not buying strength is buying fat, and no lifting app can see that
@@ -719,13 +834,27 @@
   // Canonicalisation is what makes the whole feature work: "bicep curls", "db curl" and
   // "dumbbell curls" must land on one exercise or the history fragments into singletons
   // and a trend can never be fit. Expand abbreviations, drop punctuation, singularise.
+  // English plurals, only as far as canonicalisation needs. Dropping a lone trailing
+  // "s" is right for "curls" and wrong for "crunches", which it turns into "crunche"
+  // — a token no singular spelling can ever match, so "Cable Crunch" would start a
+  // second exercise beside "Cable Crunches" and split the history in half.
+  //   -ies after a consonant -> -y   (flies -> fly)
+  //   -es after ch/sh/x/z/ss  -> drop both   (crunches -> crunch, presses -> press)
+  //   otherwise               -> drop the s  (curls -> curl, raises -> raise)
+  // "-ss" is never a plural marker, so "press" survives intact.
+  function singularise(w) {
+    if (w.length <= 2 || !/s$/.test(w) || /ss$/.test(w)) return w;
+    if (/[^aeiou]ies$/.test(w)) return w.slice(0, -3) + 'y';
+    if (/(ch|sh|x|z|ss)es$/.test(w)) return w.slice(0, -2);
+    return w.slice(0, -1);
+  }
   function normalizeName(s) {
     return String(s || '').toLowerCase()
       .replace(/[^a-z0-9 ]+/g, ' ')
       .split(/\s+/).filter(Boolean)
       .map(w => LIFT_ABBR[w] || w).join(' ')
       .split(/\s+/).filter(Boolean)
-      .map(w => w.length > 2 && /s$/.test(w) && !/ss$/.test(w) ? w.slice(0, -1) : w)
+      .map(singularise)
       .join(' ').trim();
   }
   function exerciseId(name) { return normalizeName(name).replace(/\s+/g, '-'); }
@@ -981,7 +1110,8 @@
   };
 
   return {
-    nutrientsFrom, resolvePTarget, capGrams, computeEntry,
+    nutrientsFrom, resolvePTarget, capGrams, computeEntry, mineRepeats, macrosComplete,
+    corridorDrift, DRIFT_MIN_DAYS, singularise,
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
     FOOD_PINS, foodPin, pinMatches, applyPin,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,

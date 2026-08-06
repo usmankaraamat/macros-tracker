@@ -138,6 +138,13 @@
       <option value="athlete">athlete</option>
     </select></div>
   </div>
+  <div class="field">
+    <label for="pfTrendStart">Ignore weigh-ins before — set this after a diet switch</label>
+    <input type="date" id="pfTrendStart">
+    <div class="tactical">Going from a deficit to a surplus (or back) moves a kilo or two of water
+      and glycogen in the first week. Energy balance can only read that as fat, which pushes the
+      estimate — and the corridor built on it — badly off. Set this to the date the swing settled.</div>
+  </div>
   <div class="tactical" id="tdeeReadout">Enter your age and height and log a weight to estimate maintenance.</div>
 
   <span class="panel-title">Goal · auto-sets the corridor from your TDEE</span>
@@ -152,6 +159,8 @@
     <div id="goalCustomWrap" hidden><label for="goalOffset">Custom offset (kcal/day)</label><input type="number" id="goalOffset" step="25" inputmode="numeric" placeholder="250"></div>
   </div>
   <div class="tactical" id="goalReadout" hidden></div>
+  <!-- Fires only when the corridor has stopped describing what you actually eat. -->
+  <div class="tactical bad" id="driftNote" hidden></div>
 
   <span class="panel-title">Targets · protocol defaults shown, edit deliberately</span>
   <div class="targets-grid">

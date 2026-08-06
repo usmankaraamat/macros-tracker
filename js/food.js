@@ -246,11 +246,20 @@ function pendResolve(p){
   const c = p.candidates[+p.sel.slice(1)] || p.candidates[0];
   return {base: c.base, source:'USDA', label: c.name};
 }
+// Foods that are essentially always eaten cooked. USDA's ranker favours the raw entry
+// (it is shorter, and `raw` scores a bonus that exists to prefer plain fruit and veg
+// over juice and powder), so these silently resolve to the uncooked form — which for
+// anything that loses water in the pan is a real undercount per gram.
+const COOKED_STAPLES = /\b(chicken|beef|mutton|lamb|pork|turkey|fish|prawn|shrimp|mince|keema|rice|pasta|spaghetti|macaroni|noodle|lentil|daal|dal|chickpea|chana|rajma|bean|potato|egg|oat)\b/i;
 function pendWarn(p){
   const r = pendResolve(p);
   if (r.source==='USDA' && p.estBase && p.estBase.kcal>0 &&
       Math.abs(r.base.kcal - p.estBase.kcal)/p.estBase.kcal > 0.25)
     return `USDA ${Math.round(r.base.kcal)} vs AI est ${Math.round(p.estBase.kcal)} kcal/100g — check the match`;
+  // Not an error — weighing raw and cooking it is perfectly valid, and the app cannot
+  // know which you did. So this says what was matched and leaves the call to you.
+  if (r.source==='USDA' && /\braw\b/i.test(r.label||'') && COOKED_STAPLES.test(p.name||''))
+    return `matched the RAW entry — if you weighed this cooked, search for the cooked form`;
   return '';
 }
 // Capture live input state back into `pending` so a re-render doesn't lose edits.
@@ -424,7 +433,7 @@ function commitPending(){
     const r = pendResolve(p);
     const name = r.source==='USDA' ? r.label : p.name;   // log under the real matched food name
     registerFood(name, r.base, r.source);
-    pushEntry(computeEntry(name, p.grams, p.weighed, r.base, r.source));
+    pushEntry(computeEntry(name, p.grams, p.weighed, r.base, r.source, p.partOf));
     added++;
   });
   // Nothing to add means the review isn't finished — keep the list up, or the

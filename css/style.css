@@ -734,6 +734,26 @@ td {
 tbody tr:last-child td { border-bottom: none; }
 td .ename { font-family: var(--body); font-size: 13px; color: var(--chalk); }
 td .egrams { color: var(--faint); font-size: 11px; margin-left: 5px; }
+
+/* A decomposed dish is one meal. Its header carries the meal's totals and its
+   components are indented under it — still individually editable, because the
+   grouping is how it reads, not how it is stored. */
+tr.dish-head td { border-bottom: none; padding-bottom: 3px; }
+tr.dish-head .dish-name { font-family: var(--body); font-size: 13px; font-weight: 600; color: var(--chalk); }
+/* nowrap so a narrow column drops the whole "4 ingredients · 410g" to the next line
+   rather than breaking it after the number. */
+tr.dish-head .dish-meta { font-family: var(--data); font-size: 10px; color: var(--faint);
+                          margin-left: 7px; white-space: nowrap; }
+tr.of-dish td:first-child { padding-left: 16px; position: relative; }
+/* One hairline down the left of the block, so where a dish starts and ends is
+   readable without a box around it. */
+tr.of-dish td:first-child::before {
+  content: '';
+  position: absolute;
+  left: 5px; top: 0; bottom: 0;
+  border-left: 1px solid var(--rule);
+}
+tr.of-dish .ename { font-size: 12.5px; color: var(--graphite); }
 td .flags { display: block; font-family: var(--body); font-size: 10px; color: var(--brass); margin-top: 3px; }
 
 /* Row actions: real buttons, real tap targets, reachable by keyboard. */
@@ -797,6 +817,10 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .chip:has(.chip-main) { padding-right: 5px; gap: 4px; }
 .chip .chip-main { cursor: pointer; }
 .chip .icon-btn { width: 24px; height: 24px; min-height: 24px; font-size: 11px; }
+/* A dish repeats several entries in one tap, so it reads a step louder than the
+   single-ingredient chips it sits beside. Still no hue — weight and rule, not colour. */
+.chip.dish { color: var(--chalk); border-color: var(--rule-lit); font-weight: 500; }
+.chip.dish:hover { border-color: var(--graphite); }
 
 .empty-chips { display: flex; flex-direction: column; gap: 10px; padding: 14px 0 4px; }
 .empty-chips .ec-hint { font-size: 12px; color: var(--faint); text-align: center; }
