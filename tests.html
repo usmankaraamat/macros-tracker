@@ -520,6 +520,61 @@ group('supplementWindow + supplementStats');
         seeded.map(c=>(c.due?'O':'.')).join(''));
 })();
 
+// ---- liftWindowOpen: should the app launch on Lift instead of Today? ----
+group('liftWindowOpen — the workout window, lead-in, tail and midnight');
+(function(){
+  const MON=0, TUE=1, FRI=4, SAT=5, SUN=6;
+  const at = (h,m)=> h*60 + (m||0);
+  // Mon–Fri train, Sat/Sun rest. 18:00–20:00 → open 17:45 (lead) to 20:30 (tail).
+  const T = {split:['Pull','Push','Legs','Upper · pull','Upper · push','Rest','Rest'], start:'18:00', end:'20:00'};
+  const open = (wd,h,m)=> C.liftWindowOpen(T, wd, at(h,m));
+
+  check('hhmmMinutes parses "18:00"', C.hhmmMinutes('18:00')===1080, `got ${C.hhmmMinutes('18:00')}`);
+  check('hhmmMinutes rejects "24:00"', C.hhmmMinutes('24:00')===null, 'expected null');
+  check('hhmmMinutes rejects junk', C.hhmmMinutes('soon')===null, 'expected null');
+  check('isTrainingSplit: "Rest" is not training', !C.isTrainingSplit('Rest') && !C.isTrainingSplit('  rest  '), 'Rest counted as training');
+  check('isTrainingSplit: a named split is', C.isTrainingSplit('Pull'), 'expected true');
+
+  // Mid-session on a training day is the whole point.
+  check('Mon 18:30 → open', open(MON,18,30), 'expected open');
+  check('Tue 19:59 → open', open(TUE,19,59), 'expected open');
+  // Lead-in: turning up early counts, arriving-in-an-hour does not.
+  check('Mon 17:45 → open (lead-in edge)', open(MON,17,45), 'expected open');
+  check('Mon 17:44 → shut', !open(MON,17,44), 'expected shut');
+  check('Mon 17:00 → shut', !open(MON,17,0), 'expected shut');
+  // Tail: logging the last set on the way out counts.
+  check('Mon 20:30 → open (tail edge)', open(MON,20,30), 'expected open');
+  check('Mon 20:31 → shut', !open(MON,20,31), 'expected shut');
+  // Rest days never open, whatever the clock says.
+  check('Sat 18:30 → shut (rest day)', !open(SAT,18,30), 'expected shut');
+  check('Sun 18:30 → shut (rest day)', !open(SUN,18,30), 'expected shut');
+  check('Mon 08:00 → shut', !open(MON,8,0), 'expected shut');
+
+  // A late session whose window runs past midnight stays open into the next calendar day,
+  // and the NEXT day being a rest day must not close it.
+  const LATE = {split:['Pull','Push','Legs','Upper','Upper · push','Rest','Rest'], start:'22:00', end:'00:30'};
+  const lateOpen = (wd,h,m)=> C.liftWindowOpen(LATE, wd, at(h,m));
+  check('Fri 23:00 → open (end < start)', lateOpen(FRI,23,0), 'expected open');
+  check('Sat 00:45 → open (Friday session, past midnight)', lateOpen(SAT,0,45), 'expected open');
+  check('Sat 01:05 → shut (tail expired)', !lateOpen(SAT,1,5), 'expected shut');
+  check('Sat 23:00 → shut (Saturday is a rest day)', !lateOpen(SAT,23,0), 'expected shut');
+
+  // …and the mirror case: a lead-in that reaches back across midnight.
+  const EARLY = {split:['Pull','Push','Legs','Upper','Upper · push','Rest','Rest'], start:'00:05', end:'01:00'};
+  check('Sun 23:55 → open (lead-in to Monday session)', C.liftWindowOpen(EARLY, SUN, at(23,55)), 'expected open');
+  check('Sun 23:50 → open (lead-in edge, 15 min before 00:05)', C.liftWindowOpen(EARLY, SUN, at(23,50)), 'expected open');
+  check('Sun 23:49 → shut', !C.liftWindowOpen(EARLY, SUN, at(23,49)), 'expected shut');
+
+  // Degenerate config must fail closed — never hijack the launch tab on a guess.
+  check('no end time → assume an hour', C.liftWindowOpen({split:T.split, start:'18:00'}, MON, at(18,45)), 'expected open');
+  check('  …and shut past that hour + tail', !C.liftWindowOpen({split:T.split, start:'18:00'}, MON, at(19,31)), 'expected shut');
+  check('unparseable start → shut', !C.liftWindowOpen({split:T.split, start:'evening', end:'20:00'}, MON, at(18,30)), 'expected shut');
+  check('missing split → shut', !C.liftWindowOpen({start:'18:00', end:'20:00'}, MON, at(18,30)), 'expected shut');
+  check('short split array → shut', !C.liftWindowOpen({split:['Pull'], start:'18:00', end:'20:00'}, MON, at(18,30)), 'expected shut');
+  check('all-rest week → shut', !C.liftWindowOpen({split:['Rest','Rest','Rest','Rest','Rest','Rest','Rest'], start:'18:00', end:'20:00'}, MON, at(18,30)), 'expected shut');
+  check('no schedule at all → shut', !C.liftWindowOpen(null, MON, at(18,30)), 'expected shut');
+})();
+
 // ---- e1RM / setLoad / weightAt: the primitives every lift number rests on ----
 group('e1RM — Epley, extended by reps-in-reserve');
 (function(){

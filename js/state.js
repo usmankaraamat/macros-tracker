@@ -30,11 +30,19 @@ let MEAL_PLAN = [
 ];
 // Training schedule. split is Mon-first (index 0=Mon … 6=Sun); '' or 'Rest' = rest day.
 // start/end are the workout window (editable in Settings). cycle drives the corridor to a
-// bigger surplus on training days and a smaller one on rest days. Synced with targets.
+// bigger surplus on training days and a smaller one on rest days. autoLift opens the app
+// on the Lift tab during that window instead of Today. Synced with targets.
 let TRAIN = {
   split: ['Pull','Push','Legs','Upper · pull','Upper · push','Rest','Rest'],
-  start:'18:00', end:'20:00', cycle:false, trainOffset:400, restOffset:0
+  start:'18:00', end:'20:00', cycle:false, trainOffset:400, restOffset:0, autoLift:true
 };
+// Is the workout window open right now? Same PKT-shifted clock as the rest of the app, so
+// "18:00" means the same 18:00 the coach line and the ledger day already use.
+function inWorkoutWindow(){
+  const now = new Date(Date.now() + TZ_OFFSET_MIN*60000);
+  const wd = (now.getUTCDay()+6)%7;                       // Mon-first, matching TRAIN.split
+  return LedgerCore.liftWindowOpen(TRAIN, wd, now.getUTCHours()*60 + now.getUTCMinutes());
+}
 const WEEKDAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 function weekdayMon(ds){ const p=ds.split('-').map(Number); return (new Date(Date.UTC(p[0],p[1]-1,p[2])).getUTCDay()+6)%7; }
 function splitForDate(ds){ return TRAIN.split[weekdayMon(ds)] || 'Rest'; }
@@ -79,7 +87,10 @@ function loadTargets(){
             if (t.train){ const tn=t.train;
               TRAIN = { split: Array.isArray(tn.split)&&tn.split.length===7 ? tn.split.map(s=>String(s||'Rest')) : TRAIN.split,
                         start:String(tn.start||'18:00'), end:String(tn.end||'20:00'),
-                        cycle:!!tn.cycle, trainOffset:+tn.trainOffset||0, restOffset:+tn.restOffset||0 }; } }
+                        cycle:!!tn.cycle, trainOffset:+tn.trainOffset||0, restOffset:+tn.restOffset||0,
+                        // Absent in blobs written before auto-switch existed — default it ON
+                        // rather than silently shipping the feature disabled.
+                        autoLift: tn.autoLift !== false }; } }
     const pn = JSON.parse(localStorage.getItem('ledger_pen')||'null');
     // pn.oilK / pn.oilF may still be present from before the oil tax was dropped; ignored.
     if (pn){ INFLATE = 1 + (+pn.k||0)/100; DEDUCT = 1 - (+pn.p||0)/100; }
