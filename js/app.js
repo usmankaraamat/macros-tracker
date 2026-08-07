@@ -310,8 +310,90 @@ function fillTargetInputs(){
   document.getElementById('tFMode').value = F_CAP.mode;
   document.getElementById('penK').value   = Math.round((INFLATE-1)*100);
   document.getElementById('penP').value   = Math.round((1-DEDUCT)*100);
+  resetMacroFill();          // the boxes now show saved state, none of it inferred
   fillMealPlan(); fillTrain();
 }
+
+// ---- Auto-completing the macro split --------------------------------------
+// Set any two of protein / carbs / fat and the third is arithmetic: whatever is left of
+// the calorie floor. The blank box gets filled in as you type, in its own unit.
+//
+// Two rules keep this from fighting the user. It only ever writes into a box the user
+// left blank, and only in response to an edit — never on load, where a blank carb or fat
+// cap means a deliberate "off" that must survive. And clearing a filled box is read as
+// "I want this one off", so it is not immediately filled back in.
+const MACRO_FIELDS = {
+  p: { val:'tP',    mode:'tPMode', label:'Protein floor' },
+  c: { val:'tCMax', mode:'tCMode', label:'Carb cap' },
+  f: { val:'tFMax', mode:'tFMode', label:'Fat cap' }
+};
+let _autoMacro = null;                    // key of the box the app filled, or null
+const _macroOff = new Set();              // keys the user deliberately emptied
+function resetMacroFill(){
+  if (_autoMacro) document.getElementById(MACRO_FIELDS[_autoMacro].val).classList.remove('auto-filled');
+  _autoMacro = null; _macroOff.clear();
+  const note = document.getElementById('macroFillNote');
+  if (note) note.hidden = true;
+}
+function readMacroCfg(){
+  const out = {};
+  Object.keys(MACRO_FIELDS).forEach(k=>{
+    const f = MACRO_FIELDS[k];
+    out[k] = { mode: document.getElementById(f.mode).value === 'pct' ? 'pct' : 'g',
+               val: +document.getElementById(f.val).value || 0 };
+  });
+  return out;
+}
+function autofillThirdMacro(){
+  const note = document.getElementById('macroFillNote');
+  const floor = +document.getElementById('tFloor').value;
+  // Our own last guess is not user input — clear it before reading, or the next keystroke
+  // would see three macros set and stop updating.
+  if (_autoMacro){
+    const el = document.getElementById(MACRO_FIELDS[_autoMacro].val);
+    el.value = ''; el.classList.remove('auto-filled');
+    _autoMacro = null;
+  }
+  const r = LedgerCore.completeMacros(floor, readMacroCfg());
+  if (!r || _macroOff.has(r.key)){ note.hidden = true; return; }
+  const f = MACRO_FIELDS[r.key];
+  if (r.over){
+    setStatus(note, `Those two already account for ${r.used} of the ${floor} kcal floor — `
+      + `nothing left for ${f.label.toLowerCase()}. Raise the floor or lower one of them.`, 'bad');
+    return;
+  }
+  const el = document.getElementById(f.val);
+  el.value = r.val;
+  el.classList.add('auto-filled');
+  _autoMacro = r.key;
+  setStatus(note, `${f.label} filled to ${r.val}${r.mode==='pct'?'%':'g'} — the ${r.kcal} kcal `
+    + `left of the ${floor} kcal floor. Type in it to set your own, or clear it to leave it off.`);
+}
+Object.keys(MACRO_FIELDS).forEach(k=>{
+  const f = MACRO_FIELDS[k];
+  document.getElementById(f.val).addEventListener('input', ()=>{
+    const el = document.getElementById(f.val);
+    const empty = !(+el.value > 0);
+    if (k === _autoMacro){
+      _autoMacro = null;                                       // the user took the wheel
+      el.classList.remove('auto-filled');
+      // Emptying the box the app just filled is a rejection of the suggestion, so it
+      // means "leave this one off" — otherwise it would be refilled on the next keystroke.
+      if (empty) _macroOff.add(k); else _macroOff.delete(k);
+    } else if (empty){
+      // A box the user owns: emptying it asks for it to be worked out, not switched off.
+      _macroOff.delete(k);
+    } else {
+      _macroOff.delete(k);
+    }
+    autofillThirdMacro();
+  });
+  // Changing the UNIT is not taking ownership — it says which unit to answer in. Keeping
+  // _autoMacro lets the filled value be re-expressed instead of stranded in the old unit.
+  document.getElementById(f.mode).addEventListener('change', autofillThirdMacro);
+});
+// Changing the floor changes what is left over, so the inferred macro has to follow.
+document.getElementById('tFloor').addEventListener('input', autofillThirdMacro);
 // Meal plan editor: one "HH:MM kcal Name" per line.
 function mealPlanToText(){ return MEAL_PLAN.map(m=>`${m.t} ${m.kcal} ${m.name}`).join('\n'); }
 function fillMealPlan(){ const el=document.getElementById('mealPlanInput'); if (el && document.activeElement!==el) el.value = mealPlanToText(); }
