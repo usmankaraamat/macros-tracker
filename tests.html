@@ -81,6 +81,55 @@ check('protein grams mode passes through', C.resolvePTarget({mode:'g',val:120}, 
 check('carb cap 40% of 1700 @4kcal/g = 170g', approx(C.capGrams({mode:'pct',val:40}, 4, 1700), 170), '');
 check('cap of 0 = off', C.capGrams({mode:'g',val:0}, 9, 1700) === 0, '');
 
+// ---- completeMacros: set two, the third is arithmetic ----
+group('completeMacros — fill the blank macro from the calorie floor');
+(function(){
+  const M = (mode,val)=>({mode,val});
+  const at = (floor,p,c,f)=> C.completeMacros(floor, {p:p, c:c, f:f});
+
+  // Two in grams → the blank one in grams, at its own kcal/g.
+  const r1 = at(2000, M('g',150), M('g',200), M('g',0));    // 600 + 800 used, 600 left
+  check('p150g + c200g @2000 → fat', r1 && r1.key==='f' && r1.val===67, JSON.stringify(r1));
+  check('  …kcal reported from the ROUNDED grams', r1.kcal===603, `got ${r1.kcal}`);
+  const r2 = at(2000, M('g',150), M('g',0), M('g',60));      // 600 + 540 used, 860 left
+  check('p150g + f60g @2000 → carbs 215g', r2 && r2.key==='c' && r2.val===215, JSON.stringify(r2));
+  const r3 = at(2000, M('g',0), M('g',200), M('g',60));
+  check('c200g + f60g @2000 → protein 165g', r3 && r3.key==='p' && r3.val===165, JSON.stringify(r3));
+
+  // Percentages: the three shares must come to 100 for the floor to be fully spent.
+  const r4 = at(2000, M('pct',30), M('pct',40), M('pct',0));
+  check('30% + 40% → fat 30%', r4 && r4.mode==='pct' && r4.val===30, JSON.stringify(r4));
+  const r5 = at(1800, M('pct',35), M('pct',45), M('pct',0));
+  check('35% + 45% → fat 20% (sums to 100)', r5.val===20 && 35+45+r5.val===100, JSON.stringify(r5));
+
+  // The answer is expressed in the BLANK field's unit, not the units of the inputs.
+  const r6 = at(2000, M('g',150), M('g',200), M('pct',0));
+  check('grams in, % field out → 30%', r6.mode==='pct' && r6.val===30, JSON.stringify(r6));
+
+  // Nothing to infer.
+  check('one macro set → null', at(2000, M('g',150), M('g',0), M('g',0))===null, 'expected null');
+  check('no macro set → null', at(2000, M('g',0), M('g',0), M('g',0))===null, 'expected null');
+  check('all three set → null (never overwrite a deliberate value)',
+        at(2000, M('g',150), M('g',200), M('g',67))===null, 'expected null');
+  check('no floor → null', at(0, M('g',150), M('g',200), M('g',0))===null, 'expected null');
+
+  // Over-budget must not fill in a 0, which would read as a deliberate "none".
+  const o1 = at(2000, M('g',200), M('g',350), M('g',0));     // 800 + 1400 = 2200
+  check('two macros over the floor → over flag', o1 && o1.over===true && o1.val===0, JSON.stringify(o1));
+  check('  …and reports what they already spend', o1.used===2200, `got ${o1.used}`);
+  const o2 = at(2000, M('g',150), M('g',350), M('g',0));     // 600 + 1400 = exactly 2000
+  check('two macros exactly filling the floor → over flag', o2 && o2.over===true, JSON.stringify(o2));
+  // Rounding down to zero grams is the same situation, not a 0g target.
+  const o3 = at(2000, M('g',150), M('g',349), M('g',0));     // 4 kcal left → 0.4g fat
+  check('a remainder that rounds to 0g → over flag', o3 && o3.over===true, JSON.stringify(o3));
+
+  // macroKcal, the primitive underneath.
+  check('macroKcal: 150g protein = 600 kcal', C.macroKcal(M('g',150), 4, 2000)===600, '');
+  check('macroKcal: 60g fat = 540 kcal', C.macroKcal(M('g',60), 9, 2000)===540, '');
+  check('macroKcal: 30% of 2000 = 600 kcal', C.macroKcal(M('pct',30), 4, 2000)===600, '');
+  check('macroKcal: unset = 0', C.macroKcal(M('g',0), 4, 2000)===0, '');
+})();
+
 // ---- computeEntry: penalties ----
 group('computeEntry — unweighed penalties');
 const PEN = {inflate:1.1, deduct:0.9};

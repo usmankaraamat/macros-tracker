@@ -603,6 +603,15 @@ button.sm { width: auto; min-height: 34px; padding: 6px 12px; font-size: 12px; }
 .targets-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 12px; }
 .field { margin-bottom: 12px; }
 
+/* A macro the app worked out from the other two. Marked so it never passes for
+   something you typed — it stays fully editable, and typing takes it back. */
+input.auto-filled {
+  border-style: dashed;
+  border-color: var(--graphite);
+  color: var(--graphite);
+}
+input.auto-filled:focus { border-style: solid; color: var(--chalk); }
+
 /* Toggle pills — a real switch, not a 13px checkbox. */
 .pill-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .pill {

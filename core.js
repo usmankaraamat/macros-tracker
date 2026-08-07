@@ -45,6 +45,44 @@
     return cap.mode === 'pct' ? cap.val / 100 * floor / kcalPerG : cap.val;
   }
 
+  // ---- Completing the macro split ------------------------------------------
+  // Set two of the three macros and the third is arithmetic, not a decision: whatever
+  // is left of the calorie floor has to come from somewhere. This works it out so the
+  // UI can fill the blank field in.
+  //
+  // macros = {p,c,f}, each {mode:'g'|'pct', val}; val 0 (or blank) means "not set".
+  // Returns null when there is nothing to infer — fewer than two set, all three set, or
+  // no floor to divide up. Otherwise {key, mode, val, kcal}, with val already expressed
+  // in the missing field's OWN unit so a % field is handed a % and a gram field grams.
+  // kcal is recomputed from the ROUNDED val, so the readout matches what lands in the
+  // box rather than the unrounded ideal.
+  const KCAL_PER_G = { p: 4, c: 4, f: 9 };
+  function macroKcal(m, kcalPerG, floor) {
+    if (!m || !(m.val > 0)) return 0;
+    return m.mode === 'pct' ? m.val / 100 * floor : m.val * kcalPerG;
+  }
+  function completeMacros(floor, macros) {
+    if (!(floor > 0) || !macros) return null;
+    const keys = ['p', 'c', 'f'];
+    const set = keys.filter(k => macros[k] && macros[k].val > 0);
+    if (set.length !== 2) return null;            // exactly two pins down exactly one
+    const key = keys.filter(k => set.indexOf(k) < 0)[0];
+    const used = set.reduce((s, k) => s + macroKcal(macros[k], KCAL_PER_G[k], floor), 0);
+    const left = floor - used;
+    const mode = macros[key] && macros[key].mode === 'pct' ? 'pct' : 'g';
+    // The two given macros already spend the whole floor. Say so rather than filling in
+    // a zero or a negative, which would read as a deliberate target of "none".
+    if (left <= 0) return { key: key, mode: mode, val: 0, kcal: 0,
+                            used: Math.round(used), over: true };
+    const exact = mode === 'pct' ? left / floor * 100 : left / KCAL_PER_G[key];
+    const val = Math.round(exact);
+    if (val <= 0) return { key: key, mode: mode, val: 0, kcal: 0,
+                           used: Math.round(used), over: true };
+    return { key: key, mode: mode, val: val, over: false,
+             used: Math.round(used),
+             kcal: Math.round(mode === 'pct' ? val / 100 * floor : val * KCAL_PER_G[key]) };
+  }
+
   // ---- Per-entry contribution with penalties -------------------------------
   // base = per-100g nutrients; pen = {inflate, deduct}. source tags provenance so
   // AI estimates read as provisional. partOf (optional) is the dish this entry was
@@ -1112,6 +1150,7 @@
   return {
     nutrientsFrom, resolvePTarget, capGrams, computeEntry, mineRepeats, macrosComplete,
     corridorDrift, DRIFT_MIN_DAYS, singularise,
+    completeMacros, macroKcal, KCAL_PER_G,
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
     FOOD_PINS, foodPin, pinMatches, applyPin,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
