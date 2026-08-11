@@ -977,6 +977,12 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 }
 .supp-row:last-child { border-bottom: none; }
 .supp-row .sr-sub { font-family: var(--data); font-size: 10px; color: var(--faint); margin-top: 2px; }
+.supp-row-btns { display: flex; gap: 6px; flex: none; }
+.micro-supp {
+  font-family: var(--data); font-size: 9px; letter-spacing: .04em;
+  color: var(--verdigris); border: 1px solid var(--verdigris-wash);
+  border-radius: 3px; padding: 0 3px; vertical-align: middle;
+}
 .supp-days { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; }
 
 /* Compact "ON today" strip that lives on Today. */
@@ -1162,6 +1168,20 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
   font-size: 12px;
 }
 .lift-del:hover { background: var(--chalk-wash); color: var(--hot); }
+.lift-ex-btns { display: flex; gap: 2px; flex: none; align-self: center; }
+.lift-edit {
+  width: 30px; height: 30px; min-height: 30px;
+  padding: 0; flex: none;
+  display: grid; place-items: center;
+  background: none; border: none;
+  color: var(--faint);
+  font-size: 12px;
+}
+.lift-edit:hover { background: var(--chalk-wash); color: var(--chalk); }
+.lift-ex-editing { background: var(--chalk-wash); border-radius: 6px; padding: 12px; }
+.lift-edit-lbl { display: block; font-size: 11px; color: var(--faint); margin: 8px 0 3px; }
+.lift-edit-in { width: 100%; }
+.lift-pick { width: 100%; margin-bottom: 8px; }
 
 .lift-tag {
   font-family: var(--data);

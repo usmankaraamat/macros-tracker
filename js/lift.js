@@ -200,6 +200,13 @@ Lines:
 };
 
 // ---- rendering ----
+// The index of the logged exercise currently being edited in place, or null. Editing lets
+// you fix a wrong name or a mis-typed set without deleting the whole exercise and re-logging
+// it — the friction of "one bad set means start over" that the delete-only card forced.
+let liftEditIdx = null;
+// One exercise as a text line the parser round-trips: "Name  60kgx8, 60kgx7". rir is edited
+// in its own field, so it is deliberately left off the sets line here.
+function exerciseEditLine(ex){ return (ex.sets||[]).map(SET_IN).join(', '); }
 function renderLiftSession(all, W){
   const w = all[VIEW_DATE] || workoutFor(VIEW_DATE);
   document.getElementById('liftDate').textContent = VIEW_DATE===ACTIVE_DATE ? 'today' : VIEW_DATE;
@@ -207,15 +214,21 @@ function renderLiftSession(all, W){
   const el = document.getElementById('liftSession');
   if (!(w.exercises||[]).length){
     el.innerHTML = '<div class="empty">Nothing logged for this day.</div>';
+    liftEditIdx = null;
     return;
   }
+  if (liftEditIdx != null && liftEditIdx >= w.exercises.length) liftEditIdx = null;
   const bwKg = LedgerCore.weightAt(W, VIEW_DATE);
   el.innerHTML = w.exercises.map((ex,i)=>{
+    if (i === liftEditIdx) return renderLiftExEditor(ex, i);
     const m = LedgerCore.sessionMetrics(ex.sets, {bodyweightKg: bwKg, rir: ex.rir});
     return `<div class="lift-ex">
       <div class="lift-ex-head">
         <span class="lift-ex-name">${escapeHtml(ex.name)}</span>
-        <button type="button" class="lift-del" data-lx="${i}" aria-label="Remove ${escapeAttr(ex.name)} from this session" title="Remove">✕</button>
+        <span class="lift-ex-btns">
+          <button type="button" class="lift-edit" data-le="${i}" aria-label="Edit ${escapeAttr(ex.name)}" title="Edit">✎</button>
+          <button type="button" class="lift-del" data-lx="${i}" aria-label="Remove ${escapeAttr(ex.name)} from this session" title="Remove">✕</button>
+        </span>
       </div>
       <div class="lift-sets">${(ex.sets||[]).map(SET_TXT).join('  ·  ')}</div>
       <div class="lift-sub">${m.sets} set${m.sets===1?'':'s'} · ${Math.round(m.volume).toLocaleString()} kg volume`
@@ -226,11 +239,15 @@ function renderLiftSession(all, W){
                value="${ex.rir==null?'':ex.rir}" placeholder="–"></div>
     </div>`;
   }).join('');
+  el.querySelectorAll('[data-le]').forEach(s=>{
+    s.onclick = ()=>{ liftEditIdx = +s.dataset.le; renderLiftSession(allWorkouts(), weightSeries()); };
+  });
   el.querySelectorAll('[data-lx]').forEach(s=>{
     s.onclick = ()=>{
       const i = +s.dataset.lx, cur = workoutFor(VIEW_DATE);
       const ex = cur.exercises[i];
       if (!ex) return;
+      if (liftEditIdx === i) liftEditIdx = null;
       cur.exercises.splice(i,1); saveWorkout(cur); render();
       toast(`Removed ${ex.name}`, { undo: ()=>{
         const back = workoutFor(VIEW_DATE);
@@ -246,6 +263,87 @@ function renderLiftSession(all, W){
       saveWorkout(cur); render();
     };
   });
+  bindLiftEditor(w);
+}
+// The inline editor a logged exercise turns into. Name and sets are free text so a rename
+// ("Cable Overhead Extensions" → "Triceps Overhead Extensions") re-matches the catalogue and
+// keeps the trend line intact; the sets reuse the same grammar as the main logger.
+function renderLiftExEditor(ex, i){
+  return `<div class="lift-ex lift-ex-editing">
+    <div class="lift-ex-head"><span class="lift-ex-name">Editing</span></div>
+    <label for="leName${i}" class="lift-edit-lbl">Exercise</label>
+    <input type="text" id="leName${i}" class="lift-edit-in" value="${escapeAttr(ex.name)}">
+    <label for="leSets${i}" class="lift-edit-lbl">Sets <span class="ink-dim">— e.g. 60kgx8, 60kgx7 · bwx12 · bw+10kgx8</span></label>
+    <input type="text" id="leSets${i}" class="lift-edit-in" value="${escapeAttr(exerciseEditLine(ex))}">
+    <label for="leRir${i}" class="lift-edit-lbl">Reps left in the tank on your hardest set</label>
+    <input type="number" id="leRir${i}" class="lift-edit-in" min="0" max="10" step="1" value="${ex.rir==null?'':ex.rir}" placeholder="–">
+    <div class="tactical bad" id="leMsg${i}" hidden></div>
+    <div class="footer-actions" style="grid-template-columns:1fr 1fr;margin-top:8px">
+      <button type="button" class="ghost" data-lecancel="${i}">Cancel</button>
+      <button type="button" data-lesave="${i}">Save</button>
+    </div>
+  </div>`;
+}
+function bindLiftEditor(w){
+  const el = document.getElementById('liftSession');
+  const cancel = el.querySelector('[data-lecancel]');
+  if (cancel) cancel.onclick = ()=>{ liftEditIdx = null; renderLiftSession(allWorkouts(), weightSeries()); };
+  const save = el.querySelector('[data-lesave]');
+  if (!save) return;
+  save.onclick = ()=>{
+    const i = +save.dataset.lesave;
+    const nameV = (document.getElementById('leName'+i).value||'').trim();
+    const setsV = (document.getElementById('leSets'+i).value||'').trim();
+    const rirRaw = (document.getElementById('leRir'+i).value||'').trim();
+    const msg = document.getElementById('leMsg'+i);
+    const fail = t => { msg.hidden = false; msg.textContent = t; };
+    if (!nameV) return fail('Give the exercise a name.');
+    if (!setsV) return fail('Enter at least one set — or use ✕ to remove the exercise.');
+    // Reuse the logger's grammar: one line of "name sets" parses to the same shape we store.
+    const parsed = LedgerCore.parseWorkout(nameV + ' ' + setsV, exerciseCatalog());
+    const p = parsed.exercises[0];
+    if (!p || !p.sets.length) return fail('Could not read those sets. Try "60kgx8, 60kgx7".');
+    const cur = workoutFor(VIEW_DATE);
+    if (!cur.exercises[i]){ liftEditIdx = null; render(); return; }
+    const rir = rirRaw==='' ? (p.rir==null ? null : p.rir) : Math.max(0, Math.min(10, +rirRaw||0));
+    // A rename onto an exercise the catalogue hasn't seen joins it, same as first-time logging.
+    let cat = exerciseCatalog();
+    if (!cat.some(c=>c.id===p.id)) saveCatalog(cat.concat([{id:p.id, name:p.name, aliases:[]}]));
+    cur.exercises[i] = { id:p.id, name:p.name, sets:p.sets.slice(), rir };
+    saveWorkout(cur); liftEditIdx = null; haptic(); render();
+    toast(`Updated ${p.name}`);
+  };
+}
+// A dropdown of known exercises — the last same-split session first, then the whole
+// catalogue — so a name is picked once and spelled the same way every week instead of being
+// re-typed (and re-spelled) from memory. Choosing one drops its canonical name into the
+// logger, ready for the sets.
+function renderLiftPicker(all){
+  const sel = document.getElementById('liftPick'); if (!sel) return;
+  const cat = exerciseCatalog();
+  const sp = splitForDate(VIEW_DATE);
+  const past = Object.keys(all).filter(x=>x!==VIEW_DATE && (all[x].exercises||[]).length).sort();
+  const lastSame = past.filter(x=>(all[x].split||'')===sp).pop();
+  const recent = [];
+  if (lastSame) (all[lastSame].exercises||[]).forEach(ex=>{ if (ex.name && recent.indexOf(ex.name)<0) recent.push(ex.name); });
+  const allNames = cat.map(c=>c.name).sort((a,b)=> a.toLowerCase()<b.toLowerCase()?-1:1).filter(n=>recent.indexOf(n)<0);
+  if (!recent.length && !allNames.length){ sel.hidden = true; return; }
+  sel.hidden = false;
+  let html = '<option value="">＋ Insert an exercise name…</option>';
+  if (recent.length) html += `<optgroup label="Last ${escapeHtml(all[lastSame].split||sp)} · ${lastSame}">`
+    + recent.map(n=>`<option value="${escapeAttr(n)}">${escapeHtml(n)}</option>`).join('') + '</optgroup>';
+  if (allNames.length) html += '<optgroup label="All exercises">'
+    + allNames.map(n=>`<option value="${escapeAttr(n)}">${escapeHtml(n)}</option>`).join('') + '</optgroup>';
+  sel.innerHTML = html;
+  sel.onchange = ()=>{
+    const name = sel.value; sel.value = '';
+    if (!name) return;
+    const inp = document.getElementById('liftInput');
+    const base = (inp.value||'').replace(/\s+$/,'');
+    inp.value = (base ? base + '\n' : '') + name + ' ';   // each pick on its own line, ready for sets
+    inp.focus();
+    inp.setSelectionRange(inp.value.length, inp.value.length);
+  };
 }
 function renderLiftChips(all){
   const el = document.getElementById('liftChips'); if (!el) return;
@@ -401,7 +499,7 @@ function renderLift(){
   if (!document.getElementById('liftSession')) return;
   const all = allWorkouts(), W = weightSeries();
   const rows = liftTrends(all, W);
-  renderLiftChips(all); renderLiftSession(all, W); renderLiftPending();
+  renderLiftChips(all); renderLiftPicker(all); renderLiftSession(all, W); renderLiftPending();
   renderLiftTrends(rows); renderLiftCatalog(); renderLiftHistory(all, W);
 }
 // The recomp card lives on Trends but is computed from lift data, so Trends

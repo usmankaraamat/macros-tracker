@@ -161,18 +161,29 @@ function lastDoseUpTo(taken, iso){
   Object.keys(taken).forEach(d=>{ if (taken[d] && d <= iso && (last===null || d > last)) last = d; });
   return last;
 }
+function suppMicroSummary(s){
+  const keys = s && s.micros ? Object.keys(s.micros).filter(k=>+s.micros[k]>0) : [];
+  if (!keys.length) return '';
+  const txt = keys.map(k=>{ const r = LedgerCore.microRef(k); return `${r?r.name:k} ${s.micros[k]}${r?r.unit:''}`; }).join(' · ');
+  return `<div class="sr-sub">✚ ${escapeHtml(txt)}</div>`;
+}
 function renderSuppManage(){
   const wrap = document.getElementById('suppManage'); if (!wrap) return;
   const list = supps();
   if (!list.length){ wrap.innerHTML = '<div class="empty">Nothing to manage yet.</div>'; return; }
   wrap.innerHTML = list.map((s,i)=>
     `<div class="supp-row"><div><div>${escapeHtml(s.name)}${s.dose?` <span class="sr-sub">${escapeHtml(s.dose)}</span>`:''}</div>`+
-    `<div class="sr-sub">${suppCadenceText(s)}${s.anchor&&!(s.days&&s.days.length)?` · anchored ${s.anchor}`:''}</div></div>`+
-    `<button type="button" class="sm ghost" data-suppdel="${i}">Remove</button></div>`).join('');
+    `<div class="sr-sub">${suppCadenceText(s)}${s.anchor&&!(s.days&&s.days.length)?` · anchored ${s.anchor}`:''}</div>${suppMicroSummary(s)}</div>`+
+    `<div class="supp-row-btns"><button type="button" class="sm ghost" data-suppedit="${escapeAttr(s.id)}">Edit</button>`+
+    `<button type="button" class="sm ghost" data-suppdel="${i}">Remove</button></div></div>`).join('');
+  wrap.querySelectorAll('[data-suppedit]').forEach(b=>{
+    b.onclick = ()=> editSupp(b.dataset.suppedit);
+  });
   wrap.querySelectorAll('[data-suppdel]').forEach(b=>{
     b.onclick = ()=>{
       const l = supps(), s = l[+b.dataset.suppdel];
       if (!s) return;
+      if (SUPP_EDIT_ID === s.id) resetSuppForm();   // don't leave the form editing a gone protocol
       saveSupps(l.filter(v=>v.id!==s.id));
       toast(`Removed ${s.name} — its dose history is kept`,
         { tone:'warn', undo: ()=> saveSupps(l) });
@@ -180,7 +191,14 @@ function renderSuppManage(){
   });
 }
 // ---- supplement form ----
+// The form doubles as an editor: SUPP_EDIT_ID is the id being changed (null = adding a new
+// one), so an existing protocol can gain nutrients or a fixed schedule without deleting it.
+// SUPP_MICROS is the per-dose nutrient map under construction, built by the label reader or
+// by hand and stored on the protocol as `.micros`.
 let SUPP_DAYS_PICK = [];
+let SUPP_EDIT_ID = null;
+let SUPP_MICROS = {};
+let suppLabelPhotoB64 = null;
 function renderSuppDayPick(){
   const el = document.getElementById('suppDaysPick'); if (!el) return;
   el.innerHTML = WEEKDAYS.map((d,i)=>`<span class="chip${SUPP_DAYS_PICK.indexOf(i)>=0?' on':''}" data-suppday="${i}">${d}</span>`).join('');
@@ -198,11 +216,158 @@ document.getElementById('suppKind').addEventListener('change', ()=>{
   document.getElementById('suppEveryWrap').hidden = byDays;
   document.getElementById('suppPhaseWrap').hidden = byDays;
 });
+
+// ---- nutrients per dose: label reader + by-hand entry ----
+function showSuppNutriMsg(html, bad){
+  const el = document.getElementById('suppNutriMsg'); if (!el) return;
+  el.hidden = !html; el.className = 'tactical' + (bad ? ' bad' : ''); el.innerHTML = html || '';
+}
+function renderSuppMicroPick(){
+  const sel = document.getElementById('suppMicroPick'); if (!sel) return;
+  sel.innerHTML = LedgerCore.MICRO_REF.map(m=>`<option value="${m.key}">${m.name} (${m.unit})</option>`).join('');
+  updateSuppMicroForm();
+}
+function renderSuppMicroList(){
+  const el = document.getElementById('suppMicroList'); if (!el) return;
+  const keys = Object.keys(SUPP_MICROS).filter(k=>+SUPP_MICROS[k]>0);
+  if (!keys.length){ el.innerHTML = '<div class="sr-sub">No nutrients recorded yet — read a label or add them by hand.</div>'; return; }
+  // Registry order, so the chips read top-to-bottom like the panel does.
+  el.innerHTML = LedgerCore.MICRO_KEYS.filter(k=>keys.indexOf(k)>=0).map(k=>{
+    const r = LedgerCore.microRef(k);
+    return `<span class="chip on" data-micdel="${k}" role="button" tabindex="0" title="Remove">${escapeHtml(r?r.name:k)} ${SUPP_MICROS[k]}${r?r.unit:''} ✕</span>`;
+  }).join(' ');
+  el.querySelectorAll('[data-micdel]').forEach(c=>{
+    c.onclick = ()=>{ delete SUPP_MICROS[c.dataset.micdel]; renderSuppMicroList(); };
+  });
+}
+// The Amount field's unit + the compound→elemental helper follow the chosen nutrient: minerals
+// with known salt forms (calcium, magnesium, iron, zinc, potassium) get a "salt form" select
+// that converts a label's compound weight to the elemental amount that actually counts.
+function updateSuppMicroForm(){
+  const key = document.getElementById('suppMicroPick').value;
+  const ref = LedgerCore.microRef(key);
+  document.getElementById('suppMicroUnit').textContent = ref ? '('+ref.unit+')' : '';
+  const forms = LedgerCore.ELEMENTAL_FRACTION[key];
+  document.getElementById('suppElemWrap').hidden = !forms;
+  if (forms){
+    document.getElementById('suppElemForm').innerHTML =
+      '<option value="">elemental — as listed on the label</option>' +
+      Object.keys(forms).map(f=>`<option value="${escapeAttr(f)}">${key.toUpperCase()} ${escapeHtml(f)}</option>`).join('');
+  }
+  updateSuppElemHint();
+}
+function updateSuppElemHint(){
+  const hint = document.getElementById('suppElemHint');
+  const key = document.getElementById('suppMicroPick').value;
+  const forms = LedgerCore.ELEMENTAL_FRACTION[key];
+  const form = forms ? document.getElementById('suppElemForm').value : '';
+  const amt = +document.getElementById('suppMicroAmt').value;
+  if (!form || !(amt>0)){ hint.hidden = true; hint.textContent=''; return; }
+  const el = LedgerCore.elementalMg(key, form, amt);
+  hint.hidden = false;
+  hint.textContent = el!=null ? `${amt} mg compound → ~${el} mg elemental` : 'unknown salt form';
+}
+document.getElementById('suppMicroPick').addEventListener('change', updateSuppMicroForm);
+document.getElementById('suppElemForm').addEventListener('change', updateSuppElemHint);
+document.getElementById('suppMicroAmt').addEventListener('input', updateSuppElemHint);
+document.getElementById('suppMicroAdd').onclick = ()=>{
+  const key = document.getElementById('suppMicroPick').value;
+  const forms = LedgerCore.ELEMENTAL_FRACTION[key];
+  const form = forms ? document.getElementById('suppElemForm').value : '';
+  let amt = +document.getElementById('suppMicroAmt').value;
+  if (form){ const el = LedgerCore.elementalMg(key, form, amt); if (el!=null) amt = el; }   // compound → elemental
+  if (!(amt>0)){ showSuppNutriMsg('Enter an amount above 0.', true); return; }
+  SUPP_MICROS[key] = Math.round(amt*100)/100;    // overwrite: re-adding a nutrient corrects it
+  document.getElementById('suppMicroAmt').value = '';
+  if (forms) document.getElementById('suppElemForm').value = '';
+  updateSuppElemHint();
+  renderSuppMicroList();
+};
+
+// Photo attach for the label — its own state so it never crosses into the meal composer.
+function setSuppPhoto(b64, label){
+  suppLabelPhotoB64 = b64;
+  const chip = document.getElementById('suppPhotoChip'); if (!chip) return;
+  chip.hidden = !b64;
+  if (b64){ document.getElementById('suppPhotoThumb').src = 'data:image/jpeg;base64,'+b64;
+            document.getElementById('suppPhotoName').textContent = label || 'label photo'; }
+}
+async function handleSuppPhotoPick(ev){
+  const file = ev.target.files[0]; ev.target.value = '';
+  if (!file) return;
+  try { setSuppPhoto(await shrinkImage(file), file.name); showSuppNutriMsg('Photo attached — press <b>Read label</b>.'); }
+  catch(e){ showSuppNutriMsg(escapeHtml(e.message), true); }
+}
+document.getElementById('suppPhotoBtn').onclick = ()=> document.getElementById('suppPhotoFile').click();
+document.getElementById('suppGalleryBtn').onclick = ()=> document.getElementById('suppPhotoGallery').click();
+document.getElementById('suppPhotoClear').onclick = ()=> setSuppPhoto(null);
+document.getElementById('suppPhotoFile').onchange = handleSuppPhotoPick;
+document.getElementById('suppPhotoGallery').onchange = handleSuppPhotoPick;
+document.getElementById('suppReadBtn').onclick = async ()=>{
+  const text = (document.getElementById('suppLabelText').value||'').trim();
+  if (!text && !suppLabelPhotoB64){ showSuppNutriMsg('Paste the label text or attach a photo first.', true); return; }
+  const btn = document.getElementById('suppReadBtn'); btn.disabled = true;
+  showSuppNutriMsg('<span class="spin"></span>Reading the label…');
+  try {
+    const r = await aiParseSupplement(text, suppLabelPhotoB64);
+    Object.keys(r.micros).forEach(k=>{ SUPP_MICROS[k] = r.micros[k]; });
+    const nameEl = document.getElementById('suppName'), doseEl = document.getElementById('suppDose');
+    if (r.name && !nameEl.value.trim()) nameEl.value = r.name;
+    if (r.dose && !doseEl.value.trim()) doseEl.value = r.dose;
+    renderSuppMicroList();
+    const n = Object.keys(r.micros).length;
+    showSuppNutriMsg(n
+      ? `Read ${n} nutrient${n>1?'s':''} via ${escapeHtml(AI_VIA)} — check the amounts, then add the supplement below.`
+      : `${escapeHtml(AI_VIA)} found no tracked nutrients on that label. Add them by hand.`, !n);
+    setSuppPhoto(null);
+    document.getElementById('suppLabelText').value = '';
+  } catch(e){ showSuppNutriMsg('Read failed: '+escapeHtml(e.message), true); }
+  finally { btn.disabled = false; }
+};
+
+function resetSuppForm(){
+  SUPP_EDIT_ID = null; SUPP_MICROS = {}; SUPP_DAYS_PICK = [];
+  document.getElementById('suppName').value = ''; document.getElementById('suppDose').value = '';
+  document.getElementById('suppLabelText').value = '';
+  setSuppPhoto(null); showSuppNutriMsg('');
+  renderSuppMicroList(); renderSuppDayPick();
+  document.getElementById('suppAddBtn').textContent = 'Add supplement';
+  document.getElementById('suppCancelEdit').hidden = true;
+}
+function editSupp(id){
+  const s = supps().filter(v=>v.id===id)[0]; if (!s) return;
+  SUPP_EDIT_ID = id;
+  SUPP_MICROS = {};
+  if (s.micros) Object.keys(s.micros).forEach(k=>{ if (+s.micros[k]>0) SUPP_MICROS[k] = s.micros[k]; });
+  document.getElementById('suppName').value = s.name || '';
+  document.getElementById('suppDose').value = s.dose || '';
+  if (Array.isArray(s.days) && s.days.length){
+    document.getElementById('suppKind').value = 'days';
+    SUPP_DAYS_PICK = s.days.slice();
+  } else {
+    document.getElementById('suppKind').value = 'every';
+    document.getElementById('suppEvery').value = s.every || 1;
+    document.getElementById('suppMode').value = s.mode === 'rolling' ? 'rolling' : 'fixed';
+    document.getElementById('suppAnchor').value = s.anchor || '';
+  }
+  document.getElementById('suppKind').dispatchEvent(new Event('change'));   // sync wrap visibility
+  renderSuppDayPick(); renderSuppMicroList();
+  document.getElementById('suppNutriWrap').open = Object.keys(SUPP_MICROS).length > 0;
+  document.getElementById('suppAddBtn').textContent = 'Save changes';
+  document.getElementById('suppCancelEdit').hidden = false;
+  document.getElementById('suppFormMsg').textContent = `Editing ${s.name} — change what you need, then Save.`;
+  const nm = document.getElementById('suppName');
+  nm.scrollIntoView({ behavior:'smooth', block:'center' }); nm.focus();
+}
+document.getElementById('suppCancelEdit').onclick = ()=>{
+  resetSuppForm();
+  document.getElementById('suppFormMsg').textContent = 'Edit cancelled.';
+};
 document.getElementById('suppAddBtn').onclick = ()=>{
   const msg = document.getElementById('suppFormMsg');
   const name = (document.getElementById('suppName').value||'').trim();
   if (!name){ document.getElementById('suppName').focus(); msg.textContent='Give it a name first.'; return; }
-  const s = { id: 's'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
+  const s = { id: SUPP_EDIT_ID || ('s'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)),
               name: name, dose: (document.getElementById('suppDose').value||'').trim() };
   if (document.getElementById('suppKind').value === 'days'){
     if (!SUPP_DAYS_PICK.length){ msg.textContent='Pick at least one weekday.'; return; }
@@ -212,12 +377,21 @@ document.getElementById('suppAddBtn').onclick = ()=>{
     s.mode  = document.getElementById('suppMode').value === 'rolling' ? 'rolling' : 'fixed';
     s.anchor = document.getElementById('suppAnchor').value || ACTIVE_DATE;
   }
-  saveSupps(supps().concat([s]));
-  document.getElementById('suppName').value=''; document.getElementById('suppDose').value='';
-  SUPP_DAYS_PICK = []; renderSuppDayPick();
-  msg.textContent = `Added ${name} · ${suppCadenceText(s)}.`;
-  toast(`Added ${name}`);
+  const micros = {};
+  Object.keys(SUPP_MICROS).forEach(k=>{ if (+SUPP_MICROS[k]>0) micros[k] = SUPP_MICROS[k]; });
+  if (Object.keys(micros).length) s.micros = micros;
+  const list = supps();
+  const editing = SUPP_EDIT_ID && list.some(v=>v.id===SUPP_EDIT_ID);
+  saveSupps(editing ? list.map(v=> v.id===SUPP_EDIT_ID ? s : v) : list.concat([s]));
+  const verb = editing ? 'Updated' : 'Added';
+  const nCount = Object.keys(micros).length;
+  resetSuppForm();
+  msg.textContent = `${verb} ${name} · ${suppCadenceText(s)}`
+    + (nCount ? ` · ${nCount} nutrient${nCount>1?'s':''}/dose` : '') + '.';
+  toast(`${verb} ${name}`);
 };
+renderSuppMicroPick();
+renderSuppMicroList();
 
 // Render the Plan tab. Only called when Plan is the visible tab.
 function renderPlanTab(){

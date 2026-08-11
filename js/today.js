@@ -558,40 +558,41 @@ function renderTemplates(){
 }
 
 // ---- MICRONUTRIENTS: recovery-focused panel with under/over flags ----
-// Daily reference values (m = male, f = female). 'limit' nutrients (sodium/sugar) flag high;
-// the rest flag low. Targets are general adult references, not medical advice.
-const MICROS = [
-  {key:'fib', name:'Fiber',      unit:'g',  t:{m:38,f:25},     limit:false},
-  {key:'k',   name:'Potassium',  unit:'mg', t:{m:3400,f:2600}, limit:false, rec:true},
-  {key:'mg',  name:'Magnesium',  unit:'mg', t:{m:400,f:310},   limit:false, rec:true},
-  {key:'ca',  name:'Calcium',    unit:'mg', t:{m:1000,f:1000}, limit:false},
-  {key:'fe',  name:'Iron',       unit:'mg', t:{m:8,f:18},      limit:false},
-  {key:'zn',  name:'Zinc',       unit:'mg', t:{m:11,f:8},      limit:false},
-  {key:'vc',  name:'Vitamin C',  unit:'mg', t:{m:90,f:75},     limit:false, rec:true},
-  {key:'vd',  name:'Vitamin D',  unit:'µg', t:{m:15,f:15},     limit:false},
-  {key:'na',  name:'Sodium',     unit:'mg', t:{m:2300,f:2300}, limit:true,  rec:true},
-  {key:'sug', name:'Sugar',      unit:'g',  t:{m:50,f:50},     limit:true}
-];
+// The reference table lives in core.js (LedgerCore.MICRO_REF): the 'core' set is what USDA
+// foods populate and is always shown once any food is logged; the rest are supplement-only
+// and appear only on days a logged supplement supplies them. 'limit' nutrients (sodium,
+// sugar) flag high; the rest flag low. General adult references, not medical advice.
 function renderMicros(t){
   const wrap = document.getElementById('microLine');
-  if (!MICROS.some(mi => (t[mi.key]||0) > 0)){ wrap.hidden = true; return; }
+  // The day's supplement contribution: elemental micros of every protocol ticked today.
+  const suppM = LedgerCore.sumSuppMicros(supps(), suppLog()[VIEW_DATE] || []);
+  const valOf = mi => (t[mi.key]||0) + (suppM[mi.key]||0);
+  // Core micros always show; extras only when food or a supplement actually brings them in.
+  const ref = LedgerCore.MICRO_REF.filter(mi => mi.core || valOf(mi) > 0);
+  if (!ref.some(mi => valOf(mi) > 0)){ wrap.hidden = true; return; }
   const sex = PROFILE.sex==='female' ? 'f' : 'm';
   const training = isTrainingDay(VIEW_DATE);   // emphasise recovery nutrients on training days
   // Tone, not colour-by-nutrient: on target is plain chalk, only trouble is coloured.
   const tone = { ok:'met', near:'warn', over:'over', low:'warn', verylow:'over', na:'' };
   const badge = { over:'over', verylow:'very low', low:'low', near:'near limit', ok:'', na:'' };
-  let low=0, over=0;
-  const rows = MICROS.map(mi=>{
-    const val = t[mi.key]||0, target = mi.t[sex];
+  let low=0, over=0, fromSupp=0;
+  const rows = ref.map(mi=>{
+    const val = valOf(mi), target = mi[sex];
     const status = LedgerCore.microStatus(val, target, mi.limit);
     if (status==='low'||status==='verylow') low++;
     if (status==='over') over++;
+    const supped = (suppM[mi.key]||0) > 0;
+    if (supped) fromSupp++;
     const w = Math.min(100, target>0 ? val/target*100 : 0);
     const shown = val<10 ? val.toFixed(1) : Math.round(val);
     const recTag = (training && mi.rec) ? ' ⚡' : '';
+    // Say when a row includes a supplement dose, so a number the foods can't explain isn't
+    // mistaken for a database error.
+    const suppTag = supped
+      ? ` <span class="micro-supp" title="Includes ${Math.round(suppM[mi.key])}${mi.unit} from supplements logged this day">＋supp</span>` : '';
     const flag = badge[status] ? ` · ${badge[status]}` : '';
     return `<div class="micro-row">
-      <span class="micro-name">${mi.name}${recTag}</span>
+      <span class="micro-name">${mi.name}${recTag}${suppTag}</span>
       <span class="micro-bar"><span class="${tone[status]}" style="width:${w}%"></span></span>
       <span class="micro-val ${tone[status] === 'over' ? 'over' : (tone[status] === 'warn' ? 'warn' : '')}">${shown}<small>/${target}${mi.unit}${flag}</small></span>
     </div>`;
@@ -602,10 +603,13 @@ function renderMicros(t){
   const recNote = training
     ? `<div class="tactical" style="margin-top:10px">⚡ ${escapeHtml(splitForDate(VIEW_DATE))} day — potassium, magnesium, sodium &amp; vitamin C support recovery; keep these topped up.</div>`
     : '';
+  const src = fromSupp
+    ? 'Counted from USDA-matched foods plus the supplements you logged today (shown with ＋supp, in elemental amounts).'
+    : 'Counted from USDA-matched foods only';
   wrap.hidden = false;
   wrap.innerHTML = `<details><summary class="panel-title">Micronutrients · ${summary}</summary>
     <div style="margin-top:12px">${rows}${recNote}
-      <div class="tactical" style="margin-top:12px">Counted from USDA-matched foods only — AI estimates and older entries add nothing, so a low reading can mean under-<i>tracked</i> rather than under-eaten. Sodium &amp; sugar are limits. General references, not medical advice.</div>
+      <div class="tactical" style="margin-top:12px">${src} — AI estimates and older entries add nothing, so a low reading can mean under-<i>tracked</i> rather than under-eaten. Sodium &amp; sugar are limits. General references, not medical advice.</div>
     </div></details>`;
 }
 
