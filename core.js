@@ -450,6 +450,94 @@
     return r >= 1 ? 'ok' : (r >= 0.6 ? 'low' : 'verylow');
   }
 
+  // ---- Micronutrient registry -----------------------------------------------
+  // One canonical list of every micronutrient the panel can show, with a general adult
+  // daily reference (m/f) and its unit. `core:true` marks the set USDA foods populate — the
+  // panel shows those whenever any food is logged. The rest are supplement-only: the USDA
+  // extractor doesn't read them off foods, so they surface only on days a supplement supplies
+  // them, which is how a nutrient "not covered yet" gets added to the tab retroactively the
+  // moment a label brings it in. `limit:true` is a ceiling (sodium, sugar), not a floor.
+  // References are RDA/AI figures — general guidance, not medical advice.
+  const MICRO_REF = [
+    { key:'fib', name:'Fiber',            unit:'g',  m:38,   f:25,   limit:false, core:true },
+    { key:'k',   name:'Potassium',        unit:'mg', m:3400, f:2600, limit:false, core:true, rec:true },
+    { key:'mg',  name:'Magnesium',        unit:'mg', m:400,  f:310,  limit:false, core:true, rec:true },
+    { key:'ca',  name:'Calcium',          unit:'mg', m:1000, f:1000, limit:false, core:true },
+    { key:'fe',  name:'Iron',             unit:'mg', m:8,    f:18,   limit:false, core:true },
+    { key:'zn',  name:'Zinc',             unit:'mg', m:11,   f:8,    limit:false, core:true },
+    { key:'vc',  name:'Vitamin C',        unit:'mg', m:90,   f:75,   limit:false, core:true, rec:true },
+    { key:'vd',  name:'Vitamin D',        unit:'µg', m:15,   f:15,   limit:false, core:true },
+    { key:'na',  name:'Sodium',           unit:'mg', m:2300, f:2300, limit:true,  core:true, rec:true },
+    { key:'sug', name:'Sugar',            unit:'g',  m:50,   f:50,   limit:true,  core:true },
+    // Supplement-sourced extras — shown only on days something actually supplies them.
+    { key:'va',  name:'Vitamin A',        unit:'µg', m:900,  f:700,  limit:false },
+    { key:'ve',  name:'Vitamin E',        unit:'mg', m:15,   f:15,   limit:false },
+    { key:'vk',  name:'Vitamin K',        unit:'µg', m:120,  f:90,   limit:false },
+    { key:'b1',  name:'Thiamin (B1)',     unit:'mg', m:1.2,  f:1.1,  limit:false },
+    { key:'b2',  name:'Riboflavin (B2)',  unit:'mg', m:1.3,  f:1.1,  limit:false },
+    { key:'b3',  name:'Niacin (B3)',      unit:'mg', m:16,   f:14,   limit:false },
+    { key:'b5',  name:'Pantothenic (B5)', unit:'mg', m:5,    f:5,    limit:false },
+    { key:'b6',  name:'Vitamin B6',       unit:'mg', m:1.3,  f:1.3,  limit:false },
+    { key:'b7',  name:'Biotin (B7)',      unit:'µg', m:30,   f:30,   limit:false },
+    { key:'b9',  name:'Folate (B9)',      unit:'µg', m:400,  f:400,  limit:false },
+    { key:'b12', name:'Vitamin B12',      unit:'µg', m:2.4,  f:2.4,  limit:false },
+    { key:'cho', name:'Choline',          unit:'mg', m:550,  f:425,  limit:false },
+    { key:'cu',  name:'Copper',           unit:'mg', m:0.9,  f:0.9,  limit:false },
+    { key:'se',  name:'Selenium',         unit:'µg', m:55,   f:55,   limit:false },
+    { key:'mn',  name:'Manganese',        unit:'mg', m:2.3,  f:1.8,  limit:false },
+    { key:'io',  name:'Iodine',           unit:'µg', m:150,  f:150,  limit:false },
+    { key:'cr',  name:'Chromium',         unit:'µg', m:35,   f:25,   limit:false },
+    { key:'mo',  name:'Molybdenum',       unit:'µg', m:45,   f:45,   limit:false }
+  ];
+  const MICRO_KEYS = MICRO_REF.map(m => m.key);
+  function microRef(key) { return MICRO_REF.filter(m => m.key === key)[0] || null; }
+
+  // Sum the per-dose micronutrient content of the supplements taken on a day. supps is the
+  // protocol list, takenIds that day's dose log (the ids ticked). A protocol with no `.micros`
+  // adds nothing; only registry keys with a positive value are counted, so an unknown or
+  // zeroed field can never leak an untracked total into the panel.
+  function sumSuppMicros(supps, takenIds) {
+    const ids = takenIds || [];
+    const out = {};
+    (supps || []).forEach(s => {
+      if (!s || !s.micros || ids.indexOf(s.id) < 0) return;
+      MICRO_KEYS.forEach(k => {
+        const v = +s.micros[k];
+        if (v > 0) out[k] = (out[k] || 0) + v;
+      });
+    });
+    return out;
+  }
+
+  // ---- Elemental mineral content --------------------------------------------
+  // A mineral supplement's label weight is the whole salt, but only the mineral ION counts
+  // toward intake: 1200 mg of calcium citrate is ~250 mg of elemental calcium, and it is the
+  // 250 a tracker should add — not the 1200. These are the elemental mass fractions of the
+  // common salts (mineral mass ÷ salt mass). Approximate — salts ship in varying hydrate
+  // states — but close enough to turn a compound weight into the number that matters.
+  const ELEMENTAL_FRACTION = {
+    ca: { carbonate:0.40, phosphate:0.29, 'citrate malate':0.25, acetate:0.25, citrate:0.21, lactate:0.13, ascorbate:0.10, gluconate:0.09 },
+    mg: { oxide:0.60, hydroxide:0.42, carbonate:0.29, malate:0.15, citrate:0.16, glycinate:0.14, bisglycinate:0.14, chloride:0.12, lactate:0.12, sulfate:0.10, taurate:0.09, threonate:0.072, gluconate:0.058 },
+    fe: { fumarate:0.33, 'ferrous fumarate':0.33, sulfate:0.20, 'ferrous sulfate':0.20, bisglycinate:0.20, gluconate:0.12, 'ferrous gluconate':0.12 },
+    zn: { oxide:0.80, citrate:0.31, acetate:0.30, sulfate:0.23, monomethionine:0.21, picolinate:0.20, gluconate:0.14 },
+    k:  { chloride:0.52, bicarbonate:0.39, citrate:0.38, gluconate:0.17 }
+  };
+  // Elemental mg of `mineralKey` in `mgSalt` of the named salt form. Returns null when the
+  // mineral or salt form isn't known, so a caller falls back to the label value rather than
+  // silently multiplying by a guess. A salt name is matched exactly first, then loosely
+  // (any known form named inside the string — "calcium citrate" finds "citrate").
+  function elementalMg(mineralKey, saltForm, mgSalt) {
+    const forms = ELEMENTAL_FRACTION[mineralKey];
+    if (!forms || !(mgSalt > 0)) return null;
+    const key = String(saltForm || '').trim().toLowerCase();
+    let frac = forms[key];
+    if (frac == null) {
+      const hit = Object.keys(forms).find(f => key.indexOf(f) >= 0);
+      frac = hit ? forms[hit] : null;
+    }
+    return frac == null ? null : Math.round(mgSalt * frac);
+  }
+
   // ---- Protein fix: cheapest way to close a protein gap ----------------------
   // foods = [[name, {kcal,p}], ...] per-100g. Returns single-food options that
   // deliver pGap grams of protein, sorted by calorie cost, filtered to what fits
@@ -1154,6 +1242,7 @@
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
     FOOD_PINS, foodPin, pinMatches, applyPin,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
+    MICRO_REF, MICRO_KEYS, microRef, sumSuppMicros, ELEMENTAL_FRACTION, elementalMg,
     supplementDue, supplementNextDue, supplementWindow, supplementStats, isoWeekdayMon,
     repairJson, median, linearTrend,
     e1RM, setLoad, weightAt, classifyExercise, sessionMetrics, exerciseTrend, liftVsWeight,

@@ -401,7 +401,43 @@
           <label id="suppDaysLabel">Days</label>
           <div class="supp-days" id="suppDaysPick" role="group" aria-labelledby="suppDaysLabel"></div>
         </div>
+
+        <details id="suppNutriWrap" style="margin:2px 0 12px">
+          <summary>Nutrients per dose (optional)</summary>
+          <div style="margin-top:10px">
+            <div class="tactical">Photograph the Supplement Facts panel or paste it — the AI records each nutrient's <b>elemental</b> amount (250&nbsp;mg calcium, not the 1200&nbsp;mg of calcium citrate). Taking the supplement then adds these to your day's micronutrients. Or add nutrients by hand.</div>
+            <label for="suppLabelText" class="sr-only">Supplement label text</label>
+            <textarea id="suppLabelText" rows="2" placeholder="Paste the label — e.g. Calcium 250mg, Vitamin D3 1000 IU, Vitamin K2 100mcg" style="margin-top:8px"></textarea>
+            <div class="footer-actions" style="grid-template-columns:1fr 1fr 1.2fr;margin-top:6px">
+              <button type="button" class="ghost" id="suppPhotoBtn">📷 Photo</button>
+              <button type="button" class="ghost" id="suppGalleryBtn">🖼️ Choose</button>
+              <button type="button" id="suppReadBtn">Read label</button>
+            </div>
+            <div id="suppPhotoChip" class="photo-chip" hidden>
+              <img id="suppPhotoThumb" alt="attached label photo">
+              <span id="suppPhotoName">label photo</span>
+              <button type="button" id="suppPhotoClear" aria-label="Remove photo">✕</button>
+            </div>
+            <div class="tactical" id="suppNutriMsg" hidden></div>
+            <div id="suppMicroList" style="margin-top:10px"></div>
+            <div class="targets-grid" style="margin-top:8px">
+              <div><label for="suppMicroPick">Add a nutrient by hand</label>
+                <select id="suppMicroPick"></select></div>
+              <div><label for="suppMicroAmt">Amount <span id="suppMicroUnit" class="sr-sub"></span></label>
+                <input type="number" id="suppMicroAmt" min="0" step="any" inputmode="decimal" placeholder="0"></div>
+            </div>
+            <div class="targets-grid" id="suppElemWrap" hidden>
+              <div><label for="suppElemForm">Salt form <span class="sr-sub">(converts to elemental)</span></label>
+                <select id="suppElemForm"></select></div>
+              <div><label for="suppElemHint">&nbsp;</label>
+                <div class="tactical" id="suppElemHint" style="padding-top:8px"></div></div>
+            </div>
+            <button type="button" class="sm ghost" id="suppMicroAdd" style="margin-top:6px">Add nutrient</button>
+          </div>
+        </details>
+
         <button type="button" id="suppAddBtn">Add supplement</button>
+        <button type="button" class="ghost" id="suppCancelEdit" hidden style="margin-top:6px">Cancel edit</button>
         <div class="tactical" id="suppFormMsg">Log the days you take it and the strip shows the pattern — no more guessing whether today is ON.</div>
       </div>
     </details>
@@ -454,6 +490,8 @@
   <section class="panel">
     <span class="panel-title">Session · <span id="liftDate">today</span><span id="liftSplit"></span></span>
     <div class="chips" id="liftChips" hidden></div>
+    <label for="liftPick" class="sr-only">Insert an exercise from your log</label>
+    <select id="liftPick" class="lift-pick" hidden></select>
     <label for="liftInput" class="sr-only">Describe your sets</label>
     <textarea id="liftInput" rows="3" placeholder="One exercise per line — bicep curls 20x12, 20x8, 15x14&#10;bench 60kg 8, 8, 6 rir 2"></textarea>
     <div class="omni-actions">
@@ -579,6 +617,9 @@
 <!-- Two pickers: camera (capture) forces the camera on mobile; gallery opens the library. -->
 <input type="file" id="photoFile" accept="image/*" capture="environment" hidden>
 <input type="file" id="photoGallery" accept="image/*" hidden>
+<!-- Supplement label pickers — kept separate so a label photo never lands in the meal composer. -->
+<input type="file" id="suppPhotoFile" accept="image/*" capture="environment" hidden>
+<input type="file" id="suppPhotoGallery" accept="image/*" hidden>
 
 <!-- ============================ MEAL COMPOSER ============================ -->
 <!-- Pinned to the bottom, because describing a meal is what this app is for.

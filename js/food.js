@@ -238,6 +238,44 @@ Meal: """${text}"""`;
   return cleaned.length ? cleaned : items;
 }
 
+// ---- Supplement label parse: photo or text → per-dose elemental micronutrients ----
+// The same AI plumbing the meal parser uses, pointed at a Supplement Facts panel. The model
+// returns per-DOSE amounts keyed to the app's micronutrient registry, in each nutrient's own
+// unit, and — crucially — the ELEMENTAL amount for minerals (250 mg calcium, not the 1200 mg
+// of calcium citrate on the label). Returns {name, dose, micros:{key:amount}}; every number
+// is shown for confirmation before it is saved, so a misread never lands silently.
+function suppMicroTable(){
+  return LedgerCore.MICRO_REF.map(m => `"${m.key}" = ${m.name} (${m.unit})`).join(', ');
+}
+async function aiParseSupplement(text, imageB64){
+  if (!hasAI()) throw new Error('No AI key — add a Gemini or OpenRouter key in ⚙ Settings.');
+  const photoClause = imageB64
+    ? `A photo of the supplement label / Supplement Facts panel is attached. Read the nutrients and amounts from it. The text below adds context or corrections and wins over the image where they disagree.\n`
+    : '';
+  const prompt =
+`You read a dietary supplement label and return the micronutrients ONE serving (one dose) delivers, for a nutrient tracker.
+${photoClause}
+Only use these nutrient keys, each in the stated unit: ${suppMicroTable()}.
+For MINERALS give the ELEMENTAL amount the body counts, not the weight of the salt: e.g. 1200 mg of "calcium citrate" is about 250 mg of elemental calcium (citrate ~21%), 500 mg "magnesium oxide" is ~300 mg magnesium (~60%), "ferrous sulfate 325 mg" is ~65 mg iron (~20%). If the label already states an elemental amount (most Supplement Facts panels do, e.g. "Calcium 250 mg"), use that number directly and do not convert again.
+Give the amount for ONE serving as directed on the label (if the serving size is 2 tablets, report the amount in 2 tablets). Convert IU to metric where needed: vitamin D 40 IU = 1 µg, vitamin E 1 IU ≈ 0.67 mg (natural) — use 0.9 mg (synthetic) only if the label says dl-alpha. Ignore ingredients that are not in the key list above (herbs, probiotics, amino acids, proprietary blends).
+Return JSON only, no prose: {"name":<short supplement name>,"dose":<serving size as written, e.g. "2 tablets" or "">,"micros":{<key>:<number in that key's unit>, ...}}. Omit any nutrient the label does not list. If nothing on the label maps to a key, return an empty micros object.
+Label text: """${text || ''}"""`;
+
+  const txt = await aiComplete(prompt, imageB64);
+  let parsed;
+  try { parsed = JSON.parse(txt); }
+  catch(e){ parsed = LedgerCore.repairJson(txt); if (!parsed) throw new Error('Could not parse the AI reply.'); }
+  const micros = {};
+  const raw = (parsed && parsed.micros) || {};
+  LedgerCore.MICRO_KEYS.forEach(k => {
+    const v = +raw[k];
+    if (v > 0) micros[k] = v;                          // registry keys only; positive values only
+  });
+  return { name: String((parsed && parsed.name) || '').trim(),
+           dose: String((parsed && parsed.dose) || '').trim(),
+           micros };
+}
+
 // ---- PENDING (AI review) ----
 // Resolve a pending item's active choice (a USDA candidate or the AI estimate).
 function pendResolve(p){

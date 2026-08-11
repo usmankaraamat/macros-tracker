@@ -363,6 +363,60 @@ group('mealPaceKcal — bracketed intake pace, and microStatus flags');
   check('no target → na', C.microStatus(5,0,false)==='na', '');
 })();
 
+// ---- supplement micronutrients: elemental conversion, per-day summing, registry ----
+group('elementalMg — the mineral ion, not the salt weight');
+(function(){
+  // The user's own case: 1200 mg calcium citrate is ~250 mg elemental calcium.
+  check('calcium citrate 1200mg → ~252mg elemental', C.elementalMg('ca','citrate',1200)===252, `got ${C.elementalMg('ca','citrate',1200)}`);
+  check('calcium carbonate 1250mg → 500mg elemental', C.elementalMg('ca','carbonate',1250)===500, `got ${C.elementalMg('ca','carbonate',1250)}`);
+  check('magnesium oxide 500mg → 300mg elemental', C.elementalMg('mg','oxide',500)===300, `got ${C.elementalMg('mg','oxide',500)}`);
+  check('ferrous sulfate 325mg → ~65mg iron', C.elementalMg('fe','sulfate',325)===65, `got ${C.elementalMg('fe','sulfate',325)}`);
+  check('zinc gluconate 100mg → ~14mg zinc', C.elementalMg('zn','gluconate',100)===14, `got ${C.elementalMg('zn','gluconate',100)}`);
+  // A full salt name still resolves — the loose match finds the form named inside the string.
+  check('loose match "calcium citrate" 1200 → 252', C.elementalMg('ca','calcium citrate',1200)===252, `got ${C.elementalMg('ca','calcium citrate',1200)}`);
+  // Refuse rather than guess when the form or mineral is unknown, or the weight is nonsense.
+  check('unknown salt form → null', C.elementalMg('ca','moonrock',1000)===null, 'expected null');
+  check('mineral with no salt table → null', C.elementalMg('vd','citrate',10)===null, 'expected null');
+  check('zero mg → null', C.elementalMg('ca','citrate',0)===null, 'expected null');
+})();
+
+group('sumSuppMicros — only what was taken, only known positive keys');
+(function(){
+  const list = [
+    { id:'a', micros:{ ca:250, vd:25 } },
+    { id:'b', micros:{ ca:100, b12:500 } },
+    { id:'c', micros:{ mg:200 } },                 // exists but not taken today
+    { id:'d' },                                    // taken, but carries no nutrients
+    { id:'e', micros:{ zn:5, bogus:99 } },         // an unknown key must not leak in
+    { id:'f', micros:{ fe:0, cu:-3, se:20 } }      // zero / negative values are ignored
+  ];
+  const sum = C.sumSuppMicros(list, ['a','b','d','e','f']);
+  check('calcium sums across both taken calcium supps', sum.ca===350, `got ${sum.ca}`);
+  check('vitamin D carried through', sum.vd===25, `got ${sum.vd}`);
+  check('a not-yet-tracked nutrient (B12) is summed', sum.b12===500, `got ${sum.b12}`);
+  check('an untaken supplement contributes nothing', sum.mg===undefined, `got ${sum.mg}`);
+  check('a known positive key from a mixed supp counts', sum.zn===5, `got ${sum.zn}`);
+  check('an unknown key is dropped', sum.bogus===undefined, 'bogus leaked in');
+  check('a zero value is dropped', sum.fe===undefined, `got ${sum.fe}`);
+  check('a negative value is dropped', sum.cu===undefined, `got ${sum.cu}`);
+  check('a positive value beside bad ones survives', sum.se===20, `got ${sum.se}`);
+  check('nothing taken → empty object', Object.keys(C.sumSuppMicros(list, [])).length===0, 'expected {}');
+  check('empty inputs → empty object', Object.keys(C.sumSuppMicros(null, null)).length===0, 'expected {}');
+})();
+
+group('MICRO_REF — the micronutrient registry');
+(function(){
+  check('calcium is a core (food-populated) micro', C.microRef('ca') && C.microRef('ca').core===true, 'ca missing/not core');
+  check('calcium unit is mg', C.microRef('ca').unit==='mg', `got ${C.microRef('ca').unit}`);
+  check('B12 is a registered extra', !!C.microRef('b12'), 'b12 missing');
+  check('B12 is not core (supplement-sourced)', !C.microRef('b12').core, 'b12 marked core');
+  check('B12 unit is µg', C.microRef('b12').unit==='µg', `got ${C.microRef('b12').unit}`);
+  check('unknown key → null', C.microRef('nope')===null, 'expected null');
+  check('MICRO_KEYS covers the extras', C.MICRO_KEYS.indexOf('vk')>=0 && C.MICRO_KEYS.indexOf('b12')>=0, 'missing keys');
+  check('keys are unique', new Set(C.MICRO_KEYS).size===C.MICRO_KEYS.length, 'duplicate key');
+  check('every micro has a unit and both references', C.MICRO_REF.every(m=>m.unit && m.m>0 && m.f>0), 'a ref is malformed');
+})();
+
 // ---- proteinFix: close a protein gap within a kcal budget ----
 group('proteinFix — cheapest protein sources that fit');
 (function(){
