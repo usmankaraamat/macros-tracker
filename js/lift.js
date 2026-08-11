@@ -314,26 +314,35 @@ function bindLiftEditor(w){
     toast(`Updated ${p.name}`);
   };
 }
-// A dropdown of known exercises — the last same-split session first, then the whole
-// catalogue — so a name is picked once and spelled the same way every week instead of being
-// re-typed (and re-spelled) from memory. Choosing one drops its canonical name into the
-// logger, ready for the sets.
+// A dropdown of exercises the user has ACTUALLY LOGGED — never the seed catalogue, which
+// buried the handful they use under fifty they don't. This split's exercises come first (so a
+// Push day offers push work, not whatever was trained most recently), the rest follow. Keyed
+// by id so a name whose spelling drifted collapses to one entry; the latest session wins the
+// display name, and most-recently-trained sorts to the top of each group. Choosing one drops
+// the canonical name into the logger, ready for the sets.
 function renderLiftPicker(all){
   const sel = document.getElementById('liftPick'); if (!sel) return;
-  const cat = exerciseCatalog();
-  const sp = splitForDate(VIEW_DATE);
-  const past = Object.keys(all).filter(x=>x!==VIEW_DATE && (all[x].exercises||[]).length).sort();
-  const lastSame = past.filter(x=>(all[x].split||'')===sp).pop();
-  const recent = [];
-  if (lastSame) (all[lastSame].exercises||[]).forEach(ex=>{ if (ex.name && recent.indexOf(ex.name)<0) recent.push(ex.name); });
-  const allNames = cat.map(c=>c.name).sort((a,b)=> a.toLowerCase()<b.toLowerCase()?-1:1).filter(n=>recent.indexOf(n)<0);
-  if (!recent.length && !allNames.length){ sel.hidden = true; return; }
+  const todaySplit = splitForDate(VIEW_DATE);
+  const seen = {};
+  Object.keys(all).sort().forEach(d=>{               // ascending so the latest date wins name/last
+    const w = all[d], sp = w.split || '';
+    (w.exercises||[]).forEach(ex=>{
+      if (!ex || !ex.id || !ex.name) return;
+      const e = seen[ex.id] || (seen[ex.id] = { name:ex.name, last:d, inSplit:false });
+      e.name = ex.name; e.last = d;
+      if (sp === todaySplit) e.inSplit = true;         // has appeared on a day of this split
+    });
+  });
+  const ids = Object.keys(seen);
+  if (!ids.length){ sel.hidden = true; sel.innerHTML = ''; return; }   // nothing logged yet → no picker
+  const recent = (a,b)=> seen[a].last < seen[b].last ? 1 : seen[a].last > seen[b].last ? -1 : 0;
+  const mkOpts = list => list.map(id=>`<option value="${escapeAttr(seen[id].name)}">${escapeHtml(seen[id].name)}</option>`).join('');
+  const todays = ids.filter(id=>seen[id].inSplit).sort(recent);
+  const others = ids.filter(id=>!seen[id].inSplit).sort(recent);
   sel.hidden = false;
   let html = '<option value="">＋ Insert an exercise name…</option>';
-  if (recent.length) html += `<optgroup label="Last ${escapeHtml(all[lastSame].split||sp)} · ${lastSame}">`
-    + recent.map(n=>`<option value="${escapeAttr(n)}">${escapeHtml(n)}</option>`).join('') + '</optgroup>';
-  if (allNames.length) html += '<optgroup label="All exercises">'
-    + allNames.map(n=>`<option value="${escapeAttr(n)}">${escapeHtml(n)}</option>`).join('') + '</optgroup>';
+  if (todays.length) html += `<optgroup label="${escapeHtml(todaySplit)} · your exercises">` + mkOpts(todays) + '</optgroup>';
+  if (others.length) html += '<optgroup label="Other logged exercises">' + mkOpts(others) + '</optgroup>';
   sel.innerHTML = html;
   sel.onchange = ()=>{
     const name = sel.value; sel.value = '';
@@ -349,9 +358,10 @@ function renderLiftChips(all){
   const el = document.getElementById('liftChips'); if (!el) return;
   const sp = splitForDate(VIEW_DATE);
   const past = Object.keys(all).filter(x => x !== VIEW_DATE && (all[x].exercises||[]).length).sort();
-  // The last session for today's split; failing that (a changed split, or early days)
-  // the last session of any kind, which still beats retyping the loads from memory.
-  const d = past.filter(x => (all[x].split||'') === sp).pop() || past.pop();
+  // Only the last session of TODAY'S split — repeating a different split (offering "Repeat
+  // Pull" on a push day) is never what you want, so with no same-split history the chip stays
+  // hidden rather than suggesting the wrong day's work.
+  const d = past.filter(x => (all[x].split||'') === sp).pop();
   if (!d){ el.hidden = true; el.innerHTML=''; return; }
   el.hidden = false;
   el.innerHTML = `<span class="chip" id="liftRepeat">↻ Repeat ${escapeHtml(all[d].split || sp)} <small>${d}</small></span>`;
