@@ -609,7 +609,7 @@ function renderMicros(t){
   wrap.hidden = false;
   wrap.innerHTML = `<details><summary class="panel-title">Micronutrients · ${summary}</summary>
     <div style="margin-top:12px">${rows}${recNote}
-      <div class="tactical" style="margin-top:12px">${src} — AI estimates and older entries add nothing, so a low reading can mean under-<i>tracked</i> rather than under-eaten. Sodium &amp; sugar are limits. General references, not medical advice.</div>
+      <div class="tactical" style="margin-top:12px">${src} — AI estimates and older entries add nothing, so a low reading can mean under-<i>tracked</i> rather than under-eaten. Sodium and both sugars are limits. <b>Free sugar</b> is the added/juice/syrup share worth cutting — the natural sugar in whole fruit, vegetables and milk isn't counted; <b>total sugar</b> is everything. General references, not medical advice.</div>
     </div></details>`;
 }
 

@@ -83,6 +83,23 @@
              kcal: Math.round(mode === 'pct' ? val / 100 * floor : val * KCAL_PER_G[key]) };
   }
 
+  // ---- Free (added) sugar ---------------------------------------------------
+  // USDA reports only TOTAL sugar (#269) — the fructose in an apple and the sugar in a soda
+  // land in the same number. "Free sugar" (WHO: added sugars plus those in honey, syrups and
+  // fruit juice, but NOT the sugars intrinsic to whole fruit, vegetables and milk) is the one
+  // worth cutting, and it isn't in the data. So estimate the FRACTION of a food's sugar that
+  // is free from its name: whole foods score 0, obvious sweets/juice/syrup score 1. The meal
+  // parser can override this per food (the AI knows a mango lassi's sugar better than a
+  // keyword can); this is the floor everything else falls back to.
+  const SUGAR_INTRINSIC = /\b(apples?|bananas?|oranges?|mango(?:es)?|grapes?|berry|berries|strawberr\w*|blueberr\w*|raspberr\w*|blackberr\w*|melons?|watermelons?|cantaloupes?|pears?|peach(?:es)?|plums?|apricots?|cherry|cherries|pineapples?|kiwis?|figs?|guavas?|papayas?|pomegranates?|nectarines?|clementines?|mandarins?|tangerines?|lychees?|fruits?|milk|yoghurt|yogurt|curd|dahi|labneh|kefir|vegetables?|carrots?|tomato(?:es)?|onions?|beets?|beetroot|peas?|corn|sweetcorn|potato(?:es)?|lentils?|beans?|chickpeas?)\b/;
+  const SUGAR_FREE = /\b(sugar|sugars|syrup|honey|jam|jelly|marmalade|preserve|juice|soda|cola|pop|soft ?drink|energy ?drink|cordial|squash|lemonade|candy|candies|sweet|sweets|chocolate|cocoa|cookie|biscuit|cake|pastry|muffin|donut|doughnut|brownie|dessert|pudding|custard|ice ?cream|gelato|sorbet|toffee|caramel|fudge|nutella|frosting|icing|glucose|fructose|sucrose|dextrose|maple|molasses|jaggery|gur|treacle|agave|condensed milk|sweetened)\b/;
+  function freeSugarFraction(name) {
+    const n = ' ' + String(name || '').toLowerCase() + ' ';
+    if (SUGAR_FREE.test(n)) return 1;                 // named as a sweet / juice / syrup
+    if (SUGAR_INTRINSIC.test(n)) return 0;            // a whole fruit, veg or plain dairy
+    return 1;                                         // unclassified: count it as free, the safe side when cutting
+  }
+
   // ---- Per-entry contribution with penalties -------------------------------
   // base = per-100g nutrients; pen = {inflate, deduct}. source tags provenance so
   // AI estimates read as provisional. partOf (optional) is the dish this entry was
@@ -90,11 +107,16 @@
   // Without it, decomposing "biryani" into six ingredients loses the biryani.
   function computeEntry(name, grams, weighed, base, source, pen, partOf) {
     const s = grams / 100;
+    // Free sugar per 100g = total sugar × free fraction. base.freeFrac (set by the parser from
+    // the AI's read) wins; otherwise the name heuristic. Clamped so free can never exceed total.
+    const frac = base.freeFrac != null ? Math.max(0, Math.min(1, +base.freeFrac || 0))
+                                       : freeSugarFraction(name);
     const e = {
       name, grams, weighed, base, source: source || 'DB',
       kcal: base.kcal * s, p: base.p * s, f: base.f * s,
       c: (base.c || 0) * s, ca: (base.ca || 0) * s, ph: (base.ph || 0) * s,
-      fib: (base.fib || 0) * s, sug: (base.sug || 0) * s, na: (base.na || 0) * s,
+      fib: (base.fib || 0) * s, sug: (base.sug || 0) * s, fsug: (base.sug || 0) * s * frac,
+      na: (base.na || 0) * s,
       k: (base.k || 0) * s, mg: (base.mg || 0) * s, fe: (base.fe || 0) * s,
       zn: (base.zn || 0) * s, vc: (base.vc || 0) * s, vd: (base.vd || 0) * s, flags: []
     };
@@ -468,7 +490,10 @@
     { key:'vc',  name:'Vitamin C',        unit:'mg', m:90,   f:75,   limit:false, core:true, rec:true },
     { key:'vd',  name:'Vitamin D',        unit:'µg', m:15,   f:15,   limit:false, core:true },
     { key:'na',  name:'Sodium',           unit:'mg', m:2300, f:2300, limit:true,  core:true, rec:true },
-    { key:'sug', name:'Sugar',            unit:'g',  m:50,   f:50,   limit:true,  core:true },
+    // Free sugar (the added/juice/syrup share) is the one to cut — a tighter limit than total,
+    // set to the AHA added-sugar guidance (36 g men / 25 g women). Total sugar stays as context.
+    { key:'fsug', name:'Free sugar',      unit:'g',  m:36,   f:25,   limit:true,  core:true },
+    { key:'sug', name:'Total sugar',      unit:'g',  m:50,   f:50,   limit:true,  core:true },
     // Supplement-sourced extras — shown only on days something actually supplies them.
     { key:'va',  name:'Vitamin A',        unit:'µg', m:900,  f:700,  limit:false },
     { key:'ve',  name:'Vitamin E',        unit:'mg', m:15,   f:15,   limit:false },
@@ -1242,6 +1267,7 @@
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
     FOOD_PINS, foodPin, pinMatches, applyPin,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
+    freeSugarFraction, SUGAR_INTRINSIC, SUGAR_FREE,
     MICRO_REF, MICRO_KEYS, microRef, sumSuppMicros, ELEMENTAL_FRACTION, elementalMg,
     supplementDue, supplementNextDue, supplementWindow, supplementStats, isoWeekdayMon,
     repairJson, median, linearTrend,

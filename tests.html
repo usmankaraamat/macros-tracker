@@ -363,6 +363,32 @@ group('mealPaceKcal — bracketed intake pace, and microStatus flags');
   check('no target → na', C.microStatus(5,0,false)==='na', '');
 })();
 
+// ---- free vs total sugar ----
+group('freeSugarFraction + computeEntry — free (added) sugar split out of total');
+(function(){
+  check('table sugar → all free', C.freeSugarFraction('Sugar, NFS')===1, '');
+  check('apple → none free (intrinsic)', C.freeSugarFraction('Apple, raw')===0, '');
+  check('whole milk → none free', C.freeSugarFraction('Milk, whole')===0, '');
+  check('carrots → none free', C.freeSugarFraction('Carrots, raw')===0, '');
+  check('orange juice → all free', C.freeSugarFraction('Orange juice, raw')===1, 'juice is free sugar');
+  check('cookie → all free', C.freeSugarFraction('Chocolate chip cookie')===1, '');
+  check('condensed milk → free (sweet token beats the milk token)', C.freeSugarFraction('Condensed milk, sweetened')===1, '');
+  check('unclassified food → defaults to free (safe when cutting)', C.freeSugarFraction('Chicken curry')===1, '');
+
+  const pen = {inflate:1.1, deduct:0.9};
+  const sugar = C.computeEntry('Sugar, NFS', 50, true, {kcal:387,p:0,f:0,c:100,sug:100}, 'USDA', pen);
+  check('table sugar 50g → 50g total', approx(sugar.sug,50), `got ${sugar.sug}`);
+  check('table sugar 50g → 50g free', approx(sugar.fsug,50), `got ${sugar.fsug}`);
+  const apple = C.computeEntry('Apple, raw', 200, true, {kcal:52,p:0,f:0,c:14,sug:10}, 'USDA', pen);
+  check('apple 200g → 20g total sugar', approx(apple.sug,20), `got ${apple.sug}`);
+  check('apple 200g → 0g free sugar', apple.fsug===0, `got ${apple.fsug}`);
+  // The AI's per-food fraction overrides the name heuristic for a mixed/sweetened food.
+  const yog = C.computeEntry('yogurt', 100, true, {kcal:90,p:5,f:2,c:15,sug:12,freeFrac:0.5}, 'AI est', pen);
+  check('AI freeFrac 0.5 → half the sugar is free', approx(yog.fsug,6) && approx(yog.sug,12), `free ${yog.fsug}`);
+  const clamp = C.computeEntry('x', 100, true, {kcal:0,p:0,f:0,c:0,sug:10,freeFrac:2}, 'DB', pen);
+  check('freeFrac clamps to 1 — free never exceeds total', approx(clamp.fsug,10), `got ${clamp.fsug}`);
+})();
+
 // ---- supplement micronutrients: elemental conversion, per-day summing, registry ----
 group('elementalMg — the mineral ion, not the salt weight');
 (function(){
