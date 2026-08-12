@@ -26,9 +26,13 @@ function pushEntry(e){ if (VIEW_DATE === ACTIVE_DATE) e.at = new Date().toISOStr
 function totalsOf(l) {
   return l.reduce((t,e)=>({
     kcal:t.kcal+e.kcal, p:t.p+e.p, f:t.f+e.f, c:t.c+(e.c||0), ca:t.ca+e.ca, ph:t.ph+e.ph,
-    fib:t.fib+(e.fib||0), sug:t.sug+(e.sug||0), na:t.na+(e.na||0),
+    fib:t.fib+(e.fib||0), sug:t.sug+(e.sug||0),
+    // Entries logged before free-sugar tracking carry no fsug — estimate it from the name so
+    // historical days still read a free-sugar figure instead of a misleading zero.
+    fsug:t.fsug+(e.fsug!=null ? e.fsug : (e.sug||0)*LedgerCore.freeSugarFraction(e.name)),
+    na:t.na+(e.na||0),
     k:t.k+(e.k||0), mg:t.mg+(e.mg||0), fe:t.fe+(e.fe||0), zn:t.zn+(e.zn||0), vc:t.vc+(e.vc||0), vd:t.vd+(e.vd||0)
-  }), {kcal:0,p:0,f:0,c:0,ca:0,ph:0,fib:0,sug:0,na:0,k:0,mg:0,fe:0,zn:0,vc:0,vd:0});
+  }), {kcal:0,p:0,f:0,c:0,ca:0,ph:0,fib:0,sug:0,fsug:0,na:0,k:0,mg:0,fe:0,zn:0,vc:0,vd:0});
 }
 function totals(){ return totalsOf(ledger); }
 

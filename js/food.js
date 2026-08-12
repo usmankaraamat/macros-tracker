@@ -209,6 +209,7 @@ Return JSON: {"items":[{"name":<short generic single-ingredient name good for a 
 `"partOf":<the dish this component came from, or "" if it was logged as a plain food>,`+
 `"grams":<number, estimate a realistic portion if none is stated>,`+
 `"weighed":<boolean, true ONLY if the user gave an explicit weight/measure for THIS component; a decomposed guess is false>,`+
+`"freeSugarFrac":<0 to 1: the share of THIS food's sugar that is FREE sugar (added sugar, plus sugar in honey, syrup and fruit juice) under the WHO definition. 0 for whole fruit, vegetables and plain milk or yogurt whose sugar is all intrinsic; 1 for table sugar, sweets, chocolate, soft drinks, juice and syrups; a value in between for a sweetened or mixed food>,`+
 `"est":{"kcal":<per 100g>,"p":<protein g per 100g>,"f":<fat g per 100g>,"c":<carb g per 100g>}}]}.
 "est" is your best per-100g estimate, used only as a fallback. Output JSON only, no prose.
 Meal: """${text}"""`;
@@ -279,10 +280,13 @@ Label text: """${text || ''}"""`;
 // ---- PENDING (AI review) ----
 // Resolve a pending item's active choice (a USDA candidate or the AI estimate).
 function pendResolve(p){
+  // Carry the AI's free-sugar read onto whichever base wins (USDA or estimate), without
+  // mutating the shared candidate — computeEntry reads base.freeFrac to split free from total.
+  const withFrac = b => (p.freeFrac==null ? b : Object.assign({}, b, {freeFrac: p.freeFrac}));
   if (p.sel==='est' || !p.candidates.length)
-    return {base: p.estBase || {kcal:0,p:0,f:0,c:0}, source:'AI est', label: p.name};
+    return {base: withFrac(p.estBase || {kcal:0,p:0,f:0,c:0}), source:'AI est', label: p.name};
   const c = p.candidates[+p.sel.slice(1)] || p.candidates[0];
-  return {base: c.base, source:'USDA', label: c.name};
+  return {base: withFrac(c.base), source:'USDA', label: c.name};
 }
 // Foods that are essentially always eaten cooked. USDA's ranker favours the raw entry
 // (it is shorter, and `raw` scores a bonus that exists to prefer plain fruit and veg
@@ -560,6 +564,8 @@ document.getElementById('parseBtn').onclick = async ()=>{
         partOf: (it.partOf || '').trim(),         // dish this component was split from ('' = plain food)
         grams: Number(it.grams) || 0,
         weighed: !!it.weighed,
+        // Share of this food's sugar that is free/added (AI's read); null → name heuristic later.
+        freeFrac: (it.freeSugarFrac==null || it.freeSugarFrac==='') ? null : Math.max(0, Math.min(1, +it.freeSugarFrac || 0)),
         candidates, estBase,
         // Default to the best plausible USDA match; fall back to the AI estimate when the
         // top match's calories are wildly off the estimate (USDA returned the wrong food).
