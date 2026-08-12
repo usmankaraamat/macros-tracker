@@ -238,8 +238,12 @@ function renderMacros(t){
     const max = capGrams(cap, kcalPerG);
     const macroKcal = (t.p*4 + t.c*4 + t.f*9) || 1;
     const pctKcal = Math.round(val * kcalPerG / macroKcal * 100);
+    // Fat gets a composition footnote under its bar: the unhealthy share (saturated + trans)
+    // against a rough 10%-of-floor-energy ceiling, and the unsaturated share for context.
+    const fat = name === 'Fat' ? fatBreakdown(t) : null;
     if (!max){
-      rows.push(macroRow({ name, value: val.toFixed(1), unit: `g · ${pctKcal}% kcal`, frac: null }));
+      rows.push(macroRow({ name, value: val.toFixed(1), unit: `g · ${pctKcal}% kcal`, frac: null,
+        sub: fat && fat.text, subTone: fat && fat.tone }));
       return;
     }
     const frac = val / max;
@@ -249,20 +253,37 @@ function renderMacros(t){
       unit: `g · ${pctKcal}% kcal`,
       tone: frac > 1 ? 'over' : '',
       frac, barTone: frac > 1 ? 'over' : (frac >= 0.85 ? 'warn' : ''),
-      note: frac > 1 ? `${Math.round(val - max)}g over the cap` : ''
+      note: frac > 1 ? `${Math.round(val - max)}g over the cap` : '',
+      sub: fat && fat.text, subTone: fat && fat.tone
     }));
   });
 
   document.getElementById('macroRows').innerHTML = rows.join('');
 }
+// The line under the fat bar. Saturated + trans is the "unhealthy" share worth watching;
+// the ceiling is 10% of the calorie floor's energy (the WHO cap). Unsaturated rides along for
+// context. Only what USDA-matched foods report is counted, so it can read below total fat when
+// AI-estimated items (which carry no fat breakdown) are in the day — say so rather than mislead.
+function fatBreakdown(t){
+  const sat = t.sfa||0, uns = t.ufa||0, tr = t.tfa||0, unhealthy = sat + tr;
+  if (unhealthy + uns < 0.05) return null;                  // no breakdown data logged yet
+  const limit = FLOOR > 0 ? FLOOR * 0.10 / 9 : 0;           // 10% of floor kcal, as grams of fat
+  const trTxt = tr > 0.05 ? ` (${sat.toFixed(1)} sat + ${tr.toFixed(1)} trans)` : '';
+  const cap = limit > 0 ? ` / ~${Math.round(limit)}g` : '';
+  const text = `${unhealthy.toFixed(1)}g unhealthy${trTxt}${cap} · ${uns.toFixed(1)}g unsaturated`;
+  const tone = limit > 0 && unhealthy > limit ? 'over'
+             : limit > 0 && unhealthy >= limit * 0.85 ? 'warn' : '';
+  return { text, tone };
+}
 function macroRow(o){
   const groove = o.frac == null ? '' :
     `<span class="macro-groove"><span class="${o.barTone||''}" style="width:${Math.min(100, o.frac*100)}%"></span></span>`;
   const note = o.note ? `<span class="macro-note">${escapeHtml(o.note)}</span>` : '';
+  const sub = o.sub ? `<span class="macro-note ${o.subTone||''}">${escapeHtml(o.sub)}</span>` : '';
   return `<div class="macro-row">
     <span class="macro-name">${escapeHtml(o.name)}</span>
     <span class="macro-val ${o.tone||''}">${o.value}<small>${escapeHtml(o.unit)}</small></span>
-    ${groove}${note}
+    ${groove}${note}${sub}
   </div>`;
 }
 

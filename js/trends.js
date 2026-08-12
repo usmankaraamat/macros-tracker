@@ -128,11 +128,11 @@ document.getElementById('csvBtn').onclick = ()=>{
   const dates=Array.from(new Set(Object.keys(map).concat(Object.keys(tot))))
     .filter(d=>(+map[d]>0)||(tot[d]&&tot[d].kcal>0)).sort();
   if (!dates.length){ toast('Nothing logged yet to export.'); return; }
-  const rows=[['date','weight_kg','kcal','protein_g','carbs_g','fat_g','fiber_g','free_sugar_g','total_sugar_g','sodium_mg']];
+  const rows=[['date','weight_kg','kcal','protein_g','carbs_g','fat_g','sat_fat_g','unsat_fat_g','fiber_g','free_sugar_g','total_sugar_g','sodium_mg']];
   dates.forEach(d=>{ const t=tot[d]||{}; rows.push([ d,
     +map[d]>0?(+map[d]).toFixed(1):'', t.kcal?Math.round(t.kcal):'', t.p?t.p.toFixed(1):'',
-    t.c?t.c.toFixed(1):'', t.f?t.f.toFixed(1):'', t.fib?t.fib.toFixed(1):'',
-    t.fsug?t.fsug.toFixed(1):'', t.sug?t.sug.toFixed(1):'', t.na?Math.round(t.na):'' ]); });
+    t.c?t.c.toFixed(1):'', t.f?t.f.toFixed(1):'', t.sfa?t.sfa.toFixed(1):'', t.ufa?t.ufa.toFixed(1):'',
+    t.fib?t.fib.toFixed(1):'', t.fsug?t.fsug.toFixed(1):'', t.sug?t.sug.toFixed(1):'', t.na?Math.round(t.na):'' ]); });
   const csv=rows.map(r=>r.join(',')).join('\r\n');
   const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url; a.download=`ledger_log_${ACTIVE_DATE}.csv`; a.click(); URL.revokeObjectURL(url);
