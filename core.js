@@ -30,8 +30,11 @@
     // Micronutrients (per 100g), keyed by USDA nutrient number:
     //   291 fiber(g) · 269 sugars(g) · 307 sodium · 306 potassium · 301 calcium ·
     //   304 magnesium · 303 iron · 309 zinc (mg) · 401 vitamin C(mg) · 328 vitamin D(µg).
+    // Fat breakdown (g): 606 saturated · 645 monounsaturated · 646 polyunsaturated · 605 trans.
+    // Unsaturated is mono+poly; the "unhealthy" share the footnote flags is saturated+trans.
     return { kcal, p, f, c, ca: g('301'), ph: g('305'), fib: g('291'), sug: g('269'), na: g('307'),
-             k: g('306'), mg: g('304'), fe: g('303'), zn: g('309'), vc: g('401'), vd: g('328') };
+             k: g('306'), mg: g('304'), fe: g('303'), zn: g('309'), vc: g('401'), vd: g('328'),
+             sfa: g('606'), ufa: g('645') + g('646'), tfa: g('605') };
   }
 
   // ---- Target resolution ---------------------------------------------------
@@ -116,6 +119,7 @@
       kcal: base.kcal * s, p: base.p * s, f: base.f * s,
       c: (base.c || 0) * s, ca: (base.ca || 0) * s, ph: (base.ph || 0) * s,
       fib: (base.fib || 0) * s, sug: (base.sug || 0) * s, fsug: (base.sug || 0) * s * frac,
+      sfa: (base.sfa || 0) * s, ufa: (base.ufa || 0) * s, tfa: (base.tfa || 0) * s,
       na: (base.na || 0) * s,
       k: (base.k || 0) * s, mg: (base.mg || 0) * s, fe: (base.fe || 0) * s,
       zn: (base.zn || 0) * s, vc: (base.vc || 0) * s, vd: (base.vd || 0) * s, flags: []

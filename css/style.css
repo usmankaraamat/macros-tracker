@@ -510,6 +510,8 @@ details:not(.panel)[open] > summary::before { transform: rotate(45deg); }
   color: var(--faint);
   margin-top: 5px;
 }
+.macro-note.warn { color: var(--brass); }
+.macro-note.over { color: var(--hot); }
 
 /* ============================= controls ================================= */
 

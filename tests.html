@@ -363,6 +363,29 @@ group('mealPaceKcal — bracketed intake pace, and microStatus flags');
   check('no target → na', C.microStatus(5,0,false)==='na', '');
 })();
 
+// ---- saturated / unsaturated fat plumbing ----
+group('nutrientsFrom + computeEntry — saturated, unsaturated and trans fat');
+(function(){
+  const food = { description:'Butter', foodNutrients:[
+    {nutrientNumber:'204', value:81},   // fat
+    {nutrientNumber:'606', value:51},   // saturated
+    {nutrientNumber:'645', value:21},   // mono
+    {nutrientNumber:'646', value:3},    // poly
+    {nutrientNumber:'605', value:3.3}   // trans
+  ]};
+  const b = C.nutrientsFrom(food);
+  check('saturated read from #606', approx(b.sfa,51), `got ${b.sfa}`);
+  check('unsaturated is mono+poly (#645+#646)', approx(b.ufa,24), `got ${b.ufa}`);
+  check('trans read from #605', approx(b.tfa,3.3), `got ${b.tfa}`);
+  const e = C.computeEntry('Butter', 50, true, b, 'USDA', {inflate:1,deduct:1});
+  check('50g → saturated scaled', approx(e.sfa,25.5), `got ${e.sfa}`);
+  check('50g → unsaturated scaled', approx(e.ufa,12), `got ${e.ufa}`);
+  check('50g → trans scaled', approx(e.tfa,1.65), `got ${e.tfa}`);
+  // A food with no fatty-acid breakdown reported contributes nothing to the split.
+  const plain = C.computeEntry('Rice', 100, true, {kcal:130,p:2.7,f:0.3,c:28}, 'USDA', {inflate:1,deduct:1});
+  check('no breakdown data → sfa/ufa 0', plain.sfa===0 && plain.ufa===0, `got ${plain.sfa}/${plain.ufa}`);
+})();
+
 // ---- free vs total sugar ----
 group('freeSugarFraction + computeEntry — free (added) sugar split out of total');
 (function(){
