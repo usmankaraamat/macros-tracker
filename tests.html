@@ -811,7 +811,9 @@ group('exerciseTrend — progressing, stalled, grinding, drifting');
   check('rising loads read as progressing', up.verdict === 'progressing', `got ${up.verdict}`);
   check('trend is +8.16 %/month', approx(up.pctPerMonth, 8.163, 0.01), `got ${up.pctPerMonth}`);
   check('judged on e1RM with 6 usable sessions', up.cls === 'strength' && up.metric === 'e1RM' && up.n === 6);
-  check('confidence is medium at 6 sessions', up.confidence === 'medium', `got ${up.confidence}`);
+  // A dead-straight six-session climb has a near-zero margin of error → top tier.
+  check('a clean six-session climb earns high confidence', up.confidence === 'high', `got ${up.confidence}`);
+  check('and reports a tiny margin of error', up.pctSE != null && up.pctSE < 0.5, `got ±${up.pctSE}`);
 
   const down = C.exerciseTrend(series([110,108,106,104,102,100]), {});
   check('falling loads read as regressing', down.verdict === 'regressing', `got ${down.verdict}`);
@@ -845,17 +847,31 @@ group('exerciseTrend — progressing, stalled, grinding, drifting');
         approx(honest.pctPerMonth, modest.pctPerMonth, 0.001) && honest.verdict === modest.verdict,
         `got ${honest.pctPerMonth} vs ${modest.pctPerMonth}`);
 
-  const thin = C.exerciseTrend(series([100,102,104]).slice(0,3), {});
-  check('three sessions is too thin to call', thin.verdict === 'thin', `got ${thin.verdict}`);
-  check('and it says how many more are needed', thin.sessionsNeeded === 2, `got ${thin.sessionsNeeded}`);
+  // Two sessions is a line through two dots (df=0) — no margin can be measured, so it stays
+  // "building data"; three is the first read.
+  const thin = C.exerciseTrend(series([100,102]).slice(0,2), {});
+  check('two sessions is too thin to call', thin.verdict === 'thin', `got ${thin.verdict}`);
+  check('and it says one more is needed', thin.sessionsNeeded === 1, `got ${thin.sessionsNeeded}`);
+  check('a two-session read has no margin of error', thin.pctSE == null, `got ${thin.pctSE}`);
   check('no history at all is thin, not an error', C.exerciseTrend([], {}).verdict === 'thin');
+  // Three sessions now DOES produce a read — provisional, low confidence, with its margin.
+  const three = C.exerciseTrend(series([100,103,106]).slice(0,3), {});
+  check('three sessions produces a verdict now', three.verdict !== 'thin', `got ${three.verdict}`);
+  check('rising three-session read is progressing', three.verdict === 'progressing', `got ${three.verdict}`);
+  check('but only at low confidence', three.confidence === 'low', `got ${three.confidence}`);
+  check('and it carries an explicit margin of error', three.pctSE != null, `got ${three.pctSE}`);
+  check('nothing more is demanded at three sessions', three.sessionsNeeded === 0, `got ${three.sessionsNeeded}`);
 
   // High-rep isolation: e1RM is never computed, capacity is.
   const fp = C.exerciseTrend(D.map((d,i)=>({date:d, sets:[{kg:20, reps:25+i}], rir:3})), {name:'Face pull'});
   check('high-rep work is tracked on capacity, not e1RM', fp.cls === 'volume' && fp.metric === 'capacity', `got ${fp.cls}`);
   check('added reps at the same load is progress', fp.verdict === 'progressing', `got ${fp.verdict}`);
   check('capacity trend is +14.05 %/month', approx(fp.pctPerMonth, 14.05, 0.05), `got ${fp.pctPerMonth}`);
-  check('volume-class confidence never rises above low', fp.confidence === 'low', `got ${fp.confidence}`);
+  // Strength-endurance work now earns confidence from its own data like anything else — a
+  // clean six-session capacity climb is high confidence. It is still kept out of the recomp
+  // verdict (liftVsWeight filters to strength), so this can't distort the muscle estimate.
+  check('a clean high-rep capacity climb can earn high confidence', fp.confidence === 'high', `got ${fp.confidence}`);
+  check('and it carries a margin of error too', fp.pctSE != null, `got ${fp.pctSE}`);
 
   // Median reps sits at the cap, but every session's RIR pushes it past — no e1RM is
   // available, so the exercise is judged on capacity rather than reported as thin.
@@ -876,6 +892,39 @@ group('exerciseTrend — progressing, stalled, grinding, drifting');
         C.exerciseTrend(stale, {}).n === 6 && C.exerciseTrend(stale, {}).verdict === 'progressing',
         `got n ${C.exerciseTrend(stale, {}).n}`);
   check('sessions in any order still fit', approx(C.exerciseTrend(series([100,102,104,106,108,110]).reverse(), {}).pctPerMonth, 8.163, 0.01));
+})();
+
+// ---- margin of error + graduated confidence ----
+group('exerciseTrend — margin of error and confidence that sharpens with data');
+(function(){
+  const mk = (dates, loads, reps) => dates.map((d,i)=>({date:d, sets:[{kg:loads[i], reps:reps||5}]}));
+  // linearTrend exposes the slope's standard error: zero for a perfect line, positive for
+  // scatter, null with only two points (no residual to measure).
+  const clean = C.linearTrend([{x:0,y:100},{x:1,y:102},{x:2,y:104},{x:3,y:106}]);
+  check('a perfect line has zero slope error', clean.se != null && approx(clean.se, 0, 1e-9), `got ${clean.se}`);
+  const noisy = C.linearTrend([{x:0,y:100},{x:1,y:90},{x:2,y:115},{x:3,y:95}]);
+  check('scatter off the line gives a positive slope error', noisy.se > 0, `got ${noisy.se}`);
+  check('two points give no error estimate (df=0)', C.linearTrend([{x:0,y:100},{x:1,y:110}]).se == null, 'expected null');
+
+  const D6 = ['2026-06-01','2026-06-08','2026-06-15','2026-06-22','2026-06-29','2026-07-06'];
+  const D4 = D6.slice(0,4);
+  // Same clean upward signal, more sessions → the margin shrinks and confidence climbs.
+  const se3 = C.exerciseTrend(mk(D6.slice(0,3), [100,102,104]), {}).pctSE;
+  const se6 = C.exerciseTrend(mk(D6, [100,102,104,106,108,110]), {}).pctSE;
+  check('a clean read has a defined margin at three sessions', se3 != null, `got ${se3}`);
+  check('three and six sessions of a clean line both fit tightly', se6 != null && se6 <= 0.5 && se3 <= 0.5, `3:${se3} 6:${se6}`);
+
+  // Confidence is earned from the margin, not just the count: a noisy six-session lift can
+  // read below a clean four-session one.
+  const clean4 = C.exerciseTrend(mk(D4, [100,102,104,106]), {});
+  check('a clean four-session lift reaches at least medium', clean4.confidence === 'medium' || clean4.confidence === 'high', `got ${clean4.confidence}`);
+  const noisy6 = C.exerciseTrend(mk(D6, [100,120,95,130,90,125]), {});
+  check('a wildly noisy six-session lift stays low', noisy6.confidence === 'low', `got ${noisy6.confidence}`);
+  check('the noisy lift owns a wide margin of error', noisy6.pctSE > C.LIFT_SE_MED, `got ±${noisy6.pctSE}`);
+
+  // A move smaller than its own error bar is flagged as not-yet-separable from flat.
+  const marginal = C.exerciseTrend(mk(D6, [100,101,99,102,100,103]), {});
+  check('a move inside its margin is not separable from flat', marginal.separable === false, `sep ${marginal.separable}, ±${marginal.pctSE}`);
 })();
 
 // ---- liftVsWeight: the reason this lives in a food tracker ----

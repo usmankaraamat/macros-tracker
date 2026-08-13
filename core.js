@@ -766,9 +766,15 @@
   // low-rep work and inflates badly out at 20+. High-rep exercises get a different
   // metric entirely rather than a bad e1RM (see classifyExercise).
   const LIFT_REP_CAP = 12;
-  // Fewer sessions than this and a slope is noise wearing a trend's clothes. At the
-  // usual weekly frequency that is about five weeks before the app will call anything.
-  const LIFT_MIN_SESSIONS = 5;
+  // The first point a slope means anything. At exactly 2 sessions the fit is a line through
+  // two dots (df=0) — pure noise — so 3 is the floor: the first n where the scatter off the
+  // line can even be measured. A 3-session read is deliberately shown as LOW confidence with
+  // its margin of error attached, and sharpens toward high as sessions accumulate, the same
+  // way the TDEE estimate leans on the formula early and on measured reality later.
+  const LIFT_MIN_SESSIONS = 3;
+  // The margin of error (1σ of the %/month slope) has to fall under this to earn each tier.
+  const LIFT_SE_HIGH = 2.0;           // %/month — tight enough to trust the direction
+  const LIFT_SE_MED  = 5.0;           // %/month — usable, but still provisional
   // Dead band: a trend inside ±this is "flat". Session-to-session output swings ~5% on
   // sleep, food and how warm you were, so only a sustained move outside the band counts.
   const LIFT_FLAT_PCT = 1.5;          // % per month
@@ -787,14 +793,26 @@
   }
   // Least-squares slope of y over x. Shared by the weight trend and every lift trend so
   // "is this going up" is answered the same way everywhere. Null when nothing can be fit.
+  // `se` is the standard error of the slope — how much the line could wobble given how far
+  // the points scatter off it. It needs a residual to measure, so it is null at n=2 (two
+  // points fit perfectly, df=0: no way to tell signal from noise) and tightens as points are
+  // added and as they hug the line, which is what lets a trend advertise its own confidence.
   function linearTrend(pts) {
     const n = (pts || []).length;
     if (n < 2) return null;
     const mx = pts.reduce((s, p) => s + p.x, 0) / n;
     const my = pts.reduce((s, p) => s + p.y, 0) / n;
-    const den = pts.reduce((s, p) => s + (p.x - mx) * (p.x - mx), 0);
-    if (den === 0) return null;
-    return { slope: pts.reduce((s, p) => s + (p.x - mx) * (p.y - my), 0) / den, mean: my, n: n };
+    const sxx = pts.reduce((s, p) => s + (p.x - mx) * (p.x - mx), 0);
+    if (sxx === 0) return null;
+    const slope = pts.reduce((s, p) => s + (p.x - mx) * (p.y - my), 0) / sxx;
+    const intercept = my - slope * mx;
+    let se = null;
+    if (n > 2) {
+      let sse = 0;
+      pts.forEach(p => { const r = p.y - (intercept + slope * p.x); sse += r * r; });
+      se = Math.sqrt(Math.max(0, sse) / (n - 2) / sxx);   // SE(slope) = √(residual variance / Sxx)
+    }
+    return { slope: slope, intercept: intercept, mean: my, n: n, se: se, sxx: sxx };
   }
   // Epley, extended by reps-in-reserve: a set stopped n reps short of failure is treated
   // as a set of (reps + n) taken to failure. Returns null when the effective rep count is
@@ -885,8 +903,8 @@
     const minN = o.minSessions > 0 ? o.minSessions : LIFT_MIN_SESSIONS;
     const all = (sessions || []).filter(s => s && s.date).slice().sort((a, b) => a.date < b.date ? -1 : 1);
     const empty = { name: o.name || '', cls: 'strength', metric: 'e1RM', n: 0, sessions: 0,
-                    first: null, last: null, pctPerMonth: null, volPctPerMonth: null,
-                    rirPerMonth: null, verdict: 'thin', confidence: 'none',
+                    first: null, last: null, pctPerMonth: null, pctSE: null, separable: false,
+                    volPctPerMonth: null, rirPerMonth: null, verdict: 'thin', confidence: 'none',
                     sessionsNeeded: minN, spanDays: 0, latest: null,
                     setsTotal: 0, setsCapped: 0 };
     if (!all.length) return empty;
@@ -926,6 +944,9 @@
     const volPct = volFit && volFit.mean > 0 ? volFit.slope * 30 / volFit.mean * 100 : null;
     const rirPm = rirFit ? rirFit.slope * 30 : null;
     const n = b.pts.length;
+    // The margin of error on the trend itself, in the same %/month units — 1σ of the slope.
+    // Null at n<3 (no residual to measure). This is what the readout shows as "±x.x".
+    const pctSE = fit && fit.se != null && fit.mean > 0 ? fit.se * 30 / fit.mean * 100 : null;
 
     let verdict;
     if (n < minN || pct == null) verdict = 'thin';
@@ -934,15 +955,30 @@
     else if (rirPm != null && rirPm >= LIFT_RIR_DRIFT) verdict = 'effort-drift';
     else if ((volPct != null && volPct > LIFT_FLAT_PCT) || (rirPm != null && rirPm <= -LIFT_RIR_DRIFT)) verdict = 'grinding';
     else verdict = 'stalled';
-    // Volume-class exercises never rate above 'low': rear-delt and cuff work is there for
-    // joint health, and letting its noise vote in the headline would make it meaningless.
-    const confidence = verdict === 'thin' ? 'none'
-      : cls === 'volume' ? 'low' : (n >= minN + 3 ? 'high' : 'medium');
+    // Confidence is earned from the data, not the session count alone: the margin of error has
+    // to be tight (and enough sessions logged) to reach each tier. So a noisy six-session lift
+    // can read low while a clean four-session one reads medium — and every lift climbs the
+    // tiers as it is logged. Volume/strength-endurance work is treated the same; it is kept out
+    // of the recomp verdict elsewhere, so it no longer needs an artificial confidence ceiling.
+    // `separable` is the honest headline test: is the move bigger than its own error bar?
+    const separable = pctSE != null && pct != null && Math.abs(pct) > pctSE + LIFT_FLAT_PCT;
+    const directional = verdict === 'progressing' || verdict === 'regressing';
+    let confidence;
+    if (verdict === 'thin') confidence = 'none';
+    else if (pctSE == null) confidence = 'low';
+    // A claimed direction you can't separate from flat is not something to be confident about,
+    // no matter how tidy the fit — so a directional call that sits inside its own error bar is
+    // capped at low until the move outgrows the noise.
+    else if (directional && !separable) confidence = 'low';
+    else if (n >= 5 && pctSE <= LIFT_SE_HIGH) confidence = 'high';
+    else if (n >= 4 && pctSE <= LIFT_SE_MED) confidence = 'medium';
+    else confidence = 'low';
 
     return { name: o.name || '', cls: cls, metric: cls === 'volume' ? 'capacity' : 'e1RM',
              n: n, sessions: win.length,
              first: n ? b.pts[0].y : null, last: n ? b.pts[n - 1].y : null,
-             pctPerMonth: pct, volPctPerMonth: volPct, rirPerMonth: rirPm,
+             pctPerMonth: pct, pctSE: pctSE, separable: separable,
+             volPctPerMonth: volPct, rirPerMonth: rirPm,
              verdict: verdict, confidence: confidence,
              sessionsNeeded: Math.max(0, minN - n),
              spanDays: end - t0, latest: b.latest,
@@ -1278,6 +1314,7 @@
     e1RM, setLoad, weightAt, classifyExercise, sessionMetrics, exerciseTrend, liftVsWeight,
     normalizeName, exerciseId, matchExercise, parseWorkoutLine, parseWorkout, SEED_EXERCISES,
     LIFT_REP_CAP, LIFT_MIN_SESSIONS, LIFT_FLAT_PCT, LIFT_RIR_DRIFT, LIFT_WINDOW_DAYS,
+    LIFT_SE_HIGH, LIFT_SE_MED,
     liftWindowOpen, hhmmMinutes, isTrainingSplit, LIFT_OPEN_LEAD_MIN, LIFT_OPEN_TAIL_MIN,
     KCAL_PER_KG_FAT, mergeSyncStates, ternary
   };
