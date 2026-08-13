@@ -375,6 +375,8 @@ function renderLiftChips(all){
 }
 const VERDICT_LABEL = { progressing:'progressing', stalled:'stalled', grinding:'grinding',
                         'effort-drift':'effort drift', regressing:'regressing', thin:'building data' };
+const CONF_LABEL = { high:'high confidence', medium:'medium confidence', low:'low confidence · provisional' };
+const CONF_CLS   = { high:'high', medium:'med', low:'low' };
 function pctTxt(p){ return (p>0?'+':'') + p.toFixed(1) + '%/month'; }
 function renderLiftTrends(rows){
   const wrap = document.getElementById('liftTrends'); if (!wrap) return;
@@ -385,23 +387,29 @@ function renderLiftTrends(rows){
     (a.t.cls === b.t.cls ? 0 : a.t.cls === 'strength' ? -1 : 1));
   wrap.innerHTML = rows.map(r=>{
     const t = r.t;
-    // Which metric this lift is judged on, and why. e1RM is only meaningful at low
-    // effective reps; above the cap the app measures capacity instead. That switch used
-    // to happen silently, so a set of 18 looked like it counted toward strength when it
-    // could not contribute to the number at all.
+    // Which metric this lift is judged on, and why. e1RM is only meaningful at low effective
+    // reps; past the cap the app tracks work capacity instead — a genuine strength-endurance
+    // signal, not a lesser one, so it gets the same trend, margin and confidence treatment.
     const capNote = t.setsTotal && t.setsCapped
       ? ` · ${t.setsCapped} of ${t.setsTotal} sets past ${LedgerCore.LIFT_REP_CAP} effective reps`
       : '';
     const metricNote = t.cls === 'volume'
-      ? `judged on capacity (load × reps), not e1RM${capNote}`
+      ? `strength-endurance — judged on work capacity (load × effective reps), since the reps run past the e1RM cap${capNote}`
       : `judged on e1RM${capNote}`;
-    let main, sub = '';
+    let main, meta = '', sub = '';
     if (t.verdict === 'thin'){
-      main = `${t.sessions} session${t.sessions===1?'':'s'} logged · ${t.sessionsNeeded} more before a trend means anything`;
+      const need = Math.max(1, t.sessionsNeeded);
+      main = `${t.sessions} session${t.sessions===1?'':'s'} logged · ${need} more before the first read`;
       sub = metricNote;
     } else {
-      main = `${t.metric === 'e1RM' ? 'e1RM' : 'capacity'} ${t.last.toFixed(1)}`
-           + `${t.metric === 'e1RM' ? ' kg' : ''} · ${pctTxt(t.pctPerMonth)} · ${t.n} sessions over ${t.spanDays} days`;
+      const label = t.cls === 'volume' ? 'capacity' : 'e1RM';
+      const unit = t.cls === 'volume' ? '' : ' kg';
+      const moe = t.pctSE != null ? ` <span class="ink-dim">±${t.pctSE.toFixed(1)}</span>` : '';
+      main = `${label} ${t.last.toFixed(1)}${unit} · ${pctTxt(t.pctPerMonth)}${moe}`;
+      // The margin of error and the earned confidence tier, always in view, right under the
+      // headline number — so a three-session read reads as the provisional thing it is.
+      meta = `${t.n} sessions over ${t.spanDays} days · `
+        + `<span class="lift-conf ${CONF_CLS[t.confidence]||''}">${CONF_LABEL[t.confidence]||t.confidence}</span>`;
       if (t.verdict === 'grinding')
         sub = t.volPctPerMonth > 0
           ? `Volume is up ${pctTxt(t.volPctPerMonth)} for the same top set — more work, same output.`
@@ -410,8 +418,14 @@ function renderLiftTrends(rows){
         sub = `You are stopping ${Math.abs(t.rirPerMonth).toFixed(1)} reps further from failure than a month ago — the flat trend may be the reporting, not your strength.`;
       if (t.verdict === 'stalled')
         sub = `Output, volume and effort all flat. This is the real thing.`;
-      // Half your sets sitting past the cap means the strength line is fit on the other
-      // half — worth knowing before trusting a slope drawn through it.
+      // Honest hedge: when the move is smaller than its own error bar, or the read is still
+      // provisional, say the direction isn't settled — it firms up as more sessions land.
+      if ((t.verdict === 'progressing' || t.verdict === 'regressing') && t.separable === false)
+        sub = (sub ? sub + ' ' : '') + `The change is within its ±${(t.pctSE||0).toFixed(1)} margin, so the direction isn't certain yet — it firms up with more sessions.`;
+      else if (t.confidence === 'low')
+        sub = (sub ? sub + ' ' : '') + `An early read from ${t.n} sessions; it sharpens as you log more.`;
+      // Half your sets past the cap means the strength line is fit on the other half — worth
+      // knowing before trusting a slope drawn through it.
       if (t.setsTotal && t.setsCapped / t.setsTotal >= 0.5)
         sub = (sub ? sub + ' ' : '') + metricNote.charAt(0).toUpperCase() + metricNote.slice(1) + '.';
     }
@@ -419,12 +433,13 @@ function renderLiftTrends(rows){
     const lastLine = lm && lm.sets
       ? `last: ${Math.round(lm.topLoad)} kg top set · ${lm.sets} set${lm.sets===1?'':'s'} · ${Math.round(lm.volume).toLocaleString()} kg`
       : '';
-    return `<div class="lift-ex${t.cls==='volume'?' low-signal':''}">
+    return `<div class="lift-ex">
       <div class="lift-ex-head">
         <span class="lift-ex-name">${escapeHtml(t.name)}</span>
         <span class="verdict v-${t.verdict}">${VERDICT_LABEL[t.verdict]||t.verdict}</span>
       </div>
       <div class="lift-sub">${main}</div>
+      ${meta ? `<div class="lift-sub">${meta}</div>` : ''}
       ${lastLine ? `<div class="lift-sub">${lastLine}</div>` : ''}
       ${sub ? `<div class="lift-sub" style="color:var(--graphite)">${sub}</div>` : ''}
     </div>`;
