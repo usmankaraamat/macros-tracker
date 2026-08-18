@@ -48,7 +48,8 @@
   </div>
   <div class="sidebar-tabs" role="tablist" aria-orientation="vertical" aria-label="Sections">
     <button type="button" role="tab" id="tabbtn-today" data-tab="today" aria-selected="true" aria-controls="tabToday"><span class="ico">▤</span>Today</button>
-    <button type="button" role="tab" id="tabbtn-plan" data-tab="plan" aria-selected="false" aria-controls="tabPlan"><span class="ico">◈<span class="nav-badge" id="suppBadge" hidden></span></span>Plan</button>
+    <button type="button" role="tab" id="tabbtn-logs" data-tab="logs" aria-selected="false" aria-controls="tabLogs"><span class="ico">✎<span class="nav-badge" id="suppBadge" hidden></span></span>Logs</button>
+    <button type="button" role="tab" id="tabbtn-plan" data-tab="plan" aria-selected="false" aria-controls="tabPlan"><span class="ico">◈</span>Plan</button>
     <button type="button" role="tab" id="tabbtn-lift" data-tab="lift" aria-selected="false" aria-controls="tabLift"><span class="ico">▦</span>Lift</button>
     <button type="button" role="tab" id="tabbtn-trends" data-tab="trends" aria-selected="false" aria-controls="tabTrends"><span class="ico">◧</span>Trends</button>
   </div>
@@ -368,14 +369,71 @@
   </section>
 </main>
 
+<!-- ================================= LOGS ================================ -->
+<main id="tabLogs" class="tabview" role="tabpanel" aria-labelledby="tabbtn-logs" hidden>
+  <div class="tactical" id="logsDateNote" style="margin-bottom:4px"></div>
+
+  <!-- WEIGH-IN -->
+  <section class="panel">
+    <span class="panel-title">Weigh-in · <span id="wDate">today</span></span>
+    <div class="row" style="grid-template-columns:1fr 84px">
+      <div>
+        <label for="wIn">Morning weight (kg)</label>
+        <input type="number" id="wIn" min="0" step="0.1" inputmode="decimal" placeholder="78.4">
+      </div>
+      <div style="display:flex;align-items:flex-end">
+        <button type="button" id="wSaveBtn">Log</button>
+      </div>
+    </div>
+    <div class="tactical" id="wLogHint" style="margin-top:8px">Weigh first thing, after the toilet, before eating or drinking — same conditions each day so the trend reflects fat, not last night's dinner. The full trend and corridor cross-check live on <b>Trends</b>.</div>
+  </section>
+
+  <!-- BODY-FAT ESTIMATE -->
+  <section class="panel">
+    <span class="panel-title">Body-fat estimate · U.S. Navy tape method</span>
+    <div id="bfReadout"><div class="empty">Enter your height in ⚙ Settings and log a waist and neck below to estimate body fat.</div></div>
+    <div class="tactical" id="bfTrend" hidden style="margin-top:10px"></div>
+  </section>
+
+  <!-- BODY MEASUREMENTS -->
+  <section class="panel">
+    <span class="panel-title">Body measurements · <span id="mDate">today</span> <span class="sr-sub">(cm)</span></span>
+    <div class="tactical" style="margin-bottom:6px">Waist and neck (plus hips, for women) drive the body-fat estimate above. The rest are optional — log the ones you care about and the app tracks each one over time.</div>
+    <div id="measureForm" class="measure-grid"></div>
+    <div class="footer-actions" style="grid-template-columns:1fr auto;margin-top:12px">
+      <button type="button" id="mSaveBtn">Save measurements</button>
+      <button type="button" class="ghost" id="mClearBtn">Clear this day</button>
+    </div>
+    <div class="tactical" id="mFormMsg" hidden style="margin-top:8px"></div>
+
+    <details id="measureHowto" style="margin-top:16px">
+      <summary>How to measure — read once, then stay consistent</summary>
+      <div class="measure-howto" id="measureHowtoBody" style="margin-top:10px"></div>
+      <div class="tactical" style="margin-top:10px">Consistency beats precision. Measure at the same time of day (morning is best), on the same side, with the tape snug but not compressing the skin, and — for the waist and chest — after a normal exhale, without sucking in. A cloth or spring-loaded tape held level all the way round is worth far more than an exact starting number.</div>
+    </details>
+
+    <details style="margin-top:12px">
+      <summary>Measurement log</summary>
+      <div id="measureLog" style="margin-top:12px"><div class="empty">No measurements logged yet.</div></div>
+    </details>
+  </section>
+
+  <!-- SUPPLEMENTS (daily doses) -->
+  <section class="panel">
+    <span class="panel-title">Supplements · <span id="suppDate">today</span></span>
+    <div id="suppToday"></div>
+    <div class="tactical" id="suppSummary" hidden></div>
+    <div class="tactical" style="margin-top:10px">Add or edit protocols on the <b>Plan</b> tab.</div>
+  </section>
+</main>
+
 <!-- ================================= PLAN ================================ -->
 <main id="tabPlan" class="tabview" role="tabpanel" aria-labelledby="tabbtn-plan" hidden>
   <section class="panel">
-    <span class="panel-title">Supplement protocols · <span id="suppDate">today</span></span>
-    <div id="suppToday"></div>
-    <div class="tactical" id="suppSummary" hidden></div>
+    <span class="panel-title">Supplement protocols</span>
+    <div class="tactical" style="margin-bottom:4px">Set up which supplements you take, on what schedule, and their per-dose nutrients here. Tick today's doses on the <b>Logs</b> tab.</div>
 
-    <details style="margin-top:16px">
+    <details style="margin-top:12px" open>
       <summary>Manage protocols</summary>
       <div id="suppManage" style="margin-top:12px"></div>
       <div style="margin-top:14px;border-top:1px solid var(--rule);padding-top:14px">
@@ -553,15 +611,7 @@
 
   <section class="panel">
     <span class="panel-title">Weight and intake · is the corridor working?</span>
-    <div class="row" style="grid-template-columns:1fr 84px">
-      <div>
-        <label for="wIn">Weight on <span id="wDate">today</span> (kg)</label>
-        <input type="number" id="wIn" min="0" step="0.1" inputmode="decimal" placeholder="78.4">
-      </div>
-      <div style="display:flex;align-items:flex-end">
-        <button type="button" id="wSaveBtn">Log</button>
-      </div>
-    </div>
+    <div class="tactical" style="margin-bottom:4px">Log your morning weight on the <b>Logs</b> tab — the trend and the corridor cross-check appear here.</div>
     <!-- Both series over one shared date axis, stacked, so a run of high days and
          the scale's answer to it line up column for column. -->
     <div class="trend-pair">
@@ -660,6 +710,7 @@
 <script src="js/plan.js"></script>
 <script src="js/trends.js"></script>
 <script src="js/lift.js"></script>
+<script src="js/logs.js"></script>
 <script src="js/sync.js"></script>
 <script src="js/app.js"></script>
 </body>

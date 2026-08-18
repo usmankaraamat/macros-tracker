@@ -598,6 +598,63 @@
     return { ratePerWeek: fit.slope * 7, latest: entries[entries.length - 1].kg };
   }
 
+  // ---- Body-fat % from a tape measure (U.S. Navy circumference method) --------
+  // The only field estimate that needs no calipers and no scale — just a tape, and
+  // measurements the app already asks for (height) plus two it can: waist and neck
+  // (women also add the hip). Accurate to ~3-4% against a DEXA for most people, which
+  // is close enough to TREND, and trend is the whole point: the absolute number matters
+  // far less than whether it is moving. All lengths in centimetres.
+  //   men:   %BF = 495 / (1.0324 − 0.19077·log10(waist−neck) + 0.15456·log10(height)) − 450
+  //   women: %BF = 495 / (1.29579 − 0.35004·log10(waist+hip−neck) + 0.22100·log10(height)) − 450
+  // Returns null when an input is missing or the log argument is non-positive (waist
+  // must exceed neck; for women waist+hip must exceed neck) — a body that thin does not
+  // exist, so the reading is a mistyped tape, not a number worth showing.
+  function navyBodyFat(sex, heightCm, waistCm, neckCm, hipCm) {
+    const h = +heightCm, w = +waistCm, n = +neckCm, hip = +hipCm;
+    if (!(h > 0) || !(w > 0) || !(n > 0)) return null;
+    let bf;
+    if (sex === 'female') {
+      if (!(hip > 0)) return null;
+      const g = w + hip - n;
+      if (!(g > 0)) return null;
+      bf = 495 / (1.29579 - 0.35004 * Math.log10(g) + 0.22100 * Math.log10(h)) - 450;
+    } else {
+      const g = w - n;
+      if (!(g > 0)) return null;
+      bf = 495 / (1.0324 - 0.19077 * Math.log10(g) + 0.15456 * Math.log10(h)) - 450;
+    }
+    if (!isFinite(bf)) return null;
+    // Clamp to the plausible human range — outside it the circumference model has broken
+    // down (bad tape reading), and a negative or 60% figure is worse than an honest floor.
+    return Math.max(2, Math.min(60, Math.round(bf * 10) / 10));
+  }
+  // Split a bodyweight into fat and lean mass given a body-fat percentage. Lean mass is
+  // the number that actually answers "is the cut costing me muscle?", which the scale alone
+  // never can. Returns null unless both a weight and a percentage are in hand.
+  function bodyComposition(weightKg, bfPct) {
+    const kg = +weightKg, pct = +bfPct;
+    if (!(kg > 0) || !(pct >= 0)) return null;
+    const fatKg = kg * pct / 100;
+    return { bfPct: Math.round(pct * 10) / 10,
+             fatKg: Math.round(fatKg * 10) / 10,
+             leanKg: Math.round((kg - fatKg) * 10) / 10 };
+  }
+  // Trend of a single dated measurement (waist, a body-fat series, anything one-dimensional).
+  // entries = [{date:'YYYY-MM-DD', v}] ascending. Least-squares slope → per-week and
+  // per-month rate, plus the standard error so a caller can tell a real move from noise.
+  // Null when there is nothing to fit. Deliberately parallel to weightTrend so both read
+  // the same way at the call site.
+  function measureTrend(entries) {
+    if (!entries || entries.length < 2) return null;
+    const t0 = Date.parse(entries[0].date + 'T00:00:00Z');
+    const fit = linearTrend(entries.map(e =>
+      ({ x: (Date.parse(e.date + 'T00:00:00Z') - t0) / 86400000, y: +e.v })));
+    if (!fit) return null;
+    return { perWeek: fit.slope * 7, perMonth: fit.slope * 30,
+             sePerWeek: fit.se != null ? fit.se * 7 : null,
+             latest: +entries[entries.length - 1].v, first: +entries[0].v, n: fit.n };
+  }
+
   // ---- Salvage a truncated / unbalanced JSON reply --------------------------
   // Models do not always honour a strict-JSON response mode. Measured on this app's own
   // prompt: gemini-3.5-flash closes the items array but omits the outer brace, leaving
@@ -995,19 +1052,38 @@
   //   holding   — weight steady, strength steady.
   // Only strength-class exercises with a real trend vote, and the median is taken so one
   // odd lift cannot swing the verdict.
-  function liftVsWeight(trends, wTrend) {
+  // waistTrend (optional) is the third axis. Weight and strength alone cannot tell a lean
+  // gain from a fat gain: both read "weight up". The waist can — it grows with fat and
+  // barely moves with muscle — so when a waist trend is supplied it refines the verdict
+  // into a lean-mass reading (leanVerdict) without disturbing the weight×strength status
+  // any existing caller already relies on.
+  const WAIST_FLAT_CM_WK = 0.15;      // dead band on the tape: below this the waist is "steady"
+  function liftVsWeight(trends, wTrend, waistTrend) {
     const votes = (trends || []).filter(t =>
       t && t.cls === 'strength' && t.verdict !== 'thin' && t.pctPerMonth != null);
     const kgWk = wTrend && wTrend.ratePerWeek != null ? wTrend.ratePerWeek : null;
+    const waistWk = waistTrend && waistTrend.perWeek != null ? waistTrend.perWeek : null;
     const base = { status: 'thin', n: votes.length, kgPerWeek: kgWk, strengthPctPerMonth: null,
-                   progressing: 0, stalled: 0, regressing: 0 };
+                   progressing: 0, stalled: 0, regressing: 0,
+                   waistCmPerWeek: waistWk, leanVerdict: null };
     if (!votes.length || kgWk == null) return base;
     const s = median(votes.map(t => t.pctPerMonth));
     let status;
     if (kgWk > LIFT_WEIGHT_FLAT) status = s > LIFT_FLAT_PCT ? 'building' : 'spinning';
     else if (kgWk < -LIFT_WEIGHT_FLAT) status = s >= -LIFT_FLAT_PCT ? 'retaining' : 'shedding';
     else status = s > LIFT_FLAT_PCT ? 'recomping' : 'holding';
+    // The waist reading: what the weight change is actually made of. Waist steady while
+    // weight moves is the tell of a recomposition; waist tracking the weight is plain
+    // fat on or off. Only meaningful when a waist trend exists.
+    let leanVerdict = null;
+    if (waistWk != null) {
+      const wide = waistWk > WAIST_FLAT_CM_WK, narrow = waistWk < -WAIST_FLAT_CM_WK;
+      if (kgWk > LIFT_WEIGHT_FLAT)       leanVerdict = wide ? 'fat-gain' : (s > LIFT_FLAT_PCT ? 'lean-gain' : 'lean-hold');
+      else if (kgWk < -LIFT_WEIGHT_FLAT) leanVerdict = narrow ? 'fat-loss' : 'muscle-risk';
+      else                                leanVerdict = narrow ? 'recomp' : (wide ? 'skinny-fat' : 'stable');
+    }
     return { status: status, n: votes.length, kgPerWeek: kgWk, strengthPctPerMonth: s,
+             waistCmPerWeek: waistWk, leanVerdict: leanVerdict,
              progressing: votes.filter(t => t.verdict === 'progressing').length,
              stalled: votes.filter(t => t.verdict === 'stalled' || t.verdict === 'grinding').length,
              regressing: votes.filter(t => t.verdict === 'regressing').length };
@@ -1307,6 +1383,7 @@
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
     FOOD_PINS, foodPin, pinMatches, applyPin,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
+    navyBodyFat, bodyComposition, measureTrend,
     freeSugarFraction, SUGAR_INTRINSIC, SUGAR_FREE,
     MICRO_REF, MICRO_KEYS, microRef, sumSuppMicros, ELEMENTAL_FRACTION, elementalMg,
     supplementDue, supplementNextDue, supplementWindow, supplementStats, isoWeekdayMon,

@@ -508,7 +508,10 @@ function renderRecomp(rows, W){
   const last = W.length ? W[W.length-1].date : null;
   const recent = last ? W.filter(e => (Date.parse(last)-Date.parse(e.date))/86400000 <= 42) : [];
   const wt = LedgerCore.weightTrend(recent.length>=2 ? recent : W);
-  const r = LedgerCore.liftVsWeight(rows.map(x=>x.t), wt);
+  // The waist is the third axis: weight and strength alone can't separate a lean gain from
+  // a fat gain. Only Logs supplies it, so it may be absent — liftVsWeight ignores a null.
+  const waistTr = (typeof waistTrendRecent === 'function') ? waistTrendRecent() : null;
+  const r = LedgerCore.liftVsWeight(rows.map(x=>x.t), wt, waistTr);
   if (r.status === 'thin'){
     const need = [];
     if (!wt) need.push('two weigh-ins on different days');
@@ -525,7 +528,26 @@ function renderRecomp(rows, W){
   el.innerHTML = `<div class="recomp ${tone}">
     <div class="recomp-head">${head}</div>
     <div class="recomp-body">${body(w)}${counts.length?` <span class="ink-dim">(${counts.join(' · ')})</span>`:''}</div>
+    ${waistLine(r)}
   </div>`;
+}
+// The waist reading, when Logs has one. Names what the weight change is actually made of —
+// the confirmation (or the contradiction) the scale and the barbell can't give on their own.
+const LEAN_COPY = {
+  'fat-gain':    ['bad',  cm=>`Waist widening <b>${cm} cm/week</b> — the gain is running to fat. Trim the surplus.`],
+  'lean-gain':   ['good', cm=>`Waist steady while you gain — the weight is going to muscle, not the belly. Textbook lean bulk.`],
+  'lean-hold':   ['warn', cm=>`Waist steady but strength flat — you're adding size without much fat, yet not much muscle either. Push the training.`],
+  'fat-loss':    ['good', cm=>`Waist shrinking <b>${cm} cm/week</b> — the loss is coming off as fat, which is exactly right.`],
+  'muscle-risk': ['warn', cm=>`Losing weight but the waist isn't moving — that can mean muscle, not fat, is going. Hold protein high and don't over-cut.`],
+  'recomp':      ['good', cm=>`Weight steady but the waist is shrinking <b>${cm} cm/week</b> — fat off, size on. A recomposition in progress.`],
+  'skinny-fat':  ['warn', cm=>`Weight steady but the waist is growing — fat replacing what should be muscle. Lift heavier, keep protein up.`],
+  'stable':      ['',     cm=>`Waist holding steady — body composition isn't drifting either way.`]
+};
+function waistLine(r){
+  if (!r.leanVerdict || !LEAN_COPY[r.leanVerdict]) return '';
+  const [tone, txt] = LEAN_COPY[r.leanVerdict];
+  const cm = Math.abs(r.waistCmPerWeek).toFixed(2);
+  return `<div class="recomp-waist ${tone}"><span class="rw-tag">Waist axis</span> ${txt(cm)}</div>`;
 }
 function renderLift(){
   if (!document.getElementById('liftSession')) return;

@@ -134,7 +134,7 @@ navBackdropEl.onclick = ()=> navClose(true);
 // Four views share one scroll; the drawer swaps which <main> is visible. Only
 // the visible tab is rendered, so a keystroke on Today no longer rebuilds the
 // heatmap, the ternary plot and every lift trend.
-const TABS = { today:'tabToday', plan:'tabPlan', lift:'tabLift', trends:'tabTrends' };
+const TABS = { today:'tabToday', logs:'tabLogs', plan:'tabPlan', lift:'tabLift', trends:'tabTrends' };
 function showTab(name){
   if (!TABS[name]) name = 'today';
   ACTIVE_TAB = name;
@@ -545,7 +545,7 @@ document.getElementById('exportBtn').onclick = async ()=>{
   const payload = { exported: dateStr(), version: 2,
     targets: {floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,trendStart:TREND_START,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN},
     pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100)},
-    weights: weightsMap(), templates: templates(),
+    weights: weightsMap(), measures: measureMap(), mMeta: measureMeta(), templates: templates(),
     supps: supps(), suppLog: suppLog(),
     workouts: allWorkouts(), wkMeta: workoutMeta(), exercises: exerciseCatalog(),
     days, date: ACTIVE_DATE, ledger, totals: totals() };   // date/ledger kept for v1 compat
@@ -624,6 +624,12 @@ document.getElementById('importFile').onchange = (ev)=>{
           const meta = weightsMeta(); const now = new Date().toISOString();
           Object.keys(data.weights).forEach(d=>{ if(!meta[d]) meta[d]=now; });
           saveWeights(map, meta);
+        }
+        if (data.measures && typeof data.measures === 'object'){
+          const map = Object.assign({}, data.measures, measureMap());   // restore fills gaps; local wins on clash
+          const meta = measureMeta(); const now = new Date().toISOString();
+          Object.keys(data.measures).forEach(d=>{ if(!meta[d]) meta[d]=(data.mMeta&&data.mMeta[d])||now; });
+          saveMeasures(map, meta);
         }
         if (Array.isArray(data.templates) && data.templates.length){
           const names = new Set(templates().map(t=>t.name));

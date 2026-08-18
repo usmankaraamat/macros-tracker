@@ -960,6 +960,70 @@ group('liftVsWeight — is the surplus buying muscle or fat?');
   check('thin lifts do not vote',
         C.liftVsWeight([{cls:'strength',verdict:'thin',pctPerMonth:null}], gaining).status === 'thin');
   check('no weight trend, no verdict', C.liftVsWeight([t(5)], null).status === 'thin');
+
+  // The waist as a third axis: it refines the verdict into a lean-mass reading without
+  // touching the weight×strength status any existing caller relies on.
+  const noWaist = C.liftVsWeight([t(5),t(6),t(7)], gaining);
+  check('no waist trend leaves leanVerdict null', noWaist.leanVerdict === null, `got ${noWaist.leanVerdict}`);
+  const wide = {perWeek: 0.4}, tight = {perWeek: 0.0}, shrinking = {perWeek: -0.4};
+  check('gain + waist widening = fat-gain',
+        C.liftVsWeight([t(5),t(6),t(7)], gaining, wide).leanVerdict === 'fat-gain');
+  check('gain + strength up + waist steady = lean-gain',
+        C.liftVsWeight([t(5),t(6),t(7)], gaining, tight).leanVerdict === 'lean-gain');
+  check('gain + strength flat + waist steady = lean-hold',
+        C.liftVsWeight([t(0,'stalled'),t(0,'stalled')], gaining, tight).leanVerdict === 'lean-hold');
+  check('loss + waist shrinking = fat-loss',
+        C.liftVsWeight([t(0,'stalled')], losing, shrinking).leanVerdict === 'fat-loss');
+  check('loss + waist not moving = muscle-risk',
+        C.liftVsWeight([t(0,'stalled')], losing, tight).leanVerdict === 'muscle-risk');
+  check('steady weight + waist shrinking = recomp',
+        C.liftVsWeight([t(5)], steady, shrinking).leanVerdict === 'recomp');
+  check('steady weight + waist widening = skinny-fat',
+        C.liftVsWeight([t(0,'stalled')], steady, wide).leanVerdict === 'skinny-fat');
+  check('the waist rate is carried through', C.liftVsWeight([t(5)], steady, shrinking).waistCmPerWeek === -0.4);
+  check('the weight×strength status is unchanged by the waist axis',
+        C.liftVsWeight([t(5),t(6),t(7)], gaining, wide).status === 'building');
+})();
+
+// ---- navyBodyFat: body fat from a tape measure ----
+group('navyBodyFat — U.S. Navy circumference method');
+(function(){
+  // Male, height 178, waist 90, neck 40 → mid-teens body fat.
+  const m = C.navyBodyFat('male', 178, 90, 40);
+  check('a lean-ish man lands in a plausible band', m > 12 && m < 22, `got ${m}`);
+  // A leaner waist reads as lower body fat, same height and neck.
+  const leaner = C.navyBodyFat('male', 178, 82, 40);
+  check('a smaller waist reads leaner', leaner < m, `${leaner} vs ${m}`);
+  // Female needs the hip; without it the formula cannot resolve.
+  check('female without a hip → null', C.navyBodyFat('female', 165, 75, 34) === null);
+  const f = C.navyBodyFat('female', 165, 75, 34, 96);
+  check('female with a hip resolves in range', f > 18 && f < 34, `got ${f}`);
+  // Waist must exceed neck (men): a tape typo can't produce a log of a non-positive number.
+  check('waist ≤ neck → null (bad tape)', C.navyBodyFat('male', 178, 38, 40) === null);
+  check('missing height → null', C.navyBodyFat('male', 0, 90, 40) === null);
+  check('missing waist → null', C.navyBodyFat('male', 178, 0, 40) === null);
+  // The result is clamped to the plausible human range and rounded to a tenth.
+  check('rounded to one decimal', Math.round(m*10) === m*10, `got ${m}`);
+})();
+
+// ---- bodyComposition: split a bodyweight into fat and lean ----
+group('bodyComposition — fat and lean mass from a %');
+(function(){
+  const c = C.bodyComposition(80, 20);
+  check('20% of 80 kg is 16 kg fat', c.fatKg === 16, `got ${c.fatKg}`);
+  check('the rest is lean', c.leanKg === 64, `got ${c.leanKg}`);
+  check('the % rides along', c.bfPct === 20);
+  check('no weight → null', C.bodyComposition(0, 20) === null);
+})();
+
+// ---- measureTrend: rate of a single dated measurement ----
+group('measureTrend — waist/BF slope per week and per month');
+(function(){
+  const tr = C.measureTrend([{date:'2026-01-01',v:90},{date:'2026-01-31',v:87}]);
+  check('a 3 cm drop over 30 days ≈ -3/month', approx(tr.perMonth, -3, 0.01), `got ${tr.perMonth}`);
+  check('per-week is per-month scaled by 7/30', approx(tr.perWeek, tr.perMonth*7/30, 0.001));
+  check('latest and first are reported', tr.latest === 87 && tr.first === 90);
+  check('single point → null', C.measureTrend([{date:'2026-01-01',v:90}]) === null);
 })();
 
 // ---- name canonicalisation: what the whole feature stands on ----

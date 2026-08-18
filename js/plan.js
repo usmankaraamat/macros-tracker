@@ -395,8 +395,7 @@ renderSuppMicroList();
 
 // Render the Plan tab. Only called when Plan is the visible tab.
 function renderPlanTab(){
-  renderSupps();
-  renderSuppManage();
+  renderSuppManage();       // the daily dose strip lives on Logs now; Plan only configures protocols
   renderBudget();
   renderTernary();
   renderTacticalLine();

@@ -88,6 +88,8 @@ document.getElementById('wSaveBtn').onclick = ()=>{
   const map = weightsMap(), meta = weightsMeta();
   map[VIEW_DATE] = v; meta[VIEW_DATE] = new Date().toISOString();
   saveWeights(map, meta); scheduleSync(); renderWeight(); renderWeightLog(); renderTDEE(); renderFatEstimate();
+  // A new bodyweight changes the fat/lean split, whose card lives on Logs.
+  if (typeof renderBodyFat === 'function') renderBodyFat();
 };
 document.getElementById('wIn').addEventListener('keydown', e=>{ if (e.key==='Enter') document.getElementById('wSaveBtn').click(); });
 // Maintenance band rides with the targets bundle (persists + syncs); dates are ephemeral.
