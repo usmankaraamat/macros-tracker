@@ -1188,6 +1188,7 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .lift-conf.high { color: var(--verdigris); }
 .lift-conf.med  { color: var(--chalk); }
 .lift-conf.low  { color: var(--brass); }
+.lift-hist-name { color: var(--chalk); }
 
 .lift-tag {
   font-family: var(--data);

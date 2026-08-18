@@ -472,11 +472,18 @@ function renderLiftHistory(all, W){
     const w = all[d], bwKg = LedgerCore.weightAt(W, d);
     const vol = (w.exercises||[]).reduce((s,ex)=>
       s + LedgerCore.sessionMetrics(ex.sets, {bodyweightKg:bwKg, rir:ex.rir}).volume, 0);
+    // Each exercise on its own line with the actual sets — kg × reps, same format as the live
+    // session — so a past day reads back what you did, not just how many sets you did.
+    const lines = (w.exercises||[]).map(ex=>{
+      const sets = (ex.sets||[]).map(SET_TXT).join('  ·  ') || '—';
+      const rir = ex.rir!=null ? ` <span class="ink-dim">· ${ex.rir} RIR</span>` : '';
+      return `<div class="lift-sub"><span class="lift-hist-name">${escapeHtml(ex.name)}</span> `
+           + `<span class="ink-dim">${sets}</span>${rir}</div>`;
+    }).join('');
     return `<div class="lift-ex"><div class="lift-ex-head">
         <span class="lift-ex-name">${d}${w.split?` · ${escapeHtml(w.split)}`:''}</span>
         <span class="ink-dim" style="font-size:11px">${Math.round(vol).toLocaleString()} kg</span></div>
-      <div class="lift-sub">${(w.exercises||[]).map(ex=>
-        escapeHtml(ex.name)+' <span class="ink-dim">'+(ex.sets||[]).length+'×</span>').join(' · ')}</div></div>`;
+      ${lines}</div>`;
   }).join('');
 }
 // The reading no lifting app can produce, because it does not know what you ate.
