@@ -140,6 +140,12 @@ async function syncNow(){
       {days: weightsMap(), meta: weightsMeta()},
       {days: (remote && remote.weights) || {}, meta: (remote && remote.wMeta) || {}});
     saveWeights(wm.days, wm.meta);
+    // Body measurements merge per-date like weights — the day value is a {key:cm} object,
+    // which mergeSyncStates carries as a whole under the same LWW rules.
+    const mm = LedgerCore.mergeSyncStates(
+      {days: measureMap(), meta: measureMeta()},
+      {days: (remote && remote.measures) || {}, meta: (remote && remote.mMeta) || {}});
+    saveMeasures(mm.days, mm.meta);
     // Dose log is per-day arrays of supplement ids — the same shape ledger days have,
     // so the identical per-day LWW merge applies.
     const sm = LedgerCore.mergeSyncStates(
@@ -172,7 +178,8 @@ async function syncNow(){
       suppLog: sm.days, sMeta: sm.meta,
       workouts: km.days, wkMeta: km.meta,
       exercises: exerciseCatalog(), exUpdated: catalogStamp(),
-      weights: wm.days, wMeta: wm.meta };
+      weights: wm.days, wMeta: wm.meta,
+      measures: mm.days, mMeta: mm.meta };
     const blob = await syncEncrypt(state);
     const p = await supaFetch('/rest/v1/rpc/sync_put', {
       method:'POST', body: JSON.stringify({p_id: id, p_blob: blob})   // upsert; server stamps updated_at

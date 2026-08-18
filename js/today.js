@@ -407,6 +407,7 @@ function render(){
   renderTDEE(); renderGoal();
 
   if (ACTIVE_TAB === 'today')       renderToday();
+  else if (ACTIVE_TAB === 'logs')   renderLogsTab();
   else if (ACTIVE_TAB === 'plan')   renderPlanTab();
   else if (ACTIVE_TAB === 'lift')   renderLift();
   else if (ACTIVE_TAB === 'trends') renderTrendsTab();

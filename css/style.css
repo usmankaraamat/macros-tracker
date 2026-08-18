@@ -1229,6 +1229,46 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .recomp.bad  .recomp-head { color: var(--hot); }
 .recomp-body { font-size: 12.5px; color: var(--graphite); line-height: 1.6; }
 .recomp-body b { color: var(--chalk); font-weight: 600; }
+/* The waist axis sits under the weight×strength verdict as a second, indented reading. */
+.recomp-waist {
+  margin-top: 9px; font-size: 12px; line-height: 1.55; color: var(--graphite);
+  border-left: 2px solid var(--rule); padding-left: 11px;
+}
+.recomp-waist.good { border-color: var(--verdigris); }
+.recomp-waist.warn { border-color: var(--brass); }
+.recomp-waist.bad  { border-color: var(--hot); }
+.recomp-waist b { color: var(--chalk); font-weight: 600; }
+.rw-tag {
+  display: inline-block; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--faint); margin-right: 6px;
+}
+
+/* ============================== logs tab =============================== */
+.measure-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.measure-req { color: var(--brass); font-size: 11px; vertical-align: middle; }
+/* Body-fat readout: one big number, a lean/fat split under it. */
+.bf-readout { padding: 2px 0; }
+.bf-big { font-family: var(--data); font-size: 34px; line-height: 1; color: var(--chalk); }
+.bf-unit { font-family: var(--body); font-size: 13px; color: var(--graphite); margin-left: 8px; }
+.bf-split {
+  display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px;
+  font-size: 12.5px; color: var(--graphite);
+}
+.bf-split b { color: var(--chalk); font-weight: 600; font-family: var(--data); }
+/* How-to-measure list: name + instruction, one per landmark. */
+.measure-howto { display: flex; flex-direction: column; gap: 11px; }
+.howto-item { border-left: 2px solid var(--rule); padding-left: 11px; }
+.howto-name { font-size: 12.5px; font-weight: 600; color: var(--chalk); margin-bottom: 2px; }
+.howto-txt { font-size: 12px; line-height: 1.55; color: var(--graphite); }
+/* Measurement log table, scrollable when many columns are in play. */
+.measure-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.measure-table th, .measure-table td {
+  text-align: right; padding: 5px 8px; white-space: nowrap;
+  border-bottom: 1px solid var(--rule);
+}
+.measure-table th:first-child, .measure-table td:first-child { text-align: left; }
+.measure-table th { color: var(--faint); font-weight: 500; }
+.measure-table td { color: var(--graphite); font-family: var(--data); }
 
 /* =============================== sidebar ================================ */
 
