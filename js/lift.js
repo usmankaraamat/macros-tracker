@@ -256,6 +256,10 @@ document.getElementById('liftBtn').onclick = ()=>{
   const txt = document.getElementById('liftInput').value.trim();
   if (!txt){ liftStatus('Type your sets — one exercise per line, commas between sets.'); return; }
   liftPending = LedgerCore.parseWorkout(txt, exerciseCatalog());
+  // Start the rest the moment a set reads cleanly — this is when you've finished lifting,
+  // even though the sets aren't committed until "Add to session". Commit restarts it, so
+  // whichever button you press, the rest is running.
+  if (liftPending.exercises.length) startRestTimer();
   renderLiftPending();
 };
 document.getElementById('liftInput').addEventListener('keydown', e=>{
