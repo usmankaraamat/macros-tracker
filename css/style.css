@@ -1243,6 +1243,63 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
   color: var(--faint); margin-right: 6px;
 }
 
+/* ---- rest timer: a 90s countdown that never gates the next set ---- */
+.rest-timer {
+  margin-top: 12px;
+  border: 1px solid var(--rule-lit);
+  border-radius: var(--radius);
+  padding: 9px 11px;
+  background: var(--chalk-wash);
+}
+.rest-timer-bar {
+  height: 4px; border-radius: 2px; overflow: hidden;
+  background: var(--rule);
+}
+.rest-timer-bar > span {
+  display: block; height: 100%; width: 100%;
+  background: var(--verdigris);
+  transition: width .2s linear;
+}
+.rest-timer-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 8px;
+}
+.rest-timer-label {
+  font-family: var(--data); font-size: 10px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--graphite); flex: 1;
+}
+.rest-timer-time {
+  font-family: var(--data); font-size: 18px; color: var(--chalk);
+  font-variant-numeric: tabular-nums;
+}
+.rest-timer-skip {
+  width: auto; min-height: 30px; padding: 4px 12px; flex: none;
+  font-size: 11px; background: none; border: 1px solid var(--rule-lit);
+  color: var(--graphite);
+}
+.rest-timer-skip:hover:not(:disabled) { color: var(--chalk); border-color: var(--graphite); background: var(--chalk-wash); }
+/* When the 90s elapse the bar goes brass and the label calls the rest done. */
+.rest-timer.done { border-color: var(--brass); }
+.rest-timer.done .rest-timer-bar > span { background: var(--brass); }
+.rest-timer.done .rest-timer-label { color: var(--brass); }
+.rest-timer.done .rest-timer-time { color: var(--brass); }
+
+/* ---- live "last time" preview under the logger ---- */
+.lift-preview {
+  margin-top: 12px;
+  border-left: 2px solid var(--rule-lit);
+  padding: 2px 0 4px 13px;
+}
+.lift-preview .lift-pv-tag {
+  display: inline-block; font-family: var(--data); font-size: 9px;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint);
+  margin-bottom: 4px;
+}
+.lift-preview .lift-pv-top { font-size: 13px; color: var(--chalk); font-weight: 600; margin-top: 2px; }
+.lift-preview .lift-pv-top b { color: var(--verdigris); font-weight: 600; }
+.lift-preview .lift-sets { margin-top: 5px; }
+.lift-preview .lift-sub { color: var(--graphite); }
+
 /* ============================== logs tab =============================== */
 .measure-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .measure-req { color: var(--brass); font-size: 11px; vertical-align: middle; }
