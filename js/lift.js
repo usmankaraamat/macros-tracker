@@ -88,11 +88,18 @@ function liftStatus(msg, bad){
 // so an interrupted rest resets rather than stacking. Timing is anchored to a target
 // timestamp so a throttled tab still reads the true remaining time on the next tick.
 const REST_SECONDS = 90;
+// The target time is mirrored to localStorage as well as held in memory, so a rest survives
+// the app being evicted in the background: on relaunch, resumeRestTimer reads the stored end
+// and shows the true remaining time rather than a fresh (reset) count. The countdown itself
+// is JS, so it can only redraw when the app is alive — it cannot chime while the OS has the
+// app killed; it catches up the moment you return.
+const REST_KEY = 'ledger_rest_end';
 let restEnd = 0, restInt = null, restDone = false;
 function fmtRest(sec){ const m = Math.floor(sec/60); return m + ':' + String(sec % 60).padStart(2,'0'); }
 function startRestTimer(){
   restEnd = Date.now() + REST_SECONDS*1000;
   restDone = false;
+  try{ localStorage.setItem(REST_KEY, String(restEnd)); }catch(e){}
   const el = document.getElementById('restTimer');
   if (el){ el.hidden = false; el.className = 'rest-timer'; }
   if (!restInt) restInt = setInterval(tickRestTimer, 200);
@@ -101,8 +108,25 @@ function startRestTimer(){
 function stopRestTimer(){
   if (restInt){ clearInterval(restInt); restInt = null; }
   restEnd = 0; restDone = false;
+  try{ localStorage.removeItem(REST_KEY); }catch(e){}
   const el = document.getElementById('restTimer');
   if (el){ el.hidden = true; el.className = 'rest-timer'; }
+}
+// On launch, pick up a rest that was still running when the app was last backgrounded or
+// killed. A stored end in the future resumes the live countdown; a past one is stale and
+// simply cleared, so a long-finished rest never reappears.
+function resumeRestTimer(){
+  let end = 0;
+  try{ end = +localStorage.getItem(REST_KEY) || 0; }catch(e){}
+  if (end > Date.now()){
+    restEnd = end; restDone = false;
+    const el = document.getElementById('restTimer');
+    if (el){ el.hidden = false; el.className = 'rest-timer'; }
+    if (!restInt) restInt = setInterval(tickRestTimer, 200);
+    tickRestTimer();
+  } else if (end){
+    try{ localStorage.removeItem(REST_KEY); }catch(e){}
+  }
 }
 function tickRestTimer(){
   const el = document.getElementById('restTimer');
@@ -117,6 +141,7 @@ function tickRestTimer(){
     if (label) label.textContent = 'Rest complete — next set';
     el.className = 'rest-timer done';
     if (!restDone){ restDone = true; restChime(); haptic(60); announce('Rest complete'); }
+    try{ localStorage.removeItem(REST_KEY); }catch(e){}   // the rest is over; nothing left to resume
     if (restInt){ clearInterval(restInt); restInt = null; }   // hold the "done" state until the next log or Skip
     return;
   }
@@ -149,6 +174,7 @@ function restChime(){
 (function bindRestSkip(){
   const skip = document.getElementById('restTimerSkip');
   if (skip) skip.onclick = stopRestTimer;
+  resumeRestTimer();   // restore a rest that outlived a background eviction
 })();
 
 // ---- live "last time" preview ---------------------------------------------
