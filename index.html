@@ -556,7 +556,20 @@
       <button type="button" id="liftBtn" class="omni-primary">Log sets</button>
       <button type="button" class="omni-chip" id="liftAiBtn" hidden title="Have the AI read a line the parser could not">Ask AI</button>
     </div>
+    <!-- Rest timer: starts on every logged set, counts down 90s, and never gates
+         logging — the next set just restarts it. -->
+    <div id="restTimer" class="rest-timer" hidden aria-live="polite">
+      <div class="rest-timer-bar"><span id="restTimerFill"></span></div>
+      <div class="rest-timer-row">
+        <span class="rest-timer-label" id="restTimerLabel">Rest</span>
+        <span class="rest-timer-time" id="restTimerTime">1:30</span>
+        <button type="button" class="rest-timer-skip" id="restTimerSkip">Skip</button>
+      </div>
+    </div>
     <div class="tactical" id="liftStatus" hidden></div>
+    <!-- Live "last time" reference for the exercise being typed, so a top set can be
+         gauged against what was done last session. -->
+    <div id="liftPreview" class="lift-preview" hidden></div>
     <div id="liftPending" style="margin-top:12px"></div>
     <div id="liftSession" style="margin-top:14px"></div>
   </section>

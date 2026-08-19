@@ -82,6 +82,148 @@ function liftStatus(msg, bad){
   el.innerHTML = msg || '';
 }
 
+// ---- rest timer -----------------------------------------------------------
+// A 90-second rest between sets, started fresh on every logged set. It is a nudge,
+// never a gate: logging is always allowed, and logging again just restarts the count,
+// so an interrupted rest resets rather than stacking. Timing is anchored to a target
+// timestamp so a throttled tab still reads the true remaining time on the next tick.
+const REST_SECONDS = 90;
+let restEnd = 0, restInt = null, restDone = false;
+function fmtRest(sec){ const m = Math.floor(sec/60); return m + ':' + String(sec % 60).padStart(2,'0'); }
+function startRestTimer(){
+  restEnd = Date.now() + REST_SECONDS*1000;
+  restDone = false;
+  const el = document.getElementById('restTimer');
+  if (el){ el.hidden = false; el.className = 'rest-timer'; }
+  if (!restInt) restInt = setInterval(tickRestTimer, 200);
+  tickRestTimer();
+}
+function stopRestTimer(){
+  if (restInt){ clearInterval(restInt); restInt = null; }
+  restEnd = 0; restDone = false;
+  const el = document.getElementById('restTimer');
+  if (el){ el.hidden = true; el.className = 'rest-timer'; }
+}
+function tickRestTimer(){
+  const el = document.getElementById('restTimer');
+  if (!el){ if (restInt){ clearInterval(restInt); restInt = null; } return; }
+  const fill = document.getElementById('restTimerFill');
+  const time = document.getElementById('restTimerTime');
+  const label = document.getElementById('restTimerLabel');
+  const remMs = restEnd - Date.now();
+  if (remMs <= 0){
+    if (fill) fill.style.width = '0%';
+    if (time) time.textContent = '0:00';
+    if (label) label.textContent = 'Rest complete — next set';
+    el.className = 'rest-timer done';
+    if (!restDone){ restDone = true; restChime(); haptic(60); announce('Rest complete'); }
+    if (restInt){ clearInterval(restInt); restInt = null; }   // hold the "done" state until the next log or Skip
+    return;
+  }
+  const remSec = Math.ceil(remMs/1000);
+  if (fill) fill.style.width = Math.max(0, Math.min(100, remMs/(REST_SECONDS*1000)*100)) + '%';
+  if (time) time.textContent = fmtRest(remSec);
+  if (label) label.textContent = 'Rest';
+}
+// A short two-note chime when the rest is up. Best-effort — silently a no-op where the
+// Web Audio API is unavailable or blocked.
+function restChime(){
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ctx = new AC();
+    const now = ctx.currentTime;
+    [784, 1046].forEach((f,i)=>{
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      o.connect(g); g.connect(ctx.destination);
+      const t = now + i*0.18;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.14, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+      o.start(t); o.stop(t + 0.18);
+    });
+    setTimeout(()=>{ try{ ctx.close(); }catch(e){} }, 900);
+  }catch(e){}
+}
+(function bindRestSkip(){
+  const skip = document.getElementById('restTimerSkip');
+  if (skip) skip.onclick = stopRestTimer;
+})();
+
+// ---- live "last time" preview ---------------------------------------------
+// While an exercise name is being typed, its last session is shown below the logger —
+// the top set above all, so the next top set can be judged against it. Rebuilt from the
+// same trend pass the page already computes; cached so a keystroke does not rescan storage.
+let liftPreviewData = null;
+function setLiftPreviewData(all, W, rows){
+  const byId = {};
+  (rows||[]).forEach(r=>{ byId[r.id] = r; });
+  liftPreviewData = { all, W, byId };
+}
+// The exercise name on the line the cursor sits in — reusing the logger's own grammar so
+// "bench", "bench 60", and "bench 60kg 8" all resolve to the same name while it is typed.
+function currentLiftName(){
+  const inp = document.getElementById('liftInput');
+  if (!inp) return '';
+  const val = inp.value || '';
+  const pos = inp.selectionStart != null ? inp.selectionStart : val.length;
+  const start = val.lastIndexOf('\n', pos - 1) + 1;
+  let end = val.indexOf('\n', pos);
+  if (end < 0) end = val.length;
+  const p = LedgerCore.parseWorkoutLine(val.slice(start, end));
+  return p ? (p.name || '').trim() : '';
+}
+function renderLiftPreview(){
+  const el = document.getElementById('liftPreview');
+  if (!el) return;
+  const name = currentLiftName();
+  if (name.length < 2){ el.hidden = true; el.innerHTML = ''; return; }
+  if (!liftPreviewData){
+    const all = allWorkouts(), W = weightSeries();
+    setLiftPreviewData(all, W, liftTrends(all, W));
+  }
+  const data = liftPreviewData;
+  const m = LedgerCore.matchExercise(name, exerciseCatalog());
+  const id = m ? m.exercise.id : LedgerCore.exerciseId(name);
+  // The most recent PRIOR session with this lift — "last time", so today's own entry
+  // (which is what is being typed) is never what we compare against.
+  const dates = Object.keys(data.all).filter(d=>d !== VIEW_DATE).sort();
+  let last = null;
+  for (let i=dates.length-1; i>=0 && !last; i--){
+    const ex = (data.all[dates[i]].exercises||[]).filter(e=>e.id === id)[0];
+    if (ex && (ex.sets||[]).length) last = { date: dates[i], ex };
+  }
+  if (!last){ el.hidden = true; el.innerHTML = ''; return; }   // nothing logged before → nothing to gauge against
+  const bwKg = LedgerCore.weightAt(data.W, last.date);
+  // Top set = the heaviest effective load; that is the number the next top set aims to beat.
+  // Falls back to most reps for a bodyweight lift with no weigh-in to resolve a load.
+  let top = null, topLoad = -1, topReps = -1;
+  (last.ex.sets||[]).forEach(s=>{
+    const load = LedgerCore.setLoad(s, bwKg);
+    if (load != null){ if (load > topLoad){ topLoad = load; top = s; } }
+    else if (topLoad < 0 && (+s.reps||0) > topReps){ topReps = +s.reps||0; top = s; }
+  });
+  const mtr = LedgerCore.sessionMetrics(last.ex.sets, { bodyweightKg: bwKg, rir: last.ex.rir });
+  const row = data.byId[id], t = row && row.t;
+  const verdict = t && t.verdict && t.verdict !== 'thin'
+    ? `<span class="verdict v-${t.verdict}">${VERDICT_LABEL[t.verdict]||t.verdict}</span>` : '';
+  const trendLine = t && t.verdict !== 'thin' && t.last != null
+    ? `<div class="lift-sub">${t.cls==='volume'?'capacity':'e1RM'} ${t.last.toFixed(1)}${t.cls==='volume'?'':' kg'} · ${pctTxt(t.pctPerMonth)}</div>`
+    : '';
+  const rir = last.ex.rir != null ? ` · ${last.ex.rir} RIR` : '';
+  el.hidden = false;
+  el.innerHTML = `
+    <div class="lift-ex-head">
+      <span class="lift-pv-tag">Last time · ${last.date}</span>${verdict}
+    </div>
+    <div class="lift-pv-top">Top set <b>${top ? SET_TXT(top) : '—'}</b></div>
+    <div class="lift-sets">${(last.ex.sets||[]).map(SET_TXT).join('  ·  ')}</div>
+    <div class="lift-sub">${mtr.sets} set${mtr.sets===1?'':'s'} · ${Math.round(mtr.volume).toLocaleString()} kg volume`
+      + (mtr.bestE1RM ? ` · best e1RM ${mtr.bestE1RM.toFixed(1)} kg` : '') + rir + `</div>
+    ${trendLine}`;
+}
+
 // ---- logging: parse → confirm → commit ----
 let liftPending = null;
 document.getElementById('liftBtn').onclick = ()=>{
@@ -93,6 +235,9 @@ document.getElementById('liftBtn').onclick = ()=>{
 document.getElementById('liftInput').addEventListener('keydown', e=>{
   if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) document.getElementById('liftBtn').click();
 });
+// Keep the "last time" preview tracking the line under the cursor as it is typed or moved.
+['input','click','keyup'].forEach(ev=>
+  document.getElementById('liftInput').addEventListener(ev, renderLiftPreview));
 function renderLiftPending(){
   const el = document.getElementById('liftPending'), aiBtn = document.getElementById('liftAiBtn');
   if (!el) return;
@@ -152,7 +297,7 @@ function liftCommit(){
   saveWorkout(w);
   liftPending = null;
   document.getElementById('liftInput').value = '';
-  haptic(); render();
+  haptic(); startRestTimer(); render();
   toast(`Logged ${n} ${n === 1 ? 'exercise' : 'exercises'}` +
         (added ? ` · ${added} new in the catalogue` : ''));
 }
@@ -352,6 +497,7 @@ function renderLiftPicker(all){
     inp.value = (base ? base + '\n' : '') + name + ' ';   // each pick on its own line, ready for sets
     inp.focus();
     inp.setSelectionRange(inp.value.length, inp.value.length);
+    renderLiftPreview();   // programmatic value change fires no input event
   };
 }
 function renderLiftChips(all){
@@ -371,6 +517,7 @@ function renderLiftChips(all){
       `${ex.name} ${(ex.sets||[]).map(SET_IN).join(', ')}` + (ex.rir!=null ? ` rir ${ex.rir}` : '')
     ).join('\n');
     document.getElementById('liftInput').focus();
+    renderLiftPreview();   // programmatic value change fires no input event
   };
 }
 const VERDICT_LABEL = { progressing:'progressing', stalled:'stalled', grinding:'grinding',
@@ -553,7 +700,9 @@ function renderLift(){
   if (!document.getElementById('liftSession')) return;
   const all = allWorkouts(), W = weightSeries();
   const rows = liftTrends(all, W);
+  setLiftPreviewData(all, W, rows);
   renderLiftChips(all); renderLiftPicker(all); renderLiftSession(all, W); renderLiftPending();
+  renderLiftPreview();
   renderLiftTrends(rows); renderLiftCatalog(); renderLiftHistory(all, W);
 }
 // The recomp card lives on Trends but is computed from lift data, so Trends
