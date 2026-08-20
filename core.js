@@ -1363,6 +1363,25 @@
       tagged: !!(muscles || seed)
     };
   }
+  // Validate a categorisation (from the AI, or anywhere) against the app's own muscle
+  // vocabulary. Off-list groups are dropped, weights clamped to 0.1–1, duplicates collapsed
+  // to their max, the list capped and sorted primary-first. Returns {muscles, pattern} or null
+  // when nothing usable survives — so a bad model reply can never inject an unknown group into
+  // the volume math. This is the guard that keeps AICategorisation a resolver, not an oracle.
+  function cleanCategory(cat) {
+    const c = cat || {}, seen = {};
+    (Array.isArray(c.muscles) ? c.muscles : []).forEach(m => {
+      const g = m && m.group, w = Math.max(0.1, Math.min(1, +((m && m.weight)) || 0));
+      if (MUSCLE_GROUPS.indexOf(g) < 0 || !(w > 0)) return;
+      if (seen[g] == null || w > seen[g]) seen[g] = w;
+    });
+    const muscles = Object.keys(seen).sort((a, b) => seen[b] - seen[a]).slice(0, 4)
+      .map(g => ({ group: g, weight: +seen[g].toFixed(2) }));
+    if (!muscles.length) return null;
+    const pattern = c.pattern === 'compound' || c.pattern === 'isolation' ? c.pattern
+      : (muscles.length >= 2 ? 'compound' : 'isolation');
+    return { muscles: muscles, pattern: pattern };
+  }
   function catalogIndex(catalogue) {
     const byId = {};
     (catalogue || []).forEach(c => { if (c && c.id) byId[c.id] = c; });
@@ -1708,7 +1727,7 @@
     repairJson, median, linearTrend,
     e1RM, setLoad, weightAt, classifyExercise, sessionMetrics, exerciseTrend, liftVsWeight,
     normalizeName, exerciseId, matchExercise, parseWorkoutLine, parseWorkout, SEED_EXERCISES,
-    MUSCLE_GROUPS, MUSCLE_LABEL, EXERCISE_META, exerciseMeta, normalizeMuscles, workingSetCount,
+    MUSCLE_GROUPS, MUSCLE_LABEL, EXERCISE_META, exerciseMeta, normalizeMuscles, cleanCategory, workingSetCount,
     weeklyVolumeByMuscle, muscleFrequency, volumeDrift, fatigueIndex, loadJumpCheck,
     intakeStats, tdeeConfidence, tdeeReadout, dataTrust, deloadRatio,
     LIFT_REP_CAP, LIFT_MIN_SESSIONS, LIFT_FLAT_PCT, LIFT_RIR_DRIFT, LIFT_WINDOW_DAYS,

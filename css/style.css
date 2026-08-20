@@ -1360,6 +1360,10 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .cat-tag { width: 100%; min-height: 34px; padding: 4px 6px; font-size: 11.5px; }
 .cat-tag.untagged { border-color: var(--brass); color: var(--brass); }
 #liftCatalog td { vertical-align: top; }
+.cat-review { border: 1px solid var(--rule-lit); border-radius: var(--radius); padding: 11px; background: var(--chalk-wash); }
+.cat-review-head { font-family: var(--data); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--graphite); margin-bottom: 8px; }
+.cat-review-row { font-size: 12.5px; padding: 4px 0; border-bottom: 1px solid var(--rule); }
+.cat-review-row:last-of-type { border-bottom: none; }
 
 /* ============================== logs tab =============================== */
 .measure-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }

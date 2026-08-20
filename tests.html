@@ -1278,6 +1278,22 @@ group('exerciseMeta / weeklyVolumeByMuscle / muscleFrequency');
   check('volumeDrift reports the shortfall', drift[0].muscle==='sideDelts' && drift[0].delta===-6 && drift[0].pct===-50);
 })();
 
+// ---- AI categorisation guard ----
+group('cleanCategory — constrains an AI reply to the muscle vocabulary');
+(function(){
+  const ok = C.cleanCategory({pattern:'compound', muscles:[{group:'chest',weight:1},{group:'triceps',weight:0.5}]});
+  check('valid category passes through', ok.pattern==='compound' && ok.muscles.length===2 && ok.muscles[0].group==='chest');
+  check('unknown group is dropped',
+        JSON.stringify(C.cleanCategory({muscles:[{group:'shoulders',weight:1},{group:'sideDelts',weight:1}]}).muscles)==='[{"group":"sideDelts","weight":1}]');
+  check('weights clamp into 0.1–1', C.cleanCategory({muscles:[{group:'quads',weight:9}]}).muscles[0].weight===1);
+  check('duplicate groups collapse to the max', C.cleanCategory({muscles:[{group:'lats',weight:0.4},{group:'lats',weight:1}]}).muscles[0].weight===1);
+  check('a lone muscle defaults to isolation', C.cleanCategory({muscles:[{group:'biceps',weight:1}]}).pattern==='isolation');
+  check('all-garbage returns null', C.cleanCategory({muscles:[{group:'xyz',weight:1}]})===null && C.cleanCategory({})===null);
+  check('capped at four muscles', C.cleanCategory({muscles:[
+    {group:'chest',weight:1},{group:'triceps',weight:0.9},{group:'frontDelts',weight:0.8},
+    {group:'lats',weight:0.7},{group:'biceps',weight:0.6}]}).muscles.length===4);
+})();
+
 // ---- fatigue index ----
 group('fatigueIndex — rep drop-off at fixed load');
 (function(){

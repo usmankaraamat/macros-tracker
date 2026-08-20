@@ -760,6 +760,83 @@ function renderLiftCatalog(){
         { tone:'warn', undo: ()=>{ saveCatalog(before); renderLiftCatalog(); } });
     };
   });
+  updateCatAiBtn();
+  if (typeof renderCatAiReview === 'function') renderCatAiReview();
+}
+// Which catalogue lifts still have no muscle tag — the ones the AI pass would categorise.
+function untaggedExercises(){ return exerciseCatalog().filter(c=>!LedgerCore.exerciseMeta(c).tagged); }
+// The "categorise with AI" button appears only when there is something to do and a key to do
+// it with. It stays available whenever a newly-logged lift is still untagged.
+function updateCatAiBtn(){
+  const btn = document.getElementById('catAiBtn'); if (!btn) return;
+  const n = untaggedExercises().length;
+  btn.hidden = !(n && hasAI());
+  btn.textContent = `✨ Categorise ${n} untagged exercise${n===1?'':'s'} with AI`;
+}
+// Hand the untagged exercise names to the AI, constrained to the app's own muscle vocabulary,
+// and stage the result for review. The AI only RESOLVES names to muscles/pattern — the volume
+// math downstream is the app's; every tag is shown for confirmation before it is applied, and
+// cleanCategory drops anything off the allowed group list.
+document.getElementById('catAiBtn').onclick = async ()=>{
+  const targets = untaggedExercises();
+  if (!targets.length) return;
+  const btn = document.getElementById('catAiBtn');
+  btn.disabled = true; btn.textContent = 'Categorising…';
+  try {
+    const groups = LedgerCore.MUSCLE_GROUPS.join(', ');
+    const prompt =
+`You tag gym exercises with the muscles they train, for a training tracker.
+For each exercise name, return the muscle groups it works and whether it is a compound (multi-joint) or an isolation (single-joint) movement.
+Use ONLY these muscle group keys, spelled exactly: ${groups}.
+Give each muscle a weight from 0.1 to 1.0 — the primary mover about 1.0, assistors lower. A compound usually lists 2–4 muscles; an isolation usually 1. Do not invent groups outside the list.
+Return JSON only, no prose: {"exercises":[{"name":<exactly as given>,"pattern":"compound"|"isolation","muscles":[{"group":<key>,"weight":<0.1-1>}]}]}
+Exercises:
+"""${targets.map(t=>t.name).join('\n')}"""`;
+    const txt = await aiComplete(prompt);
+    let parsed; try { parsed = JSON.parse(txt); } catch(e){ parsed = LedgerCore.repairJson(txt); }
+    const list = (parsed && (Array.isArray(parsed) ? parsed : parsed.exercises)) || [];
+    // Match each reply back to a target by normalised name, then validate through the guard.
+    const byNorm = {}; targets.forEach(t=>{ byNorm[LedgerCore.normalizeName(t.name)] = t; });
+    catAiProposed = [];
+    list.forEach(item=>{
+      const t = item && byNorm[LedgerCore.normalizeName(item.name||'')];
+      if (!t) return;
+      const clean = LedgerCore.cleanCategory(item);
+      if (clean) catAiProposed.push({ id: t.id, name: t.name, muscles: clean.muscles, pattern: clean.pattern });
+    });
+    if (!catAiProposed.length) throw new Error('the AI returned nothing usable');
+    renderCatAiReview();
+    liftStatus(`Read by ${escapeHtml(AI_VIA)} — check the tags, then apply.`);
+  } catch(err){
+    toast('AI categorise failed: ' + err.message, { tone:'warn' });
+  } finally { btn.disabled = false; updateCatAiBtn(); }
+};
+// The staged AI categorisation, awaiting review. Applied only on the user's confirm.
+let catAiProposed = null;
+function renderCatAiReview(){
+  const el = document.getElementById('catAiReview'); if (!el) return;
+  if (!catAiProposed || !catAiProposed.length){ el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  const line = p => `${escapeHtml(p.name)} <span class="ink-dim">→ ${p.pattern} · `
+    + p.muscles.map(m=>`${escapeHtml(LedgerCore.MUSCLE_LABEL[m.group]||m.group)} ${m.weight}`).join(', ') + `</span>`;
+  el.innerHTML = `<div class="cat-review">
+    <div class="cat-review-head">AI proposed tags — review before applying</div>
+    ${catAiProposed.map(p=>`<div class="cat-review-row">${line(p)}</div>`).join('')}
+    <div class="footer-actions" style="grid-template-columns:1fr 1fr;margin-top:10px">
+      <button type="button" class="ghost" id="catAiCancel">Cancel</button>
+      <button type="button" id="catAiApply">Apply ${catAiProposed.length} tag${catAiProposed.length===1?'':'s'}</button>
+    </div></div>`;
+  document.getElementById('catAiCancel').onclick = ()=>{ catAiProposed = null; renderCatAiReview(); liftStatus(''); };
+  document.getElementById('catAiApply').onclick = ()=>{
+    const list = exerciseCatalog().slice(), byId = {}; list.forEach((c,i)=>byId[c.id]=i);
+    let n = 0;
+    catAiProposed.forEach(p=>{
+      const i = byId[p.id]; if (i==null) return;
+      list[i] = Object.assign({}, list[i], { muscles: p.muscles, pattern: p.pattern }); n++;
+    });
+    saveCatalog(list); catAiProposed = null; liftStatus(''); haptic(); render();
+    toast(`Categorised ${n} exercise${n===1?'':'s'} — tweak any in the table`);
+  };
 }
 function renderLiftHistory(all, W){
   const el = document.getElementById('liftHistory'); if (!el) return;

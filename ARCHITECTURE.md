@@ -175,9 +175,15 @@ equipment and loading class. Also:
   - **warm-up set** toggling (tap a set chip) so warm-ups leave volume, top set,
     e1RM and fatigue untouched;
   - a **deload** marker on the session, which keeps a deliberate light week out of
-    every lift's trend fit so it doesn't read as regression.
+    every lift's trend fit so it doesn't read as regression;
+  - **AI categorisation** — a one-tap pass in the Exercises catalogue that sends the
+    still-untagged lift names to the AI and gets back muscles + movement pattern,
+    validated against the app's fixed muscle vocabulary (`cleanCategory`) and shown
+    for confirmation before applying. Like every AI use here it only *resolves*
+    names to metadata; the volume math stays deterministic.
 Trend identity is keyed by exercise **and** equipment, so the same movement under
-different equipment does not share one line.
+different equipment does not share one line. The Exercises catalogue also lets each
+lift's muscle/pattern be set or corrected by hand.
 
 **Trends** — history and rolling averages, a compliance heatmap, the
 weight/TDEE/goal picture, an adaptive fat-change estimate, and a **recomp card**
