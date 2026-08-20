@@ -1300,6 +1300,67 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .lift-preview .lift-sets { margin-top: 5px; }
 .lift-preview .lift-sub { color: var(--graphite); }
 
+/* ---- load-jump guardrail (non-blocking) ---- */
+.lift-jump { font-size: 11.5px; margin-top: 7px; padding: 6px 9px; border-radius: var(--radius); line-height: 1.45; }
+.lift-jump.notice { color: var(--brass); background: var(--brass-wash); border: 1px solid var(--brass); }
+.lift-jump.warn { color: var(--hot); background: var(--hot-wash); border: 1px solid var(--hot); }
+
+/* ---- sets as tappable chips; warm-ups toggle out of the metrics ---- */
+.set-chip {
+  width: auto; min-height: 0; padding: 3px 8px; margin: 0; flex: none;
+  font-family: var(--data); font-size: 12px; color: var(--graphite);
+  background: var(--chalk-wash); border: 1px solid var(--rule); border-radius: 4px;
+  display: inline-block; line-height: 1.5;
+}
+.set-chip:hover:not(:disabled) { border-color: var(--graphite); color: var(--chalk); background: var(--chalk-wash); }
+.set-chip.warm { opacity: 0.6; border-style: dashed; }
+.set-chip .wu { font-size: 8.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--brass); }
+.lift-sets { display: flex; flex-wrap: wrap; gap: 5px; }
+
+/* ---- fatigue (rep drop-off) ---- */
+.lift-fatigue.warn { color: var(--brass); }
+.lift-fatigue.bad { color: var(--hot); }
+
+/* ---- deload marker ---- */
+.lift-deload {
+  display: flex; align-items: center; gap: 8px; margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--rule); font-size: 12px; color: var(--graphite);
+  text-transform: none; letter-spacing: 0;
+}
+.lift-deload input { width: auto; min-height: 0; flex: none; }
+
+/* ---- data-trust panel ---- */
+.trust-row { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; padding: 4px 0; }
+.trust-row > span:first-of-type, .trust-row > span:nth-child(2) { flex: 1; }
+.trust-dot { font-size: 9px; }
+.trust-dot.ok { color: var(--verdigris); }
+.trust-dot.warn { color: var(--brass); }
+.trust-dot.bad { color: var(--hot); }
+.trust-tdee { font-size: 13px; line-height: 1.55; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--rule); }
+.trust-tdee b { color: var(--chalk); }
+.trust-foot { font-size: 11px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--rule); line-height: 1.5; }
+.trust-high { color: var(--verdigris); } .trust-medium { color: var(--brass); } .trust-low { color: var(--hot); }
+
+/* ---- volume-per-muscle table ---- */
+.mv-cap { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+.mv-row { display: grid; grid-template-columns: 84px 1fr auto; grid-template-areas: 'name bar val' 'freq freq freq';
+          gap: 4px 10px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--rule); }
+.mv-row:last-child { border-bottom: none; }
+.mv-name { grid-area: name; font-size: 12px; color: var(--chalk); }
+.mv-bar-wrap { grid-area: bar; position: relative; height: 8px; background: var(--rule); border-radius: 4px; }
+.mv-bar { height: 100%; background: var(--graphite); border-radius: 4px; }
+.mv-bar.short { background: var(--brass); }
+.mv-target { position: absolute; top: -2px; width: 2px; height: 12px; background: var(--chalk); }
+.mv-val { grid-area: val; font-family: var(--data); font-size: 12px; color: var(--graphite); }
+.mv-freq { grid-area: freq; font-size: 10.5px; }
+.mv-untagged { font-size: 11.5px; color: var(--brass); margin-top: 10px; padding: 7px 9px;
+               background: var(--brass-wash); border: 1px solid var(--brass); border-radius: var(--radius); line-height: 1.45; }
+
+/* ---- catalogue muscle/pattern tagging ---- */
+.cat-tag { width: 100%; min-height: 34px; padding: 4px 6px; font-size: 11.5px; }
+.cat-tag.untagged { border-color: var(--brass); color: var(--brass); }
+#liftCatalog td { vertical-align: top; }
+
 /* ============================== logs tab =============================== */
 .measure-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .measure-req { color: var(--brass); font-size: 11px; vertical-align: middle; }

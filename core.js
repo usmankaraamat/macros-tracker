@@ -924,6 +924,9 @@
     let volume = 0, topLoad = 0, best = null, cap = 0, counted = 0, skipped = 0, reps = 0, capped = 0;
     const rirs = [];
     (sets || []).forEach(s => {
+      // Warmups are ramp-up, not work — excluded from every metric so they never inflate
+      // volume, drag a top set, or feed a trend. Old data has no `warmup` key and is unaffected.
+      if (s && s.warmup) return;
       const load = setLoad(s, o.bodyweightKg);
       const r = +s.reps || 0;
       if (load == null || !(load > 0) || !(r > 0)) { skipped++; return; }
@@ -972,19 +975,24 @@
     if (!win.length) return empty;
     const t0 = isoDay(win[0].date);
 
+    // A session flagged deload is a deliberate light week; counting it in the fit would draw
+    // a false "regressing" through a planned back-off. It is dropped from the slope but still
+    // provides `latest` (it is what you last did), unless disabled with opts.skipDeload=false.
+    const skipDeload = o.skipDeload !== false;
     const build = cls => {
       const pts = [], vol = [], rir = [];
       let last = null, setsTotal = 0, setsCapped = 0;
       win.forEach(s => {
         const m = sessionMetrics(s.sets, {
           bodyweightKg: o.weights ? weightAt(o.weights, s.date) : o.bodyweightKg, rir: s.rir });
+        last = m;                                    // latest reflects the true last session
+        if (skipDeload && s.deload) return;          // …but a deload does not shape the trend
         setsTotal += m.sets; setsCapped += m.cappedSets;
         const x = isoDay(s.date) - t0;
         const y = cls === 'volume' ? m.bestCapacity : m.bestE1RM;
         if (y != null && y > 0) pts.push({ x: x, y: y });
         if (m.volume > 0) vol.push({ x: x, y: m.volume });
         if (m.hasRir) rir.push({ x: x, y: m.medianRir });
-        last = m;
       });
       return { pts: pts, vol: vol, rir: rir, latest: last, setsTotal: setsTotal, setsCapped: setsCapped };
     };
@@ -1280,6 +1288,316 @@
     { id: 'hanging-leg-raise', name: 'Hanging leg raise', aliases: ['leg raise'], bw: true }
   ];
 
+  // ---- Exercise metadata: muscles, pattern, equipment, loading ---------------
+  // muscles: fractional "set credit" per muscle group (a primary mover ~1.0, assistors
+  // less). One hard set of an exercise adds its credit to each muscle, so a compound
+  // spreads a set across several groups and volume-per-muscle stops being a guess.
+  // pattern drives the rest-timer default; equipment segments trend lines; loading is a
+  // coarse skeletal-stimulus tag. This is a SEED — a catalogue record may override any
+  // field, and an unknown exercise is simply "untagged" (surfaced, never silently dropped).
+  const MUSCLE_GROUPS = ['chest','frontDelts','sideDelts','rearDelts','triceps','biceps',
+    'forearms','lats','upperBack','traps','lowerBack','quads','hamstrings','glutes','calves','abs'];
+  const MUSCLE_LABEL = { chest:'Chest', frontDelts:'Front delts', sideDelts:'Side delts',
+    rearDelts:'Rear delts', triceps:'Triceps', biceps:'Biceps', forearms:'Forearms', lats:'Lats',
+    upperBack:'Upper back', traps:'Traps', lowerBack:'Lower back', quads:'Quads',
+    hamstrings:'Hamstrings', glutes:'Glutes', calves:'Calves', abs:'Abs' };
+  const EXERCISE_META = {
+    'bench-press':            { muscles:{chest:1,frontDelts:0.3,triceps:0.4}, pattern:'compound', equipment:'barbell', loading:'neither' },
+    'incline-bench-press':    { muscles:{chest:0.8,frontDelts:0.5,triceps:0.4}, pattern:'compound', equipment:'barbell', loading:'neither' },
+    'dumbbell-bench-press':   { muscles:{chest:1,frontDelts:0.3,triceps:0.4}, pattern:'compound', equipment:'dumbbell', loading:'neither' },
+    'incline-dumbbell-press': { muscles:{chest:0.8,frontDelts:0.5,triceps:0.4}, pattern:'compound', equipment:'dumbbell', loading:'neither' },
+    'overhead-press':         { muscles:{frontDelts:1,sideDelts:0.3,triceps:0.5}, pattern:'compound', equipment:'barbell', loading:'axial' },
+    'dumbbell-shoulder-press':{ muscles:{frontDelts:1,sideDelts:0.3,triceps:0.5}, pattern:'compound', equipment:'dumbbell', loading:'axial' },
+    'lateral-raise':          { muscles:{sideDelts:1}, pattern:'isolation', equipment:'dumbbell', loading:'neither' },
+    'rear-delt-fly':          { muscles:{rearDelts:1}, pattern:'isolation', equipment:'dumbbell', loading:'neither' },
+    'face-pull':              { muscles:{rearDelts:0.8,traps:0.3,upperBack:0.3}, pattern:'isolation', equipment:'cable', loading:'neither' },
+    'tricep-pushdown':        { muscles:{triceps:1}, pattern:'isolation', equipment:'cable', loading:'neither' },
+    'skull-crusher':          { muscles:{triceps:1}, pattern:'isolation', equipment:'barbell', loading:'neither' },
+    'dip':                    { muscles:{chest:0.6,triceps:0.6,frontDelts:0.3}, pattern:'compound', equipment:'bodyweight', loading:'neither' },
+    'push-up':                { muscles:{chest:1,triceps:0.4,frontDelts:0.3}, pattern:'compound', equipment:'bodyweight', loading:'neither' },
+    'pull-up':                { muscles:{lats:1,biceps:0.4,upperBack:0.5}, pattern:'compound', equipment:'bodyweight', loading:'neither' },
+    'chin-up':                { muscles:{lats:1,biceps:0.6,upperBack:0.4}, pattern:'compound', equipment:'bodyweight', loading:'neither' },
+    'lat-pulldown':           { muscles:{lats:1,biceps:0.4,upperBack:0.4}, pattern:'compound', equipment:'cable', loading:'neither' },
+    'barbell-row':            { muscles:{upperBack:1,lats:0.7,biceps:0.4,lowerBack:0.3}, pattern:'compound', equipment:'barbell', loading:'neither' },
+    'dumbbell-row':           { muscles:{upperBack:1,lats:0.7,biceps:0.4}, pattern:'compound', equipment:'dumbbell', loading:'neither' },
+    'seated-cable-row':       { muscles:{upperBack:1,lats:0.6,biceps:0.4}, pattern:'compound', equipment:'cable', loading:'neither' },
+    'bicep-curl':             { muscles:{biceps:1,forearms:0.3}, pattern:'isolation', equipment:'dumbbell', loading:'neither' },
+    'hammer-curl':            { muscles:{biceps:0.8,forearms:0.6}, pattern:'isolation', equipment:'dumbbell', loading:'neither' },
+    'preacher-curl':          { muscles:{biceps:1}, pattern:'isolation', equipment:'barbell', loading:'neither' },
+    'shrug':                  { muscles:{traps:1}, pattern:'isolation', equipment:'barbell', loading:'neither' },
+    'squat':                  { muscles:{quads:1,glutes:0.6,hamstrings:0.3,lowerBack:0.3}, pattern:'compound', equipment:'barbell', loading:'axial' },
+    'front-squat':            { muscles:{quads:1,glutes:0.5,upperBack:0.2}, pattern:'compound', equipment:'barbell', loading:'axial' },
+    'leg-press':              { muscles:{quads:1,glutes:0.5,hamstrings:0.3}, pattern:'compound', equipment:'machine', loading:'neither' },
+    'lunge':                  { muscles:{quads:0.8,glutes:0.7,hamstrings:0.3}, pattern:'compound', equipment:'dumbbell', loading:'axial' },
+    'bulgarian-split-squat':  { muscles:{quads:0.8,glutes:0.8,hamstrings:0.3}, pattern:'compound', equipment:'dumbbell', loading:'axial' },
+    'deadlift':               { muscles:{lowerBack:1,hamstrings:0.8,glutes:0.8,upperBack:0.4,quads:0.3}, pattern:'compound', equipment:'barbell', loading:'axial' },
+    'romanian-deadlift':      { muscles:{hamstrings:1,glutes:0.7,lowerBack:0.5}, pattern:'compound', equipment:'barbell', loading:'axial' },
+    'leg-curl':               { muscles:{hamstrings:1}, pattern:'isolation', equipment:'machine', loading:'neither' },
+    'leg-extension':          { muscles:{quads:1}, pattern:'isolation', equipment:'machine', loading:'neither' },
+    'calf-raise':             { muscles:{calves:1}, pattern:'isolation', equipment:'machine', loading:'neither' },
+    'hip-thrust':             { muscles:{glutes:1,hamstrings:0.4}, pattern:'compound', equipment:'barbell', loading:'neither' },
+    'plank':                  { muscles:{abs:1}, pattern:'isolation', equipment:'bodyweight', loading:'neither' },
+    'hanging-leg-raise':      { muscles:{abs:1,forearms:0.2}, pattern:'isolation', equipment:'bodyweight', loading:'neither' }
+  };
+  // Accept both the map form {chest:1} and the array form [{group,weight}] a catalogue
+  // record might store; always return a clean {group:weight} map (positive weights only).
+  function normalizeMuscles(m) {
+    if (!m) return null;
+    const out = {};
+    if (Array.isArray(m)) m.forEach(x => { if (x && x.group && +x.weight > 0) out[x.group] = +x.weight; });
+    else Object.keys(m).forEach(g => { if (+m[g] > 0) out[g] = +m[g]; });
+    return Object.keys(out).length ? out : null;
+  }
+  // Resolve an exercise's metadata: explicit fields on the catalogue record win, then the
+  // seed table, then untagged. `tagged` is false only when nothing at all is known — that
+  // is the signal the UI uses to prompt for tagging rather than dropping the exercise.
+  function exerciseMeta(entry) {
+    const e = entry || {};
+    const seed = e.id ? EXERCISE_META[e.id] : null;
+    const muscles = normalizeMuscles(e.muscles) || (seed ? seed.muscles : null);
+    return {
+      muscles: muscles || null,
+      pattern: e.pattern || (seed && seed.pattern) || null,
+      equipment: e.equipment || (seed && seed.equipment) || null,
+      loading: e.loading || (seed && seed.loading) || 'neither',
+      tagged: !!(muscles || seed)
+    };
+  }
+  function catalogIndex(catalogue) {
+    const byId = {};
+    (catalogue || []).forEach(c => { if (c && c.id) byId[c.id] = c; });
+    return byId;
+  }
+  const _isoDay = s => isoDay(s);
+  function _inRange(date, range) {
+    if (!range) return true;
+    if (range.from && date < range.from) return false;
+    if (range.to && date > range.to) return false;
+    return true;
+  }
+  // How many hard (non-warmup, real-rep) sets an exercise entry contributes.
+  function workingSetCount(ex) {
+    return (ex && ex.sets || []).filter(s => s && !s.warmup && +s.reps > 0).length;
+  }
+
+  // Fractional working-sets per muscle group over a list of sessions. sessions is an array
+  // of {date, exercises:[{id,name,sets,muscles?}]}. Untagged exercises are pooled under
+  // `__untagged` so nothing is silently uncounted.
+  function weeklyVolumeByMuscle(sessions, catalogue, range) {
+    const byId = catalogIndex(catalogue), out = {};
+    (sessions || []).forEach(s => {
+      if (!s || !_inRange(s.date, range)) return;
+      (s.exercises || []).forEach(ex => {
+        const n = workingSetCount(ex);
+        if (!n) return;
+        const meta = exerciseMeta(byId[ex.id] || ex);
+        if (!meta.muscles) { out.__untagged = (out.__untagged || 0) + n; return; }
+        Object.keys(meta.muscles).forEach(g => { out[g] = (out[g] || 0) + n * meta.muscles[g]; });
+      });
+    });
+    return out;
+  }
+  // Per-muscle training frequency and the GAPS between sessions that hit it — the output
+  // that exposes a muscle trained on back-to-back days (gap 1) or only weekly (gap 7).
+  // A muscle counts as "hit" on a day only if some exercise gives it >= 0.25 of a set.
+  function muscleFrequency(sessions, catalogue, range) {
+    const byId = catalogIndex(catalogue), hit = {};
+    (sessions || []).slice().filter(s => s && _inRange(s.date, range))
+      .sort((a, b) => a.date < b.date ? -1 : 1).forEach(s => {
+        const today = {};
+        (s.exercises || []).forEach(ex => {
+          if (!workingSetCount(ex)) return;
+          const meta = exerciseMeta(byId[ex.id] || ex);
+          if (!meta.muscles) return;
+          Object.keys(meta.muscles).forEach(g => { if (meta.muscles[g] >= 0.25) today[g] = true; });
+        });
+        Object.keys(today).forEach(g => { (hit[g] = hit[g] || []).push(s.date); });
+      });
+    const out = {};
+    Object.keys(hit).forEach(g => {
+      const dates = hit[g], gaps = [];
+      for (let i = 1; i < dates.length; i++) gaps.push(isoDay(dates[i]) - isoDay(dates[i - 1]));
+      out[g] = { sessions: dates.length, dates: dates, gaps: gaps };
+    });
+    return out;
+  }
+  // Planned vs executed weekly volume per muscle. planned/executed are {muscle:sets} maps.
+  function volumeDrift(planned, executed) {
+    const groups = {};
+    Object.keys(planned || {}).forEach(g => groups[g] = 1);
+    Object.keys(executed || {}).forEach(g => { if (g !== '__untagged') groups[g] = 1; });
+    return Object.keys(groups).map(g => {
+      const p = +(planned && planned[g]) || 0, e = +(executed && executed[g]) || 0;
+      return { muscle: g, planned: p, executed: +e.toFixed(2), delta: +(e - p).toFixed(2),
+               pct: p > 0 ? +((e - p) / p * 100).toFixed(1) : null };
+    }).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  }
+
+  // Within-exercise rep drop-off at a FIXED load — a fatigue / rest-adequacy signal.
+  // Only straight sets at one load are comparable; a mixed-load sequence returns
+  // applicable:false rather than a fabricated number. Warmups are excluded. When only a
+  // session-level RIR is known it is applied to the last set to estimate capacity loss,
+  // and the result is flagged an estimate.
+  function fatigueIndex(sets, opts) {
+    const o = opts || {};
+    const work = (sets || []).filter(s => s && !s.warmup && +s.reps > 0);
+    if (work.length < 2) return { applicable: false, reason: 'need two or more working sets' };
+    const loadOf = s => s.bw ? 'bw' : (+s.kg || 0);
+    const load0 = loadOf(work[0]);
+    if (!work.every(s => loadOf(s) === load0))
+      return { applicable: false, reason: 'sets are at mixed loads' };
+    const reps = work.map(s => +s.reps);
+    const r1 = reps[0], rLast = reps[reps.length - 1];
+    const rawDropoff = r1 > 0 ? (r1 - rLast) / r1 : 0;
+    // Effective reps add reps-in-reserve: per-set RIR wins; else the session RIR is charged
+    // to the last set only (it describes the hardest set, usually the last).
+    const perSet = work.some(s => s.rir != null);
+    const sessRir = o.rir != null ? +o.rir : null;
+    const eff = work.map((s, i) => {
+      if (s.rir != null) return (+s.reps) + Math.max(0, +s.rir || 0);
+      if (!perSet && sessRir != null && i === work.length - 1) return (+s.reps) + Math.max(0, sessRir);
+      return +s.reps;
+    });
+    const e1 = eff[0], eLast = eff[eff.length - 1];
+    const adjustedDropoff = e1 > 0 ? (e1 - eLast) / e1 : 0;
+    const perSetDeltas = [];
+    for (let i = 1; i < reps.length; i++) perSetDeltas.push(reps[i] - reps[i - 1]);
+    // The flag keys off the RAW, observed rep drop — a concrete number, not an inferred one.
+    // adjustedDropoff (capacity, using RIR) rides alongside as context, marked an estimate.
+    const flag = rawDropoff > 0.30 ? 'high' : rawDropoff >= 0.20 ? 'elevated' : 'ok';
+    return { applicable: true, sets: work.length, load: load0,
+             rawDropoff: +rawDropoff.toFixed(3), adjustedDropoff: +adjustedDropoff.toFixed(3),
+             perSetDeltas: perSetDeltas, estimate: (!perSet && sessRir != null), flag: flag };
+  }
+
+  // Guardrail: is a proposed top-set load a big jump over recent history for this lift?
+  // history = [{date, topKg}] (or {date, sets} which we reduce to a top load). Compares
+  // against the heaviest top set in the trailing `windowDays` (default 14), normalises to a
+  // weekly rate, and grades it. Informs; never blocks. Thresholds differ by equipment class
+  // because a machine tolerates faster loading than a free-weight compound.
+  const LOADJUMP_THRESH = {
+    fixed: { notice: 7, warn: 10 },   // machine / smith / fixed path
+    free:  { notice: 5, warn: 7.5 }   // barbell / dumbbell compound
+  };
+  function loadJumpCheck(proposedTopSetKg, history, opts) {
+    const o = opts || {}, none = { severity: 'none', pctChange: null, daysSince: null, priorTopSetKg: null };
+    const prop = +proposedTopSetKg;
+    if (!(prop > 0)) return none;
+    const rows = (history || []).map(h => {
+      let top = +h.topKg;
+      if (!(top > 0) && h.sets) top = (h.sets || []).reduce((m, s) => {
+        const load = s.bw ? (+o.bodyweightKg || 0) + (+s.kg || 0) : (+s.kg || 0);
+        return !s.warmup && +s.reps > 0 && load > m ? load : m;
+      }, 0);
+      return { date: h.date, top: top };
+    }).filter(h => h.date && h.top > 0);
+    if (!rows.length) return none;
+    const asOf = o.asOf || rows.map(r => r.date).sort().pop();
+    const win = +o.windowDays > 0 ? +o.windowDays : 14;
+    const recent = rows.filter(r => { const dd = isoDay(asOf) - isoDay(r.date); return dd >= 0 && dd <= win; });
+    if (!recent.length) return none;
+    const prior = recent.reduce((a, b) => b.top > a.top ? b : a);
+    const daysSince = Math.max(1, isoDay(asOf) - isoDay(prior.date));
+    const pctChange = (prop - prior.top) / prior.top * 100;
+    const pctPerWeek = pctChange * 7 / daysSince;
+    const cls = (o.equipment === 'machine' || o.equipment === 'smith' || o.pattern === 'isolation') ? 'fixed' : 'free';
+    const th = LOADJUMP_THRESH[cls];
+    let severity = 'none';
+    if (pctPerWeek > th.warn) severity = 'warn';
+    else if (pctPerWeek > th.notice) severity = 'notice';
+    return { severity: severity, pctChange: +pctChange.toFixed(1), daysSince: daysSince,
+             priorTopSetKg: +prior.top.toFixed(1), pctPerWeek: +pctPerWeek.toFixed(1),
+             cls: cls, message: severity === 'none' ? '' :
+               `+${pctChange.toFixed(1)}% vs ${daysSince} day${daysSince === 1 ? '' : 's'} ago` +
+               ` — ${pctPerWeek.toFixed(1)}%/wk. Typical safe loading is under ${th.warn}%/wk.` };
+  }
+
+  // ---- data-quality: intake variability and TDEE confidence ------------------
+  // Coefficient of variation of daily intake — the cheapest data-quality signal there is,
+  // and the gate on whether an adaptive TDEE means anything. A 4,900 kcal day next to a
+  // 1,600 makes the average unreadable however many days you log.
+  function intakeStats(intakes) {
+    const xs = (intakes || []).map(Number).filter(v => v > 0);
+    if (!xs.length) return { n: 0, mean: 0, sd: 0, cv: null };
+    const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const sd = Math.sqrt(xs.reduce((s, v) => s + (v - mean) * (v - mean), 0) / xs.length);
+    return { n: xs.length, mean: Math.round(mean), sd: Math.round(sd), cv: mean > 0 ? +(sd / mean * 100).toFixed(1) : null };
+  }
+  // The confidence tier an adaptive TDEE has earned. It cannot rise above 'low' without
+  // enough intake days AND enough valid weigh-ins AND a tight enough intake CV.
+  function tdeeConfidence(o) {
+    o = o || {};
+    const nI = +o.nIntakeDays || 0, nW = +o.nWeighIns || 0, cv = o.cv;
+    if (nI < 7 || nW < 2 || cv == null) return 'none';
+    if (nI < 14 || nW < 10) return 'low';
+    if (cv < 10) return 'high';
+    if (cv < 15) return 'medium';
+    return 'low';
+  }
+  // A TDEE readout that surfaces its own uncertainty: a point estimate, an interval, the two
+  // methods that disagree (weight-trend regression vs Mifflin×activity) and their gap, plus
+  // the earned confidence. Composes the existing calibrateTDEE — it does not replace it.
+  function tdeeReadout(o) {
+    o = o || {};
+    const formula = +o.formula || 0;
+    const stats = intakeStats(o.intakes || []);
+    const avgIntake = o.avgIntake != null ? +o.avgIntake : stats.mean;
+    const rate = o.ratePerWeek;
+    const cal = calibrateTDEE(formula, avgIntake, rate == null ? null : rate, +o.sampleDays || 0);
+    const regression = cal.dataTDEE;                 // weight-trend implied
+    const predictive = cal.formula;                  // Mifflin × activity implied
+    const confidence = tdeeConfidence({ nIntakeDays: stats.n, nWeighIns: +o.nWeighIns || 0, cv: stats.cv });
+    const gapKcal = (regression != null && predictive > 0) ? Math.abs(regression - predictive) : null;
+    // Interval: the span between the two methods when both exist and disagree; otherwise a
+    // ±band that tightens as confidence rises.
+    let lo, hi;
+    if (regression != null && predictive > 0) {
+      lo = Math.min(regression, predictive); hi = Math.max(regression, predictive);
+    } else {
+      const band = confidence === 'high' ? 0.05 : confidence === 'medium' ? 0.08 : 0.12;
+      lo = Math.round(cal.blended * (1 - band)); hi = Math.round(cal.blended * (1 + band));
+    }
+    const warnings = [];
+    if (stats.cv != null && stats.cv >= 15) warnings.push('intake too variable to read (CV ≥ 15%)');
+    if ((+o.nWeighIns || 0) < 10) warnings.push('fewer than 10 valid weigh-ins');
+    if (stats.n < 14) warnings.push('fewer than 14 logged intake days');
+    return { pointEstimate: cal.blended, interval: [lo, hi], method: cal.w >= 0.66 ? 'regression' : cal.w <= 0.34 ? 'predictive' : 'blended',
+             confidence: confidence, cv: stats.cv, nIntakeDays: stats.n, nWeighIns: +o.nWeighIns || 0,
+             disagreement: { regression: regression, predictive: predictive, gapKcal: gapKcal }, warnings: warnings };
+  }
+  // A single "how much should I trust the app's reads right now" score from the input
+  // signals it already has. Not a verdict about the body — a verdict about the data.
+  function dataTrust(o) {
+    o = o || {};
+    const cv = o.intakeCV, nI = +o.nIntakeDays || 0, nW = +o.nWeighIns || 0, span = +o.spanDays || 0;
+    const items = [];
+    items.push({ key: 'intakeDays', ok: nI >= 14, label: `${nI} intake day${nI === 1 ? '' : 's'} logged`, want: '14+' });
+    items.push({ key: 'intakeCV', ok: cv != null && cv < 10, warn: cv != null && cv < 15,
+                 label: cv == null ? 'intake variability — no data' : `intake CV ${cv}%`, want: '<10%' });
+    items.push({ key: 'weighIns', ok: nW >= 10, label: `${nW} weigh-in${nW === 1 ? '' : 's'}`, want: '10+' });
+    items.push({ key: 'history', ok: span >= 42, label: `${span} days of history`, want: '42+' });
+    const score = items.filter(i => i.ok).length / items.length;
+    const tier = score >= 0.75 ? 'high' : score >= 0.5 ? 'medium' : 'low';
+    return { tier: tier, score: +score.toFixed(2), items: items };
+  }
+
+  // A deliberately lighter week reads as "regressing" unless it is recognised as a deload.
+  // Heuristic: the session's median top-load, relative to each exercise's trailing max, has
+  // dropped by at least `drop` (default 12%). Used to auto-suggest the deload flag; the user
+  // still confirms it. priorMax: {exerciseId: kg} of recent maxima before this session.
+  function deloadRatio(session, priorMax, opts) {
+    const o = opts || {}, ratios = [];
+    (session && session.exercises || []).forEach(ex => {
+      const pm = +(priorMax && priorMax[ex.id]) || 0;
+      if (!(pm > 0)) return;
+      const top = (ex.sets || []).reduce((m, s) => !s.warmup && +s.reps > 0 && +s.kg > m ? +s.kg : m, 0);
+      if (top > 0) ratios.push(top / pm);
+    });
+    if (!ratios.length) return { deload: false, ratio: null, n: 0 };
+    const med = median(ratios), drop = +o.drop > 0 ? +o.drop : 0.12;
+    return { deload: med <= 1 - drop, ratio: +med.toFixed(3), n: ratios.length };
+  }
+
   // ---- Sync merge: last-write-wins per DAY ----------------------------------
   // A sync state is {days:{'YYYY-MM-DD':[entries]}, meta:{'YYYY-MM-DD':isoStamp}}.
   // Per-day (not per-blob) LWW makes "phone logs lunch, PC logs dinner on another
@@ -1390,6 +1708,9 @@
     repairJson, median, linearTrend,
     e1RM, setLoad, weightAt, classifyExercise, sessionMetrics, exerciseTrend, liftVsWeight,
     normalizeName, exerciseId, matchExercise, parseWorkoutLine, parseWorkout, SEED_EXERCISES,
+    MUSCLE_GROUPS, MUSCLE_LABEL, EXERCISE_META, exerciseMeta, normalizeMuscles, workingSetCount,
+    weeklyVolumeByMuscle, muscleFrequency, volumeDrift, fatigueIndex, loadJumpCheck,
+    intakeStats, tdeeConfidence, tdeeReadout, dataTrust, deloadRatio,
     LIFT_REP_CAP, LIFT_MIN_SESSIONS, LIFT_FLAT_PCT, LIFT_RIR_DRIFT, LIFT_WINDOW_DAYS,
     LIFT_SE_HIGH, LIFT_SE_MED,
     liftWindowOpen, hhmmMinutes, isTrainingSplit, LIFT_OPEN_LEAD_MIN, LIFT_OPEN_TAIL_MIN,

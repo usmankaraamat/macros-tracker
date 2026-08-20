@@ -379,7 +379,9 @@ function computeTDEE(){
   const intakes=Object.keys(tot).filter(d=>d>=start && d<=end && d!==ACTIVE_DATE && tot[d].kcal>0).map(d=>tot[d].kcal);
   const avgIntake = intakes.length ? intakes.reduce((a,b)=>a+b,0)/intakes.length : 0;
   const cal = LedgerCore.calibrateTDEE(formula, avgIntake, tr?tr.ratePerWeek:null, sampleDays);
-  return Object.assign(cal, {kg, avgIntake:Math.round(avgIntake), sampleDays});
+  return Object.assign(cal, {kg, avgIntake:Math.round(avgIntake), sampleDays,
+    formulaBase: formula, ratePerWeek: tr?tr.ratePerWeek:null,
+    intakes: intakes, nWeighIns: winW.length});
 }
 // Has the corridor stopped describing what you actually eat? Reads the last 28 closed
 // days against the corridor now in force. A ceiling breached most days is not a warning
@@ -687,6 +689,8 @@ function renderTrendsTab(){
   renderWeight();
   renderWeightLog();
   renderFatEstimate();   // TDEE + goal readouts are refreshed by render(), not here
+  renderDataTrust();
+  renderMuscleVolume();
   renderWeeklyReport();
   renderTopFoods();
   renderRecompFromLifts();
@@ -724,6 +728,91 @@ function renderWeeklyReport() {
 }
 
 // 7. TOP FOODS BAR CHART
+// Weekly set targets per muscle, if the user has set any. Optional — an empty map just
+// means the volume panel shows executed sets with no target marker.
+function volumeTargets(){
+  try{ const m = JSON.parse(localStorage.getItem('ledger_volume_targets')||'{}'); return m&&typeof m==='object'?m:{}; }catch(e){ return {}; }
+}
+// ---- data quality: intake variability, TDEE confidence, macro consistency ----
+// The app's reads are only as good as the data feeding them. This panel makes the input
+// quality visible — the cheapest, most honest thing it can show — so an adaptive TDEE that
+// is really a guess reads as one, and a clean stretch reads as trustworthy.
+function renderDataTrust(){
+  const wrap = document.getElementById('dataTrust'); if (!wrap) return;
+  const td = computeTDEE();
+  const cDays = closedDays();                        // for macro consistency over the last week
+  const week = cDays.slice(0,7).map(d=>totalsOf(d.ledger));
+  const kcalCV = LedgerCore.intakeStats(week.map(t=>t.kcal)).cv;
+  const pStat = LedgerCore.intakeStats(week.map(t=>t.p));
+  const spanDays = cDays.length ? Math.round((Date.parse(cDays[0].date)-Date.parse(cDays[cDays.length-1].date))/86400000)+1 : 0;
+  const rd = LedgerCore.tdeeReadout({
+    formula: td.formulaBase||0, avgIntake: td.avgIntake, ratePerWeek: td.ratePerWeek,
+    sampleDays: td.sampleDays, intakes: td.intakes||[], nWeighIns: td.nWeighIns||0 });
+  const trust = LedgerCore.dataTrust({
+    intakeCV: rd.cv, nIntakeDays: rd.nIntakeDays, nWeighIns: rd.nWeighIns, spanDays: spanDays });
+  const dot = it => it.ok ? '<span class="trust-dot ok">●</span>'
+                   : it.warn ? '<span class="trust-dot warn">●</span>' : '<span class="trust-dot bad">●</span>';
+  const rows = trust.items.map(it =>
+    `<div class="trust-row">${dot(it)}<span>${escapeHtml(it.label)}</span><span class="ink-dim">want ${escapeHtml(it.want)}</span></div>`).join('');
+  // The TDEE disagreement is the headline the old readout hid: regression vs formula can be
+  // hundreds of kcal apart, and the honest answer is the interval, not one number.
+  const dis = rd.disagreement;
+  let tdeeLine = '';
+  if (dis.regression != null && dis.predictive > 0){
+    tdeeLine = `<div class="trust-tdee">Adaptive TDEE <b>${rd.pointEstimate.toLocaleString()}</b> kcal `
+      + `<span class="lift-conf ${CONF_CLS[rd.confidence]||'low'}">${rd.confidence} confidence</span><br>`
+      + `<span class="ink-dim">weight-trend says ${dis.regression.toLocaleString()} · formula says ${dis.predictive.toLocaleString()}`
+      + (dis.gapKcal>200 ? ` — they disagree by ${dis.gapKcal.toLocaleString()} kcal` : '') + `</span></div>`;
+  }
+  const consist = (kcalCV!=null || pStat.cv!=null)
+    ? `<div class="trust-row"><span>Last ${week.length}-day consistency</span>`
+      + `<span class="ink-dim">kcal CV ${kcalCV!=null?kcalCV+'%':'—'} · protein ${pStat.n?Math.round(pStat.mean)+'g ±'+pStat.sd:'—'}</span></div>`
+    : '';
+  wrap.innerHTML = tdeeLine + rows + consist
+    + `<div class="trust-foot ink-dim">Trust tier: <b class="trust-${trust.tier}">${trust.tier}</b>. `
+    + `These gate how much to believe the adaptive corridor, the fat-change estimate and the recomp read.</div>`;
+}
+
+// ---- weekly training volume per muscle ----
+// The app knew every set but never rolled it up per muscle, so a muscle trained at half its
+// planned volume, or on back-to-back days, was invisible. This reads it back — fractional
+// working-sets by muscle over the trailing 7 days, the gaps that expose frequency, and a
+// prompt to tag any exercise the metadata does not yet know.
+function renderMuscleVolume(){
+  const wrap = document.getElementById('muscleVolume'); if (!wrap) return;
+  const all = allWorkouts(), cat = exerciseCatalog();
+  const sessions = Object.keys(all).map(d=>all[d]);
+  if (!sessions.some(s=>(s.exercises||[]).length)){ wrap.innerHTML = '<div class="empty">Log a few sessions and volume-per-muscle appears here.</div>'; return; }
+  const end = Object.keys(all).sort().pop() || VIEW_DATE;
+  const from = addDaysISO(end, -6);
+  const range = { from, to: end };
+  const vol = LedgerCore.weeklyVolumeByMuscle(sessions, cat, range);
+  const freq = LedgerCore.muscleFrequency(sessions, cat, range);
+  const targets = volumeTargets();
+  const untagged = vol.__untagged || 0;
+  const groups = Object.keys(vol).filter(g=>g!=='__untagged').sort((a,b)=>vol[b]-vol[a]);
+  if (!groups.length && !untagged){ wrap.innerHTML = '<div class="empty">No sets in the last 7 days.</div>'; return; }
+  const maxV = Math.max(1, ...groups.map(g=>vol[g]), ...Object.keys(targets).map(k=>+targets[k]||0));
+  const rows = groups.map(g=>{
+    const sets = vol[g], tgt = +targets[g]||0;
+    const f = freq[g] || {sessions:0, gaps:[]};
+    const backToBack = f.gaps.some(x=>x<=1);
+    const pct = Math.max(6, sets/maxV*100), tpct = tgt>0 ? Math.min(100, tgt/maxV*100) : null;
+    const short = tgt>0 && sets < tgt*0.75;
+    const gapNote = f.sessions>=2 ? `${f.sessions}× · gaps ${f.gaps.join('/')}d` + (backToBack?' ⚠':'') : `${f.sessions}× this week`;
+    return `<div class="mv-row">
+      <div class="mv-name">${escapeHtml(LedgerCore.MUSCLE_LABEL[g]||g)}</div>
+      <div class="mv-bar-wrap"><div class="mv-bar${short?' short':''}" style="width:${pct}%"></div>`
+      + (tpct!=null?`<div class="mv-target" style="left:${tpct}%" title="target ${tgt}"></div>`:'') + `</div>
+      <div class="mv-val">${sets%1?sets.toFixed(1):sets}${tgt>0?` / ${tgt}`:''}</div>
+      <div class="mv-freq ink-dim">${gapNote}</div>
+    </div>`;
+  }).join('');
+  wrap.innerHTML = `<div class="mv-cap ink-dim">Working sets per muscle · last 7 days${Object.keys(targets).length?' · target marker shown':''}</div>`
+    + rows
+    + (untagged ? `<div class="mv-untagged">⚠ ${untagged%1?untagged.toFixed(1):untagged} set${untagged===1?'':'s'} on exercises with no muscle tag — they are pooled, not counted per muscle. Newly-logged lifts outside the seed list need tagging.</div>` : '');
+}
+
 function renderTopFoods() {
   const wrap = document.getElementById('topFoodsList');
   const count = {};

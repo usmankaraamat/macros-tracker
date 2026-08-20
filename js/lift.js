@@ -55,17 +55,23 @@ function weightSeries(){
 // One pass over the stored sessions produces every exercise's history, so a page render
 // scans localStorage once rather than once per exercise.
 function liftTrends(all, W){
-  const byId = {}, names = {}, lastDate = {};
+  const byKey = {}, names = {}, lastDate = {}, ids = {}, equips = {};
   Object.keys(all).sort().forEach(d=>{
+    const deload = !!all[d].deload;
     (all[d].exercises||[]).forEach(ex=>{
       if (!ex || !ex.id) return;
-      names[ex.id] = ex.name || ex.id; lastDate[ex.id] = d;
-      (byId[ex.id] = byId[ex.id] || []).push({date:d, sets:ex.sets||[], rir:ex.rir});
+      // Equipment is part of a lift's identity: the same movement on a Smith machine and a
+      // free barbell are different lifts and must not share a trend line. Only an EXPLICIT
+      // per-session equipment tag segments — existing data (no tag) stays one line per id.
+      const key = ex.equipment ? ex.id + '@' + ex.equipment : ex.id;
+      names[key] = ex.name || ex.id; lastDate[key] = d; ids[key] = ex.id;
+      if (ex.equipment) equips[key] = ex.equipment;
+      (byKey[key] = byKey[key] || []).push({date:d, sets:ex.sets||[], rir:ex.rir, deload:deload});
     });
   });
-  return Object.keys(byId).map(id=>({
-    id, lastDate: lastDate[id],
-    t: LedgerCore.exerciseTrend(byId[id], {name:names[id], weights:W})
+  return Object.keys(byKey).map(key=>({
+    id: ids[key], key, equipment: equips[key]||null, lastDate: lastDate[key],
+    t: LedgerCore.exerciseTrend(byKey[key], {name:names[key], weights:W})
   }));
 }
 const SET_TXT = s => s.bw ? (s.kg>0 ? `bw+${s.kg} × ${s.reps}` : `bw × ${s.reps}`) : `${s.kg}kg × ${s.reps}`;
@@ -87,19 +93,40 @@ function liftStatus(msg, bad){
 // never a gate: logging is always allowed, and logging again just restarts the count,
 // so an interrupted rest resets rather than stacking. Timing is anchored to a target
 // timestamp so a throttled tab still reads the true remaining time on the next tick.
-const REST_SECONDS = 90;
-// The target time is mirrored to localStorage as well as held in memory, so a rest survives
-// the app being evicted in the background: on relaunch, resumeRestTimer reads the stored end
-// and shows the true remaining time rather than a fresh (reset) count. The countdown itself
-// is JS, so it can only redraw when the app is alive — it cannot chime while the OS has the
-// app killed; it catches up the moment you return.
-const REST_KEY = 'ledger_rest_end';
-let restEnd = 0, restInt = null, restDone = false;
+// Rest defaults are set by exercise class: a compound needs 2–3 min, an isolation ~90s.
+// Short rest on compounds is exactly what drives the within-set rep drop-off, so the timer
+// stops being a flat 90 and reads the movement it just followed. Per-exercise overrides live
+// on the catalogue record (restSec); the class default is the fallback.
+const REST_COMPOUND = 150, REST_ISOLATION = 90, REST_DEFAULT = 90;
+// The target time AND the total are mirrored to localStorage, so a rest survives the app being
+// evicted in the background: on relaunch, resumeRestTimer reads them and shows the true
+// remaining time rather than a fresh (reset) count. The countdown itself is JS, so it can only
+// redraw when the app is alive — it cannot chime while the OS has the app killed; it catches up
+// the moment you return.
+const REST_KEY = 'ledger_rest_end', REST_TOTAL_KEY = 'ledger_rest_total';
+let restEnd = 0, restTotal = REST_DEFAULT, restInt = null, restDone = false;
 function fmtRest(sec){ const m = Math.floor(sec/60); return m + ':' + String(sec % 60).padStart(2,'0'); }
-function startRestTimer(){
-  restEnd = Date.now() + REST_SECONDS*1000;
+// The rest a set of just-logged exercises earns: the longest of their per-exercise rests, so a
+// session mixing a compound and an isolation rests for the compound.
+function restSecondsFor(exercises){
+  const cat = exerciseCatalog();
+  const byId = {}; cat.forEach(c=>{ if (c && c.id) byId[c.id] = c; });
+  let secs = 0;
+  (exercises||[]).forEach(x=>{
+    const rec = byId[x.id] || x;
+    const meta = LedgerCore.exerciseMeta(rec);
+    const s = +rec.restSec > 0 ? +rec.restSec
+            : meta.pattern === 'compound' ? REST_COMPOUND
+            : meta.pattern === 'isolation' ? REST_ISOLATION : REST_DEFAULT;
+    if (s > secs) secs = s;
+  });
+  return secs > 0 ? secs : REST_DEFAULT;
+}
+function startRestTimer(seconds){
+  restTotal = +seconds > 0 ? +seconds : REST_DEFAULT;
+  restEnd = Date.now() + restTotal*1000;
   restDone = false;
-  try{ localStorage.setItem(REST_KEY, String(restEnd)); }catch(e){}
+  try{ localStorage.setItem(REST_KEY, String(restEnd)); localStorage.setItem(REST_TOTAL_KEY, String(restTotal)); }catch(e){}
   const el = document.getElementById('restTimer');
   if (el){ el.hidden = false; el.className = 'rest-timer'; }
   if (!restInt) restInt = setInterval(tickRestTimer, 200);
@@ -108,7 +135,7 @@ function startRestTimer(){
 function stopRestTimer(){
   if (restInt){ clearInterval(restInt); restInt = null; }
   restEnd = 0; restDone = false;
-  try{ localStorage.removeItem(REST_KEY); }catch(e){}
+  try{ localStorage.removeItem(REST_KEY); localStorage.removeItem(REST_TOTAL_KEY); }catch(e){}
   const el = document.getElementById('restTimer');
   if (el){ el.hidden = true; el.className = 'rest-timer'; }
 }
@@ -116,10 +143,10 @@ function stopRestTimer(){
 // killed. A stored end in the future resumes the live countdown; a past one is stale and
 // simply cleared, so a long-finished rest never reappears.
 function resumeRestTimer(){
-  let end = 0;
-  try{ end = +localStorage.getItem(REST_KEY) || 0; }catch(e){}
+  let end = 0, total = 0;
+  try{ end = +localStorage.getItem(REST_KEY) || 0; total = +localStorage.getItem(REST_TOTAL_KEY) || 0; }catch(e){}
   if (end > Date.now()){
-    restEnd = end; restDone = false;
+    restEnd = end; restTotal = total > 0 ? total : REST_DEFAULT; restDone = false;
     const el = document.getElementById('restTimer');
     if (el){ el.hidden = false; el.className = 'rest-timer'; }
     if (!restInt) restInt = setInterval(tickRestTimer, 200);
@@ -146,9 +173,9 @@ function tickRestTimer(){
     return;
   }
   const remSec = Math.ceil(remMs/1000);
-  if (fill) fill.style.width = Math.max(0, Math.min(100, remMs/(REST_SECONDS*1000)*100)) + '%';
+  if (fill) fill.style.width = Math.max(0, Math.min(100, remMs/(restTotal*1000)*100)) + '%';
   if (time) time.textContent = fmtRest(remSec);
-  if (label) label.textContent = 'Rest';
+  if (label) label.textContent = 'Rest · ' + fmtRest(restTotal);
 }
 // A short two-note chime when the rest is up. Best-effort — silently a no-op where the
 // Web Audio API is unavailable or blocked.
@@ -259,7 +286,7 @@ document.getElementById('liftBtn').onclick = ()=>{
   // Start the rest the moment a set reads cleanly — this is when you've finished lifting,
   // even though the sets aren't committed until "Add to session". Commit restarts it, so
   // whichever button you press, the rest is running.
-  if (liftPending.exercises.length) startRestTimer();
+  if (liftPending.exercises.length) startRestTimer(restSecondsFor(liftPending.exercises));
   renderLiftPending();
 };
 document.getElementById('liftInput').addEventListener('keydown', e=>{
@@ -268,6 +295,35 @@ document.getElementById('liftInput').addEventListener('keydown', e=>{
 // Keep the "last time" preview tracking the line under the cursor as it is typed or moved.
 ['input','click','keyup'].forEach(ev=>
   document.getElementById('liftInput').addEventListener(ev, renderLiftPreview));
+// The non-blocking load-jump guardrail, shown inline at review time. Compares the proposed
+// top set against this lift's recent history and, if it is a big weekly jump, says so — it
+// informs, it never gates. Returns an HTML string ('' when there is nothing to flag).
+function liftJumpNotice(x){
+  const all = allWorkouts(), W = weightSeries();
+  const bwKg = LedgerCore.weightAt(W, VIEW_DATE);
+  const proposed = (x.sets||[]).reduce((m,s)=>{ const l = LedgerCore.setLoad(s, bwKg); return l!=null && l>m ? l : m; }, 0);
+  if (!(proposed > 0)) return '';
+  const history = Object.keys(all).filter(d=>d!==VIEW_DATE).map(d=>{
+    const e = (all[d].exercises||[]).filter(e=>e.id===x.id)[0];
+    return e ? { date: d, sets: e.sets, bodyweightKg: LedgerCore.weightAt(W, d) } : null;
+  }).filter(Boolean);
+  const meta = LedgerCore.exerciseMeta(exerciseCatalog().filter(c=>c.id===x.id)[0] || x);
+  const chk = LedgerCore.loadJumpCheck(proposed, history, {
+    asOf: VIEW_DATE, bodyweightKg: bwKg, equipment: meta.equipment, pattern: meta.pattern });
+  if (chk.severity === 'none') return '';
+  return `<div class="lift-jump ${chk.severity}">⚠ ${Math.round(proposed)} kg — ${escapeHtml(chk.message)}</div>`;
+}
+// Within-exercise rep drop-off at a fixed load — high drop-off usually means rest was too
+// short. Only shown for straight sets at one load; a mixed-load exercise says nothing here.
+const FATIGUE_LABEL = { ok:'', elevated:'elevated', high:'high' };
+function fatigueLine(ex){
+  const f = LedgerCore.fatigueIndex(ex.sets, { rir: ex.rir });
+  if (!f.applicable || f.flag === 'ok') return '';
+  const pct = Math.round(f.rawDropoff * 100);
+  const tone = f.flag === 'high' ? 'bad' : 'warn';
+  const why = f.flag === 'high' ? ' — typically 10–20%. Often means rest is too short.' : '';
+  return `<div class="lift-sub lift-fatigue ${tone}">Rep drop-off ${pct}% (${FATIGUE_LABEL[f.flag]})${why}</div>`;
+}
 function renderLiftPending(){
   const el = document.getElementById('liftPending'), aiBtn = document.getElementById('liftAiBtn');
   if (!el) return;
@@ -293,6 +349,7 @@ function renderLiftPending(){
         ${x.viaAI ? '<span class="lift-tag">read by AI — check it</span>' : ''}
       </div>
       <div class="lift-sets">${x.sets.map(SET_TXT).join('  ·  ')}</div>
+      ${liftJumpNotice(x)}
       <div class="lift-rir"><label for="plr${i}" title="How many more reps you had in you on your hardest set. Guess it — only the change over time is ever read, so a consistent personal bias cancels out.">Reps left in the tank on your hardest set</label>
         <input type="number" id="plr${i}" data-pr="${i}" min="0" max="10" step="1"
                value="${x.rir==null?'':x.rir}" placeholder="–"></div>
@@ -323,11 +380,12 @@ function liftCommit(){
     else w.exercises.push({id:x.id, name:x.name, sets:x.sets.slice(), rir: x.rir==null?null:x.rir});
   });
   const n = liftPending.exercises.length;
+  const restSecs = restSecondsFor(liftPending.exercises);
   if (added) saveCatalog(cat);
   saveWorkout(w);
   liftPending = null;
   document.getElementById('liftInput').value = '';
-  haptic(); startRestTimer(); render();
+  haptic(); startRestTimer(restSecs); render();
   toast(`Logged ${n} ${n === 1 ? 'exercise' : 'exercises'}` +
         (added ? ` · ${added} new in the catalogue` : ''));
 }
@@ -397,6 +455,7 @@ function renderLiftSession(all, W){
   el.innerHTML = w.exercises.map((ex,i)=>{
     if (i === liftEditIdx) return renderLiftExEditor(ex, i);
     const m = LedgerCore.sessionMetrics(ex.sets, {bodyweightKg: bwKg, rir: ex.rir});
+    const warmN = (ex.sets||[]).filter(s=>s.warmup).length;
     return `<div class="lift-ex">
       <div class="lift-ex-head">
         <span class="lift-ex-name">${escapeHtml(ex.name)}</span>
@@ -405,10 +464,14 @@ function renderLiftSession(all, W){
           <button type="button" class="lift-del" data-lx="${i}" aria-label="Remove ${escapeAttr(ex.name)} from this session" title="Remove">✕</button>
         </span>
       </div>
-      <div class="lift-sets">${(ex.sets||[]).map(SET_TXT).join('  ·  ')}</div>
+      <div class="lift-sets">${(ex.sets||[]).map((s,si)=>
+        `<button type="button" class="set-chip${s.warmup?' warm':''}" data-set="${i}.${si}" title="Tap to toggle warm-up">${SET_TXT(s)}${s.warmup?' <span class="wu">wu</span>':''}</button>`
+        ).join(' ')}</div>
       <div class="lift-sub">${m.sets} set${m.sets===1?'':'s'} · ${Math.round(m.volume).toLocaleString()} kg volume`
       + (m.bestE1RM ? ` · best e1RM ${m.bestE1RM.toFixed(1)} kg` : '')
-      + (m.incomplete ? ` · <span style="color:var(--brass)">log a weight to score this</span>` : '') + `</div>
+      + (warmN ? ` · ${warmN} warm-up${warmN===1?'':'s'} excluded` : '')
+      + (m.incomplete ? ` · <span style="color:var(--brass)">log a weight to score this</span>` : '') + `</div>`
+      + fatigueLine(ex) + `
       <div class="lift-rir"><label for="slr${i}" title="How many more reps you had in you on your hardest set. Guess it — only the change over time is ever read, so a consistent personal bias cancels out.">Reps left in the tank on your hardest set</label>
         <input type="number" id="slr${i}" data-lr="${i}" min="0" max="10" step="1"
                value="${ex.rir==null?'':ex.rir}" placeholder="–"></div>
@@ -430,6 +493,16 @@ function renderLiftSession(all, W){
       } });
     };
   });
+  // Tap a set to toggle it as a warm-up — excluded from volume, top set, e1RM and fatigue.
+  el.querySelectorAll('[data-set]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const [i,si] = btn.dataset.set.split('.').map(Number);
+      const cur = workoutFor(VIEW_DATE), s = cur.exercises[i] && cur.exercises[i].sets[si];
+      if (!s) return;
+      if (s.warmup) delete s.warmup; else s.warmup = true;
+      saveWorkout(cur); render();
+    };
+  });
   el.querySelectorAll('input[data-lr]').forEach(inp=>{
     inp.onchange = ()=>{
       const i = +inp.dataset.lr, cur = workoutFor(VIEW_DATE), v = inp.value.trim();
@@ -438,6 +511,20 @@ function renderLiftSession(all, W){
       saveWorkout(cur); render();
     };
   });
+  // Deload marker: a deliberate light day should not read as regression, so it can be excluded
+  // from every lift's trend fit while still being kept as the session you actually did.
+  const foot = document.createElement('label');
+  foot.className = 'lift-deload';
+  foot.innerHTML = `<input type="checkbox" id="liftDeload"${w.deload?' checked':''}> `
+    + `Deload day <span class="ink-dim">— logged, but excluded from progression trends</span>`;
+  el.appendChild(foot);
+  const dcb = document.getElementById('liftDeload');
+  if (dcb) dcb.onchange = ()=>{
+    const cur = workoutFor(VIEW_DATE);
+    if (dcb.checked) cur.deload = true; else delete cur.deload;
+    saveWorkout(cur); render();
+    toast(dcb.checked ? 'Marked as a deload — kept out of trends' : 'Deload flag cleared');
+  };
   bindLiftEditor(w);
 }
 // The inline editor a logged exercise turns into. Name and sets are free text so a rename
@@ -622,14 +709,47 @@ function renderLiftTrends(rows){
     </div>`;
   }).join('');
 }
+// Options for the catalogue's muscle/pattern tagging. A single primary muscle is enough to
+// pull a lift into the per-muscle volume view; compounds credit their assistors from the seed.
+const MUSCLE_OPTS = ['', 'chest','frontDelts','sideDelts','rearDelts','triceps','biceps','forearms',
+  'lats','upperBack','traps','lowerBack','quads','hamstrings','glutes','calves','abs'];
 function renderLiftCatalog(){
   const el = document.getElementById('liftCatalog'); if (!el) return;
   const cat = exerciseCatalog().slice().sort((a,b)=> a.name<b.name?-1:1);
-  el.innerHTML = `<table><thead><tr><th>Exercise</th><th>Also written as</th><th></th></tr></thead><tbody>`
-    + cat.map(c=>`<tr><td>${escapeHtml(c.name)}</td>`
-      + `<td class="ink-dim" style="font-size:11px">${escapeHtml((c.aliases||[]).join(', ')) || '—'}</td>`
-      + `<td><button type="button" class="lift-del" data-cd="${escapeAttr(c.id)}" aria-label="Remove ${escapeAttr(c.name)} from the catalogue" title="Remove">✕</button></td></tr>`).join('')
+  const muscleSel = (c, meta)=>{
+    const cur = meta.muscles ? Object.keys(meta.muscles).sort((a,b)=>meta.muscles[b]-meta.muscles[a])[0] : '';
+    const tagged = meta.tagged ? '' : ' untagged';
+    return `<select class="cat-tag${tagged}" data-mus="${escapeAttr(c.id)}">`
+      + MUSCLE_OPTS.map(m=>`<option value="${m}"${m===cur?' selected':''}>${m?escapeHtml(LedgerCore.MUSCLE_LABEL[m]||m):(meta.tagged?'(seed)':'— untagged —')}</option>`).join('')
+      + `</select>`;
+  };
+  const patSel = (c, meta)=>`<select class="cat-tag" data-pat="${escapeAttr(c.id)}">`
+      + ['','compound','isolation'].map(v=>`<option value="${v}"${v===(meta.pattern||'')?' selected':''}>${v||'—'}</option>`).join('') + `</select>`;
+  el.innerHTML = `<table><thead><tr><th>Exercise</th><th>Muscle</th><th>Type</th><th></th></tr></thead><tbody>`
+    + cat.map(c=>{
+      const meta = LedgerCore.exerciseMeta(c);
+      return `<tr><td>${escapeHtml(c.name)}`
+        + ((c.aliases||[]).length?`<br><span class="ink-dim" style="font-size:10px">${escapeHtml(c.aliases.join(', '))}</span>`:'')
+        + `</td><td>${muscleSel(c, meta)}</td><td>${patSel(c, meta)}</td>`
+        + `<td><button type="button" class="lift-del" data-cd="${escapeAttr(c.id)}" aria-label="Remove ${escapeAttr(c.name)} from the catalogue" title="Remove">✕</button></td></tr>`;
+    }).join('')
     + `</tbody></table>`;
+  // Tagging writes a primary-muscle override (weight 1.0) onto the catalogue record. The seed
+  // still supplies assistors for known compounds; an explicit tag wins where it is set.
+  const patch = (id, fn)=>{
+    const list = exerciseCatalog().slice();
+    const i = list.findIndex(c=>c.id===id); if (i<0) return;
+    list[i] = Object.assign({}, list[i]); fn(list[i]);
+    saveCatalog(list); render();
+  };
+  el.querySelectorAll('[data-mus]').forEach(sel=>{
+    sel.onchange = ()=> patch(sel.dataset.mus, c=>{
+      if (sel.value) c.muscles = [{group: sel.value, weight: 1}]; else delete c.muscles;
+    });
+  });
+  el.querySelectorAll('[data-pat]').forEach(sel=>{
+    sel.onchange = ()=> patch(sel.dataset.pat, c=>{ if (sel.value) c.pattern = sel.value; else delete c.pattern; });
+  });
   el.querySelectorAll('[data-cd]').forEach(s=>{
     s.onclick = ()=>{
       const before = exerciseCatalog();
