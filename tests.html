@@ -1250,6 +1250,104 @@ group('parseWorkout — the grammar');
         approx(C.sessionMetrics(lh.sets).volume, 610, 0.01), `got ${C.sessionMetrics(lh.sets).volume}`);
 })();
 
+// ---- exercise metadata + volume attribution ----
+group('exerciseMeta / weeklyVolumeByMuscle / muscleFrequency');
+(function(){
+  const cat = C.SEED_EXERCISES;
+  const lr = C.exerciseMeta({id:'lateral-raise'});
+  check('seed metadata resolves', lr.pattern==='isolation' && lr.equipment==='dumbbell' && lr.muscles.sideDelts===1);
+  check('catalogue record overrides seed',
+        C.exerciseMeta({id:'lateral-raise', pattern:'compound'}).pattern==='compound');
+  check('array-form muscles normalise',
+        JSON.stringify(C.normalizeMuscles([{group:'chest',weight:1},{group:'x',weight:0}]))==='{"chest":1}');
+  check('an unknown exercise is untagged, not crashed',
+        C.exerciseMeta({id:'zzz-unknown'}).tagged===false && C.exerciseMeta({id:'zzz'}).muscles===null);
+  const sessions = [{date:'2026-08-10', exercises:[
+    {id:'lateral-raise', sets:[{kg:10,reps:15},{kg:10,reps:12},{kg:10,reps:10}]},
+    {id:'bench-press', sets:[{kg:60,reps:8,warmup:true},{kg:80,reps:5},{kg:80,reps:5}]}]}];
+  const vol = C.weeklyVolumeByMuscle(sessions, cat);
+  check('side delts get 3 fractional sets', vol.sideDelts===3, JSON.stringify(vol));
+  check('warmup set excluded from chest volume', vol.chest===2, `chest=${vol.chest}`);
+  const untagged = C.weeklyVolumeByMuscle([{date:'2026-08-10', exercises:[{id:'mystery', sets:[{kg:5,reps:10}]}]}], cat);
+  check('untagged volume pooled, never dropped', untagged.__untagged===1, JSON.stringify(untagged));
+  const freq = C.muscleFrequency([
+    {date:'2026-08-01', exercises:[{id:'squat', sets:[{kg:100,reps:5}]}]},
+    {date:'2026-08-08', exercises:[{id:'squat', sets:[{kg:100,reps:5}]}]}], cat);
+  check('gaps expose weekly frequency', freq.quads.sessions===2 && freq.quads.gaps[0]===7, JSON.stringify(freq.quads.gaps));
+  const drift = C.volumeDrift({sideDelts:12}, {sideDelts:6});
+  check('volumeDrift reports the shortfall', drift[0].muscle==='sideDelts' && drift[0].delta===-6 && drift[0].pct===-50);
+})();
+
+// ---- fatigue index ----
+group('fatigueIndex — rep drop-off at fixed load');
+(function(){
+  const F = (sets,opts)=>C.fatigueIndex(sets,opts);
+  check('47% drop flags high', approx(F([{kg:65,reps:15},{kg:65,reps:10},{kg:65,reps:8}]).rawDropoff, 0.467, 0.005));
+  check('high flag set', F([{kg:65,reps:15},{kg:65,reps:10},{kg:65,reps:8}]).flag==='high');
+  check('8% drop is ok', F([{kg:90,reps:12},{kg:90,reps:11}]).flag==='ok');
+  check('mixed loads → not applicable', F([{kg:60,reps:8},{kg:70,reps:6}]).applicable===false);
+  check('single working set → not applicable', F([{kg:60,reps:8}]).applicable===false);
+  check('warmups excluded before comparison',
+        approx(F([{kg:40,reps:12,warmup:true},{kg:65,reps:15},{kg:65,reps:8}]).rawDropoff, 0.467, 0.005));
+  const est = F([{kg:100,reps:10},{kg:100,reps:6}], {rir:2});
+  // Reserve on the last set means the capacity drop (adjusted) is gentler than the raw rep drop.
+  check('session RIR charged to last set marks an estimate', est.estimate===true && est.adjustedDropoff < est.rawDropoff);
+})();
+
+// ---- load-jump guardrail ----
+group('loadJumpCheck — non-blocking progression guardrail');
+(function(){
+  const r = C.loadJumpCheck(180, [{date:'2026-08-05', topKg:160}], {asOf:'2026-08-12', equipment:'machine'});
+  check('160→180 in 7d on a machine warns', r.severity==='warn' && r.pctChange===12.5 && r.daysSince===7, JSON.stringify(r));
+  const ok = C.loadJumpCheck(165, [{date:'2026-08-05', topKg:160}], {asOf:'2026-08-12', equipment:'machine'});
+  check('a modest bump stays quiet', ok.severity==='none', JSON.stringify(ok));
+  const fw = C.loadJumpCheck(175, [{date:'2026-08-05', topKg:160}], {asOf:'2026-08-12', equipment:'barbell'});
+  const fwMachine = C.loadJumpCheck(175, [{date:'2026-08-05', topKg:160}], {asOf:'2026-08-12', equipment:'machine'});
+  check('free-weight compound trips where the same jump on a machine only notices',
+        fw.severity==='warn' && fwMachine.severity==='notice', JSON.stringify([fw.severity, fwMachine.severity]));
+  check('no history → none', C.loadJumpCheck(100, []).severity==='none');
+  check('reduces raw sets to a top load',
+        C.loadJumpCheck(180, [{date:'2026-08-05', sets:[{kg:150,reps:8},{kg:160,reps:5}]}], {asOf:'2026-08-12', equipment:'machine'}).priorTopSetKg===160);
+})();
+
+// ---- TDEE confidence + data trust ----
+group('intakeStats / tdeeConfidence / tdeeReadout / dataTrust');
+(function(){
+  check('clean week reads a low CV', C.intakeStats([3000,3100,2950,3050,3080,3000,3067]).cv < 10);
+  check('a 4904 next to a 1623 blows CV past 15%', C.intakeStats([4904,1623,3200,3100,3000]).cv > 15);
+  check('confidence gated by CV and counts',
+        C.tdeeConfidence({nIntakeDays:20,nWeighIns:12,cv:7})==='high' &&
+        C.tdeeConfidence({nIntakeDays:20,nWeighIns:12,cv:13})==='medium' &&
+        C.tdeeConfidence({nIntakeDays:20,nWeighIns:12,cv:20})==='low' &&
+        C.tdeeConfidence({nIntakeDays:10,nWeighIns:12,cv:5})==='low');
+  const rd = C.tdeeReadout({formula:2500, avgIntake:3067, ratePerWeek:0.2, sampleDays:28,
+                            intakes:[3067,3000,3100,3050,3080], nWeighIns:12});
+  check('readout surfaces the method disagreement', rd.disagreement.gapKcal != null && rd.interval[0] <= rd.interval[1], JSON.stringify(rd.interval));
+  const dt = C.dataTrust({intakeCV:7, nIntakeDays:20, nWeighIns:12, spanDays:60});
+  check('full clean data reads high trust', dt.tier==='high', JSON.stringify(dt.score));
+  check('thin data reads low trust', C.dataTrust({intakeCV:null, nIntakeDays:3, nWeighIns:1, spanDays:5}).tier==='low');
+})();
+
+// ---- warmup + deload in the trend engine ----
+group('sessionMetrics warmup exclusion + exerciseTrend deload skip');
+(function(){
+  const withWarm = C.sessionMetrics([{kg:40,reps:10,warmup:true},{kg:80,reps:5},{kg:80,reps:5}]);
+  const without  = C.sessionMetrics([{kg:80,reps:5},{kg:80,reps:5}]);
+  check('warmup adds no volume', withWarm.volume===without.volume && withWarm.sets===2, `${withWarm.volume} vs ${without.volume}`);
+  check('warmup does not become the top set', withWarm.topLoad===80);
+  // A deload week should not drag a rising lift into "regressing".
+  const base = [
+    {date:'2026-07-01', sets:[{kg:100,reps:5}]},
+    {date:'2026-07-08', sets:[{kg:102,reps:5}]},
+    {date:'2026-07-15', sets:[{kg:104,reps:5}]},
+    {date:'2026-07-22', sets:[{kg:106,reps:5}]},
+    {date:'2026-07-29', sets:[{kg:80,reps:5}], deload:true}];
+  const skipped = C.exerciseTrend(base, {name:'Squat'});
+  const counted = C.exerciseTrend(base, {name:'Squat', skipDeload:false});
+  check('deload is dropped from the slope', skipped.pctPerMonth > counted.pctPerMonth, `${skipped.pctPerMonth} vs ${counted.pctPerMonth}`);
+  check('but the deload still shows as the latest session', skipped.latest && Math.round(skipped.latest.topLoad)===80);
+})();
+
 // ---- summary ----
 const sum = document.getElementById('summary');
 sum.className = failed === 0 ? 'allpass' : 'anyfail';
