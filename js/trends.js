@@ -789,10 +789,31 @@ function renderMuscleVolume(){
   const vol = LedgerCore.weeklyVolumeByMuscle(sessions, cat, range);
   const freq = LedgerCore.muscleFrequency(sessions, cat, range);
   const targets = volumeTargets();
+  // Per-muscle progression, rolled up from the individual exercise trends over the 8-week
+  // trend window (not this week's volume): each muscle's read is the involvement-weighted,
+  // trust-weighted mean of the lifts that train it, which cancels the per-exercise confounders
+  // (session order, pre-exhaustion) that make a single lift's progress hard to read.
+  const prog = LedgerCore.muscleProgress(liftTrends(all, weightSeries()), cat);
   const untagged = vol.__untagged || 0;
   const groups = Object.keys(vol).filter(g=>g!=='__untagged').sort((a,b)=>vol[b]-vol[a]);
   if (!groups.length && !untagged){ wrap.innerHTML = '<div class="empty">No sets in the last 7 days.</div>'; return; }
   const maxV = Math.max(1, ...groups.map(g=>vol[g]), ...Object.keys(targets).map(k=>+targets[k]||0));
+  const progLine = g=>{
+    const p = prog[g];
+    if (!p) return `<div class="mv-prog"><span class="ink-dim">progression · needs a few more logged sessions</span></div>`;
+    const cls = p.verdict==='progressing'?'up':p.verdict==='regressing'?'down':'flat';
+    const arrow = p.verdict==='progressing'?'▲':p.verdict==='regressing'?'▼':'→';
+    const word = p.verdict==='stalled'?'holding':p.verdict;
+    const moe = p.se!=null ? ` <span class="ink-dim">±${p.se.toFixed(1)}</span>` : '';
+    const conf = `<span class="lift-conf ${CONF_CLS[p.confidence]||'low'}">${p.confidence}</span>`;
+    const drivers = p.contributors.slice(0,2).map(c=>{
+      const nm = c.name.length>16 ? c.name.slice(0,15)+'…' : c.name;
+      return escapeHtml(nm);
+    }).join(', ');
+    return `<div class="mv-prog ${cls}"><span class="arrow">${arrow}</span>`
+      + `<span>${pctTxt(p.pctPerMonth)}${moe} · ${word}</span>${conf}`
+      + `<span class="mv-drivers">${p.nExercises} lift${p.nExercises===1?'':'s'}: ${drivers}</span></div>`;
+  };
   const rows = groups.map(g=>{
     const sets = vol[g], tgt = +targets[g]||0;
     const f = freq[g] || {sessions:0, gaps:[]};
@@ -806,10 +827,12 @@ function renderMuscleVolume(){
       + (tpct!=null?`<div class="mv-target" style="left:${tpct}%" title="target ${tgt}"></div>`:'') + `</div>
       <div class="mv-val">${sets%1?sets.toFixed(1):sets}${tgt>0?` / ${tgt}`:''}</div>
       <div class="mv-freq ink-dim">${gapNote}</div>
+      ${progLine(g)}
     </div>`;
   }).join('');
   wrap.innerHTML = `<div class="mv-cap ink-dim">Working sets per muscle · last 7 days${Object.keys(targets).length?' · target marker shown':''}</div>`
     + rows
+    + `<div class="mv-foot ink-dim">The footnote under each muscle is its <b>progression</b> — every exercise that trains it, weighted by involvement and trust, rolled into one %/month over the last 8 weeks. It reads a muscle a single lift can't: an isolation looking flat while the compounds that hit it climb still nets out as progress. ±&nbsp;is the margin; the tier is how far the pooled trend clears it.</div>`
     + (untagged ? `<div class="mv-untagged">⚠ ${untagged%1?untagged.toFixed(1):untagged} set${untagged===1?'':'s'} on exercises with no muscle tag — they are pooled, not counted per muscle. Newly-logged lifts outside the seed list need tagging.</div>` : '');
 }
 

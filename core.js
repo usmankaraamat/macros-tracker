@@ -1471,6 +1471,105 @@
     });
     return out;
   }
+
+  // ---- Per-muscle progression -----------------------------------------------
+  // A single lift's trend says little about the muscle behind it: the order it fell in the
+  // session, whether its prime mover was already pre-exhausted, which day it landed on — all
+  // confound one exercise. But a muscle is trained by several exercises, and if it is genuinely
+  // growing they should trend up *together*, even when any one of them is noisy. So this rolls
+  // the exercise trends up per muscle, each weighted by how much it involves the muscle and how
+  // much it can be trusted, which averages those per-exercise confounders out.
+  //
+  // For muscle g, over every exercise e that has a real (non-thin) trend and involves g:
+  //   inv  — e's mechanical share of g (0.1–1, the same muscle map the volume math uses)
+  //   sets — e's working sets inside the trend window
+  //   vol  = sets × inv          (the muscle's share of stimulus from that lift)
+  //   rel  — trust drawn from e's own trend confidence (high 1 / medium .65 / low .35)
+  //   W    = vol × rel
+  // The muscle's progression is the W-weighted mean of the exercises' %/month:
+  //   P_g = Σ(W·pct) / ΣW
+  // and its error bar is the weight-propagated SE, √(Σ(W·SE)²)/ΣW, so a pool of wobbly lifts
+  // cannot read as a confident trend. Only exercises whose involvement clears `minInv` vote —
+  // a muscle should not be judged by a lift that barely grazes it. Multiple exercises are
+  // required to earn medium/high confidence: corroboration is the whole point.
+  //
+  // `trends` is the list liftTrends() already builds — [{ id, t }, …] where t is an
+  // exerciseTrend result. Returns a map g -> { pctPerMonth, se, separable, verdict, confidence,
+  // nExercises, sets, contributors:[{id,name,pct,inv,weight,confidence}] }; muscles with no
+  // non-thin exercise are simply absent.
+  function muscleProgress(trends, catalogue, opts) {
+    const o = opts || {};
+    const minInv = o.minInv > 0 ? o.minInv : 0.15;
+    const FLAT = o.flatPct > 0 ? o.flatPct : LIFT_FLAT_PCT;
+    const REL = { high: 1, medium: 0.65, low: 0.35 };
+    const byId = catalogIndex(catalogue);
+    const acc = {};
+    (trends || []).forEach(r => {
+      const t = r && r.t;
+      if (!t || t.pctPerMonth == null || t.verdict === 'thin') return;
+      const rel = REL[t.confidence];
+      if (!(rel > 0)) return;
+      const meta = exerciseMeta(byId[r.id] || { id: r.id });
+      if (!meta.muscles) return;
+      const sets = t.setsTotal > 0 ? t.setsTotal : t.n;      // working sets in the window
+      // A null SE (too few points for a residual) falls back to the move's own magnitude, so a
+      // thin fit can add signal to the weighted mean but can never sharpen the error bar.
+      const se = t.pctSE != null ? t.pctSE : Math.abs(t.pctPerMonth);
+      Object.keys(meta.muscles).forEach(g => {
+        const inv = meta.muscles[g];
+        if (!(inv >= minInv)) return;
+        const w = sets * inv * rel;
+        if (!(w > 0)) return;
+        const a = acc[g] || (acc[g] = { sw: 0, swp: 0, wSE2: 0, sets: 0, contributors: [] });
+        a.sw += w;
+        a.swp += w * t.pctPerMonth;
+        a.wSE2 += (w * se) * (w * se);
+        a.sets += sets * inv;
+        a.contributors.push({ id: r.id, name: t.name || r.id, pct: t.pctPerMonth,
+                              inv: inv, weight: w, confidence: t.confidence });
+      });
+    });
+
+    const out = {};
+    Object.keys(acc).forEach(g => {
+      const a = acc[g];
+      const pct = a.sw > 0 ? a.swp / a.sw : null;
+      // Two sources of uncertainty, combined in quadrature:
+      //  within  — each lift's own trend error, propagated through the weights.
+      //  between — do the lifts that train this muscle even agree? Two prime movers pulling
+      //            opposite ways (a falling isolation, a rising compound) should WIDEN the bar,
+      //            not cancel into false confidence. This is the weighted spread of the
+      //            contributors around the muscle mean, divided by their effective count (Kish),
+      //            so it vanishes for a single lift and for a pool that moves together.
+      const within = a.sw > 0 ? Math.sqrt(a.wSE2) / a.sw : null;
+      let dvar = 0, sw2 = 0;
+      a.contributors.forEach(c => { dvar += c.weight * (c.pct - pct) * (c.pct - pct); sw2 += c.weight * c.weight; });
+      dvar = a.sw > 0 ? dvar / a.sw : 0;
+      const neff = sw2 > 0 ? (a.sw * a.sw) / sw2 : 1;          // effective # of independent lifts
+      const between = neff > 0 ? Math.sqrt(dvar / neff) : 0;
+      const se = within != null ? Math.sqrt(within * within + between * between) : null;
+      const nEx = a.contributors.length;
+      const separable = se != null && pct != null && Math.abs(pct) > se + FLAT;
+      const directional = pct != null && Math.abs(pct) > FLAT;
+      const verdict = pct == null ? 'thin'
+        : pct > FLAT ? 'progressing' : pct < -FLAT ? 'regressing' : 'stalled';
+      // Corroboration gates confidence: one lift can never exceed low (it is exactly the
+      // confounded case this function exists to escape); ≥2 exercises reach medium, and high
+      // only when the pooled move also clears its own error bar. A directional call that sits
+      // inside the error bar is pinned to low however many lifts agree.
+      let confidence;
+      if (nEx < 2) confidence = 'low';
+      else if (directional && !separable) confidence = 'low';
+      else if (separable) confidence = 'high';
+      else confidence = 'medium';
+      a.contributors.sort((x, y) => y.weight - x.weight);
+      out[g] = { pctPerMonth: pct, se: se, separable: separable, verdict: verdict,
+                 confidence: confidence, nExercises: nEx, sets: a.sets,
+                 contributors: a.contributors };
+    });
+    return out;
+  }
+
   // Planned vs executed weekly volume per muscle. planned/executed are {muscle:sets} maps.
   function volumeDrift(planned, executed) {
     const groups = {};
@@ -1759,7 +1858,7 @@
     e1RM, setLoad, weightAt, classifyExercise, sessionMetrics, exerciseTrend, liftVsWeight,
     normalizeName, exerciseId, matchExercise, parseWorkoutLine, parseWorkout, SEED_EXERCISES,
     MUSCLE_GROUPS, MUSCLE_LABEL, EXERCISE_META, exerciseMeta, normalizeMuscles, cleanCategory, workingSetCount,
-    weeklyVolumeByMuscle, muscleFrequency, volumeDrift, fatigueIndex, loadJumpCheck,
+    weeklyVolumeByMuscle, muscleFrequency, muscleProgress, volumeDrift, fatigueIndex, loadJumpCheck,
     intakeStats, tdeeConfidence, tdeeReadout, dataTrust, deloadRatio,
     LIFT_REP_CAP, LIFT_MIN_SESSIONS, LIFT_FLAT_PCT, LIFT_RIR_DRIFT, LIFT_WINDOW_DAYS,
     LIFT_SE_HIGH, LIFT_SE_MED,
