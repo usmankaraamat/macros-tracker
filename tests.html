@@ -1305,6 +1305,38 @@ group('exerciseMeta / weeklyVolumeByMuscle / muscleFrequency');
   check('volumeDrift reports the shortfall', drift[0].muscle==='sideDelts' && drift[0].delta===-6 && drift[0].pct===-50);
 })();
 
+group('muscleProgress — roll exercise trends up onto the muscle behind them');
+(function(){
+  const T = (id, name, pct, se, verdict, confidence, sets) =>
+    ({ id, t:{ name, pctPerMonth:pct, pctSE:se, verdict, confidence, setsTotal:sets, n:5, cls:'strength' } });
+  // Two chest presses climbing, a triceps isolation falling, a lone side-delt lift.
+  const trends = [
+    T('bench-press',            'Bench',      5,   1.5, 'progressing', 'high',   12),
+    T('incline-dumbbell-press', 'Incline DB', 3,   2.0, 'progressing', 'medium',  8),
+    T('tricep-pushdown',        'Pushdown',  -4,   2.5, 'regressing',  'medium',  9),
+    T('lateral-raise',          'Lateral',    0.5, 1.0, 'stalled',     'medium', 10),
+    T('leg-curl',               'Leg curl',   null,null,'thin',        'none',    2)   // ignored
+  ];
+  const p = C.muscleProgress(trends, []);   // empty catalogue → seed muscles resolve by id
+  check('chest rolls up from two climbing presses', p.chest && p.chest.verdict==='progressing', JSON.stringify(p.chest));
+  check('chest weighted toward the higher-volume prime mover (bench, +5) over incline (+3)',
+        p.chest.pctPerMonth > 3 && p.chest.pctPerMonth < 5, `got ${p.chest && p.chest.pctPerMonth}`);
+  check('chest earns high confidence — two lifts, separable', p.chest.confidence==='high' && p.chest.separable===true);
+  // The nuance the whole feature is for: the isolation reads regression, but the presses that
+  // also load triceps are climbing, so the MUSCLE nets out flat rather than falling.
+  check('triceps nets to holding despite the pushdown falling',
+        p.triceps.verdict==='stalled' && p.triceps.pctPerMonth > -2 && p.triceps.pctPerMonth < 2, `got ${p.triceps && p.triceps.pctPerMonth}`);
+  check('triceps pulls from all three lifts that touch it', p.triceps.nExercises===3, `n=${p.triceps && p.triceps.nExercises}`);
+  // One exercise can never exceed low confidence — that is exactly the confounded read.
+  check('a single-lift muscle is capped at low confidence', p.sideDelts.nExercises===1 && p.sideDelts.confidence==='low');
+  // A thin exercise contributes nothing, so its solo muscle never appears.
+  check('a thin-only muscle is absent', p.hamstrings===undefined);
+  // A minor synergist below the involvement floor does not drag a muscle in.
+  const graze = C.muscleProgress([T('bench-press','Bench',5,1.5,'progressing','high',10)], [], {minInv:0.5});
+  check('below-minInv synergists are dropped', graze.chest && graze.triceps===undefined && graze.frontDelts===undefined);
+  check('empty input → empty map', Object.keys(C.muscleProgress([], [])).length===0);
+})();
+
 // ---- AI categorisation guard ----
 group('cleanCategory — constrains an AI reply to the muscle vocabulary');
 (function(){

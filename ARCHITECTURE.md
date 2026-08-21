@@ -203,7 +203,18 @@ Plus two data-driven panels:
   - **Volume per muscle** — weekly fractional working-sets per muscle group (from
     the exercise metadata), with training frequency, the gaps between sessions
     that hit each muscle, optional per-muscle targets, and a prompt for any
-    exercise still lacking a muscle tag (pooled, never silently dropped).
+    exercise still lacking a muscle tag (pooled, never silently dropped). Under
+    each muscle bar sits a **progression footnote** (`LedgerCore.muscleProgress`):
+    the individual exercise trends rolled up onto the muscle behind them. A single
+    lift's progress is confounded (session order, pre-exhaustion), so each muscle's
+    read is the **involvement-weighted, trust-weighted mean** of every lift that
+    trains it — weight = (working sets × muscle involvement) × trend-confidence —
+    over the 8-week trend window. Its error bar combines each lift's own trend
+    error *and* the disagreement between lifts (a falling isolation against a rising
+    compound widens the bar rather than cancelling into false confidence), and only
+    corroborated, separable moves earn medium/high confidence. This surfaces a
+    muscle that is genuinely under-performing even when no single lift makes it
+    obvious.
 
 ---
 
