@@ -182,14 +182,22 @@ equipment and loading class. Also:
     e1RM and fatigue untouched;
   - a **deload** marker on the session, which keeps a deliberate light week out of
     every lift's trend fit so it doesn't read as regression;
-  - **AI categorisation** — a one-tap pass in the Exercises catalogue that sends the
-    still-untagged lift names to the AI and gets back muscles + movement pattern,
-    validated against the app's fixed muscle vocabulary (`cleanCategory`) and shown
-    for confirmation before applying. Like every AI use here it only *resolves*
-    names to metadata; the volume math stays deterministic.
+  - **AI categorisation** — a pass in the Exercises catalogue that sends lift names
+    to the AI and gets back muscles + movement pattern, validated against the app's
+    fixed muscle vocabulary (`cleanCategory`) and shown for confirmation before
+    applying. Two entry points: one auto-surfaces to tag anything still *untagged*;
+    a second re-tags **every** exercise, the built-in seed lifts included, so their
+    assistor muscles (a bench press also works front delts + triceps) can be written
+    onto the record as an explicit, adjustable map and fed to the per-muscle trends —
+    the review shows the current map vs the proposed one. Like every AI use here it
+    only *resolves* names to metadata; the volume math stays deterministic.
 Trend identity is keyed by exercise **and** equipment, so the same movement under
-different equipment does not share one line. The Exercises catalogue also lets each
-lift's muscle/pattern be set or corrected by hand.
+different equipment does not share one line. The Exercises catalogue shows each
+lift's full muscle map (primary bold, assistors dimmed, labelled *seed* or *tagged*)
+and lets the muscle/pattern be set or corrected by hand — a manual primary change now
+keeps the existing assistors rather than flattening the lift to one muscle. Seed
+metadata lives in `EXERCISE_META`; an explicit map on the catalogue record overrides
+it (`exerciseMeta().explicit`).
 
 **Trends** — history and rolling averages, a compliance heatmap, the
 weight/TDEE/goal picture, an adaptive fat-change estimate, and a **recomp card**

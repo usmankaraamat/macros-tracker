@@ -1391,6 +1391,12 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .cat-tag { width: 100%; min-height: 34px; padding: 4px 6px; font-size: 11.5px; }
 .cat-tag.untagged { border-color: var(--brass); color: var(--brass); }
 #liftCatalog td { vertical-align: top; }
+/* The full muscle map under an exercise name — primary bold, assistors dimmed — so the seed
+   lifts' built-in secondary muscles are visible instead of hidden behind a single dropdown. */
+.cat-muscles { font-family: var(--data); font-size: 10px; color: var(--graphite); margin-top: 3px; line-height: 1.5; }
+.cat-src { font-size: 8.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--faint);
+           border: 1px solid var(--rule-lit); border-radius: 3px; padding: 0 3px; margin-left: 2px; }
+.cat-was { font-family: var(--data); font-size: 10px; color: var(--faint); }
 .cat-review { border: 1px solid var(--rule-lit); border-radius: var(--radius); padding: 11px; background: var(--chalk-wash); }
 .cat-review-head { font-family: var(--data); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--graphite); margin-bottom: 8px; }
 .cat-review-row { font-size: 12.5px; padding: 4px 0; border-bottom: 1px solid var(--rule); }

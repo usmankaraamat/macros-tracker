@@ -1385,13 +1385,19 @@
   function exerciseMeta(entry) {
     const e = entry || {};
     const seed = e.id ? EXERCISE_META[e.id] : null;
-    const muscles = normalizeMuscles(e.muscles) || (seed ? seed.muscles : null);
+    const own = normalizeMuscles(e.muscles);           // an explicit tag on the record
+    const muscles = own || (seed ? seed.muscles : null);
     return {
       muscles: muscles || null,
       pattern: e.pattern || (seed && seed.pattern) || null,
       equipment: e.equipment || (seed && seed.equipment) || null,
       loading: e.loading || (seed && seed.loading) || 'neither',
-      tagged: !!(muscles || seed)
+      tagged: !!(muscles || seed),
+      // `explicit` is true only when the muscle map lives on the record itself; false when it
+      // is coming from the seed table (or is missing). The catalogue uses this to tell a
+      // hand/AI-set tag from a built-in one, and to know a seed lift can still be enriched.
+      explicit: !!own,
+      fromSeed: !own && !!seed
     };
   }
   // Validate a categorisation (from the AI, or anywhere) against the app's own muscle
