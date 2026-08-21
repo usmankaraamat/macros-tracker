@@ -713,6 +713,20 @@ function renderLiftTrends(rows){
 // pull a lift into the per-muscle volume view; compounds credit their assistors from the seed.
 const MUSCLE_OPTS = ['', 'chest','frontDelts','sideDelts','rearDelts','triceps','biceps','forearms',
   'lats','upperBack','traps','lowerBack','quads','hamstrings','glutes','calves','abs'];
+// The full muscle map for a lift, primary first, assistors dimmed — so the seed lifts' built-in
+// secondary muscles (bench also works front delts and triceps) are visible, not hidden behind a
+// single primary dropdown. `src` labels where the map comes from: an explicit hand/AI tag, or the
+// built-in seed default.
+function muscleMapHTML(meta){
+  if (!meta.muscles) return '';
+  const ks = Object.keys(meta.muscles).sort((a,b)=>meta.muscles[b]-meta.muscles[a]);
+  const parts = ks.map((g,i)=>{
+    const nm = escapeHtml(LedgerCore.MUSCLE_LABEL[g]||g), w = meta.muscles[g];
+    return i===0 ? `<b>${nm}</b>` : `+${nm} <span class="ink-dim">${w}</span>`;
+  }).join(' · ');
+  const src = meta.explicit ? 'tagged' : (meta.fromSeed ? 'seed' : '');
+  return `<div class="cat-muscles">${parts}${src?` <span class="cat-src">${src}</span>`:''}</div>`;
+}
 function renderLiftCatalog(){
   const el = document.getElementById('liftCatalog'); if (!el) return;
   const cat = exerciseCatalog().slice().sort((a,b)=> a.name<b.name?-1:1);
@@ -730,6 +744,7 @@ function renderLiftCatalog(){
       const meta = LedgerCore.exerciseMeta(c);
       return `<tr><td>${escapeHtml(c.name)}`
         + ((c.aliases||[]).length?`<br><span class="ink-dim" style="font-size:10px">${escapeHtml(c.aliases.join(', '))}</span>`:'')
+        + muscleMapHTML(meta)
         + `</td><td>${muscleSel(c, meta)}</td><td>${patSel(c, meta)}</td>`
         + `<td><button type="button" class="lift-del" data-cd="${escapeAttr(c.id)}" aria-label="Remove ${escapeAttr(c.name)} from the catalogue" title="Remove">✕</button></td></tr>`;
     }).join('')
@@ -744,7 +759,13 @@ function renderLiftCatalog(){
   };
   el.querySelectorAll('[data-mus]').forEach(sel=>{
     sel.onchange = ()=> patch(sel.dataset.mus, c=>{
-      if (sel.value) c.muscles = [{group: sel.value, weight: 1}]; else delete c.muscles;
+      if (!sel.value){ delete c.muscles; return; }
+      // Promote the chosen group to primary (1.0) but KEEP the existing assistors — a seed
+      // compound's built-in secondary muscles must survive a primary tweak, not be flattened
+      // to one muscle. (A truly untagged lift has none, so this still writes just the primary.)
+      const cur = LedgerCore.exerciseMeta(c).muscles || {};
+      const rest = Object.keys(cur).filter(g=>g!==sel.value).map(g=>({group:g, weight:cur[g]}));
+      c.muscles = [{group: sel.value, weight: 1}].concat(rest);
     });
   });
   el.querySelectorAll('[data-pat]').forEach(sel=>{
@@ -763,32 +784,45 @@ function renderLiftCatalog(){
   updateCatAiBtn();
   if (typeof renderCatAiReview === 'function') renderCatAiReview();
 }
-// Which catalogue lifts still have no muscle tag — the ones the AI pass would categorise.
+// Which catalogue lifts still have no muscle tag at all — the auto pass targets these.
 function untaggedExercises(){ return exerciseCatalog().filter(c=>!LedgerCore.exerciseMeta(c).tagged); }
-// The "categorise with AI" button appears only when there is something to do and a key to do
-// it with. It stays available whenever a newly-logged lift is still untagged.
+// Two AI affordances. The first offers to tag anything still UNTAGGED, and surfaces on its own
+// the moment a newly-logged lift needs it. The second re-tags EVERY exercise — the seed lifts
+// included — so their assistor muscles get written onto the record as an explicit map the user
+// can see, review and feed to the per-muscle trends, instead of relying on the built-in default
+// (or, for a lift a user hand-tagged to a single primary, restoring the assistors that lost).
 function updateCatAiBtn(){
-  const btn = document.getElementById('catAiBtn'); if (!btn) return;
-  const n = untaggedExercises().length;
-  btn.hidden = !(n && hasAI());
-  btn.textContent = `✨ Categorise ${n} untagged exercise${n===1?'':'s'} with AI`;
-}
-// Hand the untagged exercise names to the AI, constrained to the app's own muscle vocabulary,
-// and stage the result for review. The AI only RESOLVES names to muscles/pattern — the volume
-// math downstream is the app's; every tag is shown for confirmation before it is applied, and
-// cleanCategory drops anything off the allowed group list.
-document.getElementById('catAiBtn').onclick = async ()=>{
-  const targets = untaggedExercises();
-  if (!targets.length) return;
+  const ai = hasAI();
+  const un = untaggedExercises().length, all = exerciseCatalog().length;
   const btn = document.getElementById('catAiBtn');
-  btn.disabled = true; btn.textContent = 'Categorising…';
+  if (btn){
+    btn.hidden = !(un && ai);
+    btn.textContent = `✨ Categorise ${un} untagged exercise${un===1?'':'s'} with AI`;
+  }
+  const allBtn = document.getElementById('catAiAllBtn');
+  if (allBtn){
+    // Hide the "all" button while the untagged one is doing the same job on an all-untagged
+    // catalogue; otherwise offer it whenever there is anything to enrich.
+    allBtn.hidden = !(all && ai) || (un === all);
+    allBtn.textContent = `✨ Re-tag all ${all} exercises with AI — adds assistor muscles`;
+  }
+}
+// Hand a set of exercises to the AI, constrained to the app's own muscle vocabulary, and stage
+// the result for review. The AI only RESOLVES names to muscles/pattern — the volume math
+// downstream is the app's; every tag is shown for confirmation before it applies, and
+// cleanCategory drops anything off the allowed group list. `targets` decides the scope, so the
+// same path serves the untagged-only pass and the re-tag-everything pass.
+async function runCatAi(targets, btn){
+  if (!targets || !targets.length) return;
+  const restore = btn ? btn.textContent : '';
+  if (btn){ btn.disabled = true; btn.textContent = 'Categorising…'; }
   try {
     const groups = LedgerCore.MUSCLE_GROUPS.join(', ');
     const prompt =
 `You tag gym exercises with the muscles they train, for a training tracker.
 For each exercise name, return the muscle groups it works and whether it is a compound (multi-joint) or an isolation (single-joint) movement.
 Use ONLY these muscle group keys, spelled exactly: ${groups}.
-Give each muscle a weight from 0.1 to 1.0 — the primary mover about 1.0, assistors lower. A compound usually lists 2–4 muscles; an isolation usually 1. Do not invent groups outside the list.
+Give each muscle a weight from 0.1 to 1.0 — the primary mover about 1.0, assistors lower. A compound usually lists 2–4 muscles (name the assistors, e.g. a bench press also works the front delts and triceps); an isolation usually 1. Do not invent groups outside the list.
 Return JSON only, no prose: {"exercises":[{"name":<exactly as given>,"pattern":"compound"|"isolation","muscles":[{"group":<key>,"weight":<0.1-1>}]}]}
 Exercises:
 """${targets.map(t=>t.name).join('\n')}"""`;
@@ -802,23 +836,39 @@ Exercises:
       const t = item && byNorm[LedgerCore.normalizeName(item.name||'')];
       if (!t) return;
       const clean = LedgerCore.cleanCategory(item);
-      if (clean) catAiProposed.push({ id: t.id, name: t.name, muscles: clean.muscles, pattern: clean.pattern });
+      if (!clean) return;
+      // Carry the current map so the review can show what actually changes (a re-tag of a seed
+      // lift the user may want to eyeball before it overrides the built-in default).
+      const prev = LedgerCore.exerciseMeta(t).muscles;
+      catAiProposed.push({ id: t.id, name: t.name, muscles: clean.muscles, pattern: clean.pattern, prev: prev });
     });
     if (!catAiProposed.length) throw new Error('the AI returned nothing usable');
     renderCatAiReview();
     liftStatus(`Read by ${escapeHtml(AI_VIA)} — check the tags, then apply.`);
   } catch(err){
     toast('AI categorise failed: ' + err.message, { tone:'warn' });
-  } finally { btn.disabled = false; updateCatAiBtn(); }
-};
+  } finally { if (btn){ btn.disabled = false; btn.textContent = restore; } updateCatAiBtn(); }
+}
+document.getElementById('catAiBtn').onclick = ()=> runCatAi(untaggedExercises(), document.getElementById('catAiBtn'));
+document.getElementById('catAiAllBtn').onclick = ()=> runCatAi(exerciseCatalog(), document.getElementById('catAiAllBtn'));
 // The staged AI categorisation, awaiting review. Applied only on the user's confirm.
 let catAiProposed = null;
 function renderCatAiReview(){
   const el = document.getElementById('catAiReview'); if (!el) return;
   if (!catAiProposed || !catAiProposed.length){ el.hidden = true; el.innerHTML = ''; return; }
   el.hidden = false;
-  const line = p => `${escapeHtml(p.name)} <span class="ink-dim">→ ${p.pattern} · `
-    + p.muscles.map(m=>`${escapeHtml(LedgerCore.MUSCLE_LABEL[m.group]||m.group)} ${m.weight}`).join(', ') + `</span>`;
+  const fmtArr = ms => ms.map(m=>`${escapeHtml(LedgerCore.MUSCLE_LABEL[m.group]||m.group)} ${m.weight}`).join(', ');
+  const fmtMap = mp => Object.keys(mp).sort((a,b)=>mp[b]-mp[a])
+    .map(g=>`${escapeHtml(LedgerCore.MUSCLE_LABEL[g]||g)} ${mp[g]}`).join(', ');
+  const line = p => {
+    const now = fmtArr(p.muscles);
+    // Show the prior map when a re-tag actually changes it, so an override of a seed/hand tag
+    // is a deliberate, visible choice rather than a silent replacement.
+    const wasStr = p.prev ? fmtMap(p.prev) : '';
+    const changed = wasStr && wasStr !== now;
+    return `${escapeHtml(p.name)} <span class="ink-dim">→ ${p.pattern} · ${now}</span>`
+      + (changed ? `<br><span class="cat-was">was: ${wasStr}</span>` : '');
+  };
   el.innerHTML = `<div class="cat-review">
     <div class="cat-review-head">AI proposed tags — review before applying</div>
     ${catAiProposed.map(p=>`<div class="cat-review-row">${line(p)}</div>`).join('')}

@@ -1289,6 +1289,15 @@ group('exerciseMeta / weeklyVolumeByMuscle / muscleFrequency');
         JSON.stringify(C.normalizeMuscles([{group:'chest',weight:1},{group:'x',weight:0}]))==='{"chest":1}');
   check('an unknown exercise is untagged, not crashed',
         C.exerciseMeta({id:'zzz-unknown'}).tagged===false && C.exerciseMeta({id:'zzz'}).muscles===null);
+  // A seed lift's map comes from the seed table (fromSeed), not the record — so it is eligible
+  // to be enriched by the AI pass even though it is already "tagged".
+  check('seed lift reads as fromSeed, not explicit',
+        lr.fromSeed===true && lr.explicit===false && lr.tagged===true);
+  const tagged = C.exerciseMeta({id:'lateral-raise', muscles:[{group:'sideDelts',weight:1},{group:'traps',weight:0.3}]});
+  check('a record with its own muscle map reads as explicit', tagged.explicit===true && tagged.fromSeed===false);
+  check('the explicit map wins over the seed', tagged.muscles.traps===0.3 && tagged.muscles.sideDelts===1);
+  check('a truly untagged lift is neither seed nor explicit',
+        C.exerciseMeta({id:'zzz'}).explicit===false && C.exerciseMeta({id:'zzz'}).fromSeed===false);
   const sessions = [{date:'2026-08-10', exercises:[
     {id:'lateral-raise', sets:[{kg:10,reps:15},{kg:10,reps:12},{kg:10,reps:10}]},
     {id:'bench-press', sets:[{kg:60,reps:8,warmup:true},{kg:80,reps:5},{kg:80,reps:5}]}]}];
