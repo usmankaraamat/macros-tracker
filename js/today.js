@@ -437,23 +437,64 @@ function repeatChipHTML(u, attr, i){
     : `${escapeHtml(u.name)} <small>${Math.round(u.items[0].grams)}g</small>`;
   return `<button type="button" class="chip${u.kind === 'dish' ? ' dish' : ''}" ${attr}="${i}">${label}</button>`;
 }
-// One tap logs it, whether it is a single food or a five-ingredient dish. Both chip
-// rows behaved differently before — one logged, one prefilled a form — which made an
-// identical-looking control mean two things. The toast carries the undo.
-function logRepeat(u){
+// Tapping a repeat re-weighs it rather than re-logging the old amount. A saved food is an
+// INGREDIENT, not a portion — the same roti is 120 g one day and 150 g the next — so the tap
+// opens a weigh sheet with each ingredient's last amount prefilled and selected: accept it with
+// Enter, or type the new weight. A dish asks for every ingredient, so a multi-item meal stays
+// accurate. Set an ingredient to 0 to drop it from this log.
+function weighSheet(u){
+  return openSheet((sheet, close)=>{
+    const many = u.items.length > 1;
+    sheetHead(sheet, u.name, many ? 'Enter the weight of each ingredient — 0 to skip one.' : 'Enter the weight you ate.');
+    const inputs = [];
+    u.items.forEach(e=>{
+      const row = document.createElement('label');
+      row.className = 'weigh-row';
+      const name = document.createElement('span');
+      name.className = 'weigh-name'; name.textContent = e.name;         // textContent escapes the name
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.min = '0'; inp.step = '1'; inp.inputMode = 'decimal';
+      inp.value = Math.round(e.grams);
+      const unit = document.createElement('span');
+      unit.className = 'weigh-unit'; unit.textContent = 'g';
+      row.appendChild(name); row.appendChild(inp); row.appendChild(unit);
+      sheet.appendChild(row);
+      inputs.push(inp);
+    });
+    const commit = ()=>{
+      const grams = inputs.map(inp => Math.max(0, +inp.value || 0));
+      close(grams.some(g => g > 0) ? grams : null);
+    };
+    // Enter advances to the next ingredient, and commits from the last.
+    inputs.forEach((inp, idx)=> inp.addEventListener('keydown', ev=>{
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      if (idx < inputs.length - 1) inputs[idx + 1].focus(); else commit();
+    }));
+    sheetActions(sheet, many ? `Log ${u.name}` : 'Log', 'Cancel', null, commit, ()=> close(null));
+    return inputs[0];
+  });
+}
+// Weigh-then-log a repeat or a usual. Shared by both so an identical-looking control means the
+// same thing everywhere. The toast carries the undo.
+async function logRepeat(u){
   if (!u) return;
+  const grams = await weighSheet(u);
+  if (!grams) return;                                  // cancelled, or every ingredient zeroed
   const before = ledger.slice();
   let added = 0;
-  u.items.forEach(e=>{
+  u.items.forEach((e, idx)=>{
+    const g = grams[idx];
+    if (!(g > 0)) return;                              // a zeroed ingredient is dropped from this log
     const base = e.base || DB[e.name];
     if (!base) return;
     if (!foodBase[e.name]) registerFood(e.name, base, e.source);
-    pushEntry(computeEntry(e.name, e.grams, e.weighed, base, e.source, e.partOf));
+    pushEntry(computeEntry(e.name, g, e.weighed, base, e.source, e.partOf));
     added++;
   });
   if (!added){ toast(`No nutrition data stored for ${u.name}.`, { tone:'warn' }); return; }
   haptic(); save(); render();
-  toast(u.kind === 'dish' ? `Logged ${u.name} · ${added} items` : `Logged ${u.name} · ${u.items[0].grams}g`,
+  toast(u.items.length > 1 ? `Logged ${u.name} · ${added} item${added===1?'':'s'}` : `Logged ${u.name}`,
     { undo: ()=>{ ledger = before; save(); render(); } });
 }
 
@@ -480,7 +521,7 @@ function emptyLedgerCell(){
       the meals you log most will show up here as one-tap repeats.</div></div>`;
   }
   return `<div class="empty-chips">
-    <div class="ec-hint">Nothing logged. Tap a usual to log it instantly.</div>
+    <div class="ec-hint">Nothing logged. Tap a usual to weigh it and log.</div>
     <div class="ec-row">${_emptyTop.map((u,i)=> repeatChipHTML(u, 'data-q', i)).join('')}</div></div>`;
 }
 function wireEmptyLedgerChips(){
@@ -559,22 +600,9 @@ function renderTemplates(){
     ch.onclick = ()=>{
       const t = templates()[+ch.dataset.tpl];
       if (!t) return;
-      const before = ledger.slice();
-      let added = 0;
-      t.items.forEach(e=>{
-        const base = e.base || DB[e.name];
-        if (!base) return;
-        if (e.base) registerFood(e.name, e.base, e.source);
-        pushEntry(computeEntry(e.name, e.grams, e.weighed, base, e.source, e.partOf));
-        added++;
-      });
-      if (!added){
-        toast(`“${t.name}” has no usable nutrition data.`, { tone: 'warn' });
-        return;
-      }
-      haptic(); save(); render();
-      toast(`Logged “${t.name}” · ${added} ${added === 1 ? 'item' : 'items'}`,
-        { undo: ()=>{ ledger = before; save(); render(); } });
+      // A usual is a saved bundle of ingredients — re-weighed on each log like any repeat, so
+      // the same meal at a different portion stays accurate.
+      logRepeat({ name: t.name, kind: 'dish', items: t.items });
     };
   });
 }
