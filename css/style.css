@@ -1621,6 +1621,11 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
 .sheet p b { color: var(--chalk); font-weight: 600; }
 .sheet .sheet-field { margin-bottom: 16px; }
 .sheet .footer-actions { margin-top: 4px; }
+/* weigh-on-tap rows: one ingredient per line, its last amount prefilled */
+.weigh-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.weigh-row .weigh-name { flex: 1; font-size: 13.5px; color: var(--chalk); text-transform: none; letter-spacing: 0; }
+.weigh-row input { width: 92px; flex: none; text-align: right; font-family: var(--data); }
+.weigh-row .weigh-unit { width: 14px; flex: none; color: var(--graphite); font-size: 12px; }
 
 /* Pick list: the manifest a sheet acts on. Rows are the ledger's own reading —
    name on the left, the numbers right-aligned in the data face — so ticking one
