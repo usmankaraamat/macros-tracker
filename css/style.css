@@ -924,6 +924,26 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 
 /* ============================ micronutrients ============================ */
 
+/* Averaging-window selector: Today / Week / 2 Wks / Month. A compact segmented row —
+   the chosen span sits filled, the rest read as quiet options. */
+.micro-window { display: flex; gap: 4px; margin-bottom: 14px; }
+.mw-btn {
+  flex: 1;
+  min-height: 34px;
+  padding: 6px 4px;
+  border: 1px solid var(--rule-lit);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--faint);
+  font-family: var(--data);
+  font-size: 11px;
+  letter-spacing: .02em;
+  cursor: pointer;
+}
+.mw-btn:hover { color: var(--chalk); }
+.mw-btn.on { color: var(--chalk); border-color: var(--graphite); background: var(--chalk-wash); }
+.mw-btn:focus-visible { outline: 2px solid var(--chalk); outline-offset: 2px; }
+
 .micro-row {
   display: grid;
   grid-template-columns: 84px 1fr auto;

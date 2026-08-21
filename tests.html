@@ -466,6 +466,33 @@ group('MICRO_REF — the micronutrient registry');
   check('every micro has a unit and both references', C.MICRO_REF.every(m=>m.unit && m.m>0 && m.f>0), 'a ref is malformed');
 })();
 
+group('microAverages — rolling per-nutrient averages over a trailing window');
+(function(){
+  // Five days of history ending 2026-08-20. Iron varies day to day; fiber is steady.
+  const days = [
+    { date:'2026-08-20', micros:{ fe:8,  fib:30 } },
+    { date:'2026-08-19', micros:{ fe:2,  fib:30 } },
+    { date:'2026-08-18', micros:{ fe:5,  fib:30 } },
+    { date:'2026-08-15', micros:{ fe:5,  fib:30, b12:500 } },   // 5 days before end
+    { date:'2026-07-25', micros:{ fe:99, fib:99 } }             // far outside any window
+  ];
+  const w7 = C.microAverages(days, '2026-08-20', 7, ['fe','fib','b12']);
+  check('7-day window keeps only the 4 recent days', w7.loggedDays===4, `got ${w7.loggedDays}`);
+  check('iron averages over ALL 4 logged days, not just non-zero', approx(w7.byKey.fe.avg, (8+2+5+5)/4), `got ${w7.byKey.fe.avg}`);
+  check('fiber steady at its daily value', approx(w7.byKey.fib.avg, 30), `got ${w7.byKey.fib.avg}`);
+  // A pill on 1 of 4 days averages its dose over all 4 — that is how "consistently short" shows.
+  check('B12 taken once divides over every logged day', approx(w7.byKey.b12.avg, 500/4), `got ${w7.byKey.b12.avg}`);
+  check('B12 coverage count is 1 of 4', w7.byKey.b12.n===1 && w7.byKey.b12.days===4, `n=${w7.byKey.b12.n} days=${w7.byKey.b12.days}`);
+  // A tighter window drops the day at the far edge.
+  const w3 = C.microAverages(days, '2026-08-20', 3, ['fe']);
+  check('3-day window keeps only 08-18..08-20', w3.loggedDays===3, `got ${w3.loggedDays}`);
+  check('iron avg over the 3 tightest days', approx(w3.byKey.fe.avg, (8+2+5)/3), `got ${w3.byKey.fe.avg}`);
+  // No days in range → zero average, not a divide-by-zero NaN.
+  const none = C.microAverages(days, '2020-01-01', 7, ['fe']);
+  check('empty window → 0 logged days', none.loggedDays===0, `got ${none.loggedDays}`);
+  check('empty window → avg 0, not NaN', none.byKey.fe.avg===0, `got ${none.byKey.fe.avg}`);
+})();
+
 // ---- proteinFix: close a protein gap within a kcal budget ----
 group('proteinFix — cheapest protein sources that fit');
 (function(){

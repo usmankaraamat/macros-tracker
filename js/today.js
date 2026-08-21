@@ -612,54 +612,126 @@ function renderTemplates(){
 // foods populate and is always shown once any food is logged; the rest are supplement-only
 // and appear only on days a logged supplement supplies them. 'limit' nutrients (sodium,
 // sugar) flag high; the rest flag low. General adult references, not medical advice.
+// Averaging windows for the panel. 'today' is the live per-day view; the rest are trailing
+// rolling averages so a nutrient that is consistently short reads apart from a single off day.
+// Weekly is the default — one bad day barely moves it, a real shortfall persists.
+const MICRO_WINDOWS = [
+  { id:'today', label:'Today', days:1  },
+  { id:'7',     label:'Week',  days:7  },
+  { id:'14',    label:'2 Wks', days:14 },
+  { id:'30',    label:'Month', days:30 }
+];
+const MICRO_WIN_KEY = 'micro_window';
+function microWindowId(){
+  try { const v = localStorage.getItem(MICRO_WIN_KEY); if (MICRO_WINDOWS.some(w=>w.id===v)) return v; } catch(e){}
+  return '7';                                   // default: weekly rolling average
+}
+function setMicroWindowId(v){ try { localStorage.setItem(MICRO_WIN_KEY, v); } catch(e){} }
+
+// Every closed day's food+supplement micronutrient totals, for the rolling averages. The open
+// (live) day is left out on purpose — its partial intake would drag the average down all day;
+// a day counts once it is closed. A past day being viewed is overlaid with its edited ledger.
+function microDaysSeries(){
+  const sl = suppLog(), sp = supps();
+  return closedDays().map(d=>{
+    const m = totalsOf(d.ledger);
+    const sm = LedgerCore.sumSuppMicros(sp, sl[d.date] || []);
+    for (const k in sm) m[k] = (m[k]||0) + sm[k];
+    return { date: d.date, micros: m };
+  });
+}
+
 function renderMicros(t){
   const wrap = document.getElementById('microLine');
-  // The day's supplement contribution: elemental micros of every protocol ticked today.
-  const suppM = LedgerCore.sumSuppMicros(supps(), suppLog()[VIEW_DATE] || []);
-  const valOf = mi => (t[mi.key]||0) + (suppM[mi.key]||0);
-  // Core micros always show; extras only when food or a supplement actually brings them in.
-  const ref = LedgerCore.MICRO_REF.filter(mi => mi.core || valOf(mi) > 0);
-  if (!ref.some(mi => valOf(mi) > 0)){ wrap.hidden = true; return; }
+  // Preserve the disclosure's open state across the rebuild — the user opening the panel to
+  // switch windows should not have it snap shut under their thumb on the next render.
+  const prior = wrap.querySelector('details');
+  const wasOpen = prior ? prior.open : false;
+
   const sex = PROFILE.sex==='female' ? 'f' : 'm';
-  const training = isTrainingDay(VIEW_DATE);   // emphasise recovery nutrients on training days
-  // Tone, not colour-by-nutrient: on target is plain chalk, only trouble is coloured.
-  const tone = { ok:'met', near:'warn', over:'over', low:'warn', verylow:'over', na:'' };
+  const winId = microWindowId();
+  const win = MICRO_WINDOWS.filter(w=>w.id===winId)[0] || MICRO_WINDOWS[1];
+  const avgMode = winId !== 'today';
+
+  // Today's own values (also the fallback data-presence check in per-day mode).
+  const suppToday = LedgerCore.sumSuppMicros(supps(), suppLog()[VIEW_DATE] || []);
+  const todayVal = mi => (t[mi.key]||0) + (suppToday[mi.key]||0);
+  const todayHas = LedgerCore.MICRO_REF.some(mi => todayVal(mi) > 0);
+
+  const series = avgMode ? microDaysSeries() : [];
+  const stats  = avgMode ? LedgerCore.microAverages(series, VIEW_DATE, win.days, LedgerCore.MICRO_KEYS) : null;
+  const histHas = avgMode && stats.loggedDays > 0;
+
+  // Hide entirely only when there is nothing to say: no micros today and, in an average
+  // window, no closed days at all to draw from.
+  if (avgMode ? !series.length : !todayHas){ wrap.hidden = true; return; }
+
+  const valOf = avgMode
+    ? (mi => stats.byKey[mi.key] ? stats.byKey[mi.key].avg : 0)
+    : todayVal;
+
+  const tone  = { ok:'met', near:'warn', over:'over', low:'warn', verylow:'over', na:'' };
   const badge = { over:'over', verylow:'very low', low:'low', near:'near limit', ok:'', na:'' };
-  let low=0, over=0, fromSupp=0;
-  const rows = ref.map(mi=>{
-    const val = valOf(mi), target = mi[sex];
-    const status = LedgerCore.microStatus(val, target, mi.limit);
-    if (status==='low'||status==='verylow') low++;
-    if (status==='over') over++;
-    const supped = (suppM[mi.key]||0) > 0;
-    if (supped) fromSupp++;
-    const w = Math.min(100, target>0 ? val/target*100 : 0);
-    const shown = val<10 ? val.toFixed(1) : Math.round(val);
-    const recTag = (training && mi.rec) ? ' ⚡' : '';
-    // Say when a row includes a supplement dose, so a number the foods can't explain isn't
-    // mistaken for a database error.
-    const suppTag = supped
-      ? ` <span class="micro-supp" title="Includes ${Math.round(suppM[mi.key])}${mi.unit} from supplements logged this day">＋supp</span>` : '';
-    const flag = badge[status] ? ` · ${badge[status]}` : '';
-    return `<div class="micro-row">
-      <span class="micro-name">${mi.name}${recTag}${suppTag}</span>
-      <span class="micro-bar"><span class="${tone[status]}" style="width:${w}%"></span></span>
-      <span class="micro-val ${tone[status] === 'over' ? 'over' : (tone[status] === 'warn' ? 'warn' : '')}">${shown}<small>/${target}${mi.unit}${flag}</small></span>
-    </div>`;
-  }).join('');
-  const summary = (low||over)
-    ? [low?`${low} low`:'', over?`${over} over`:''].filter(Boolean).join(' · ')
-    : 'all tracked micros on target';
-  const recNote = training
-    ? `<div class="tactical" style="margin-top:10px">⚡ ${escapeHtml(splitForDate(VIEW_DATE))} day — potassium, magnesium, sodium &amp; vitamin C support recovery; keep these topped up.</div>`
-    : '';
-  const src = fromSupp
-    ? 'Counted from USDA-matched foods plus the supplements you logged today (shown with ＋supp, in elemental amounts).'
-    : 'Counted from USDA-matched foods only';
+  const training = !avgMode && isTrainingDay(VIEW_DATE);
+
+  let low=0, over=0, fromSupp=0, body, summary;
+  if (avgMode && !histHas){
+    summary = `${win.label} avg · no closed days`;
+    body = `<div class="tactical">No completed days in the last ${win.days} to average yet — a day counts toward the average once it's closed. Switch to <b>Today</b> for today's intake.</div>`;
+  } else {
+    // Core micros always show; extras only when the active window actually surfaces one.
+    const ref = LedgerCore.MICRO_REF.filter(mi => mi.core || valOf(mi) > 0);
+    const rows = ref.map(mi=>{
+      const val = valOf(mi), target = mi[sex];
+      const status = LedgerCore.microStatus(val, target, mi.limit);
+      if (status==='low'||status==='verylow') low++;
+      if (status==='over') over++;
+      const w = Math.min(100, target>0 ? val/target*100 : 0);
+      const shown = val<10 ? val.toFixed(1) : Math.round(val);
+      let tag = '';
+      if (!avgMode){
+        const supped = (suppToday[mi.key]||0) > 0;
+        if (supped){ fromSupp++; tag = ` <span class="micro-supp" title="Includes ${Math.round(suppToday[mi.key])}${mi.unit} from supplements logged this day">＋supp</span>`; }
+        if (training && mi.rec) tag = ' ⚡' + tag;
+      } else {
+        // A bare count for nutrients only some days supplied (mostly supplement-only extras),
+        // so "on 2 of 7 days" reads apart from one present daily — the average still divides
+        // by every logged day, which is what makes a rarely-taken pill read as a low average.
+        const n = stats.byKey[mi.key] ? stats.byKey[mi.key].n : 0;
+        if (n>0 && n < stats.loggedDays) tag = ` <span class="micro-supp" title="Supplied on ${n} of ${stats.loggedDays} logged days">${n}/${stats.loggedDays}d</span>`;
+      }
+      const flag = badge[status] ? ` · ${badge[status]}` : '';
+      const cls = tone[status] === 'over' ? 'over' : (tone[status] === 'warn' ? 'warn' : '');
+      return `<div class="micro-row">
+        <span class="micro-name">${mi.name}${tag}</span>
+        <span class="micro-bar"><span class="${tone[status]}" style="width:${w}%"></span></span>
+        <span class="micro-val ${cls}">${shown}<small>/${target}${mi.unit}${flag}</small></span>
+      </div>`;
+    }).join('');
+    const trouble = (low||over)
+      ? [low?`${low} low`:'', over?`${over} over`:''].filter(Boolean).join(' · ')
+      : 'all on target';
+    summary = avgMode ? `${win.label} avg · ${trouble}` : trouble;
+
+    const recNote = training
+      ? `<div class="tactical" style="margin-top:10px">⚡ ${escapeHtml(splitForDate(VIEW_DATE))} day — potassium, magnesium, sodium &amp; vitamin C support recovery; keep these topped up.</div>`
+      : '';
+    const caption = avgMode
+      ? `${win.label} rolling average over ${stats.loggedDays} logged day${stats.loggedDays===1?'':'s'} of the last ${win.days}. A bar under target here means the nutrient is <i>consistently</i> short, not a one-off; counted from USDA-matched foods plus any supplements logged each day. AI estimates and older entries add nothing, so a low reading can mean under-<i>tracked</i> rather than under-eaten.`
+      : `${fromSupp ? 'Counted from USDA-matched foods plus the supplements you logged today (shown with ＋supp, in elemental amounts).' : 'Counted from USDA-matched foods only'} — AI estimates and older entries add nothing, so a low reading can mean under-<i>tracked</i> rather than under-eaten.`;
+    body = `${rows}${recNote}
+      <div class="tactical" style="margin-top:12px">${caption} Sodium and both sugars are limits. <b>Free sugar</b> is the added/juice/syrup share worth cutting — the natural sugar in whole fruit, vegetables and milk isn't counted; <b>total sugar</b> is everything. General references, not medical advice.</div>`;
+  }
+
+  const control = `<div class="micro-window" role="group" aria-label="Averaging window">` +
+    MICRO_WINDOWS.map(w=>`<button type="button" class="mw-btn${w.id===winId?' on':''}" data-mwin="${w.id}" aria-pressed="${w.id===winId}">${w.label}</button>`).join('') +
+    `</div>`;
+
   wrap.hidden = false;
-  wrap.innerHTML = `<details><summary class="panel-title">Micronutrients · ${summary}</summary>
-    <div style="margin-top:12px">${rows}${recNote}
-      <div class="tactical" style="margin-top:12px">${src} — AI estimates and older entries add nothing, so a low reading can mean under-<i>tracked</i> rather than under-eaten. Sodium and both sugars are limits. <b>Free sugar</b> is the added/juice/syrup share worth cutting — the natural sugar in whole fruit, vegetables and milk isn't counted; <b>total sugar</b> is everything. General references, not medical advice.</div>
-    </div></details>`;
+  wrap.innerHTML = `<details${wasOpen?' open':''}><summary class="panel-title">Micronutrients · ${summary}</summary>
+    <div style="margin-top:12px">${control}${body}</div></details>`;
+  wrap.querySelectorAll('[data-mwin]').forEach(b=>{
+    b.onclick = ()=>{ setMicroWindowId(b.getAttribute('data-mwin')); renderMicros(totals()); };
+  });
 }
 

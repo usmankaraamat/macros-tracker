@@ -147,6 +147,12 @@ not a single target) rendered as a gauge; only out-of-tolerance states carry
 colour. A pace marker steers intake across the day against a meal plan. Macro
 rows (protein as a floor, optional carb/fat caps), micronutrients, the entry
 ledger, and one-tap "repeat" chips mined from past *meals* (not ingredients).
+The micronutrient panel has an averaging-window selector — Today / Week /
+2 Wks / Month (weekly is the default) — so a nutrient that is *consistently*
+short reads apart from a single off day. `LedgerCore.microAverages` divides each
+nutrient's window total by the number of **logged** days (a day never logged is
+not a zero-intake day), which is deliberately how a rarely-taken supplement
+surfaces as a low average.
 
 **Logs** — the day's manual, non-food inputs: weigh-in, body measurements (which
 feed the Navy body-fat estimate), and the supplement dose strip. Writes to
