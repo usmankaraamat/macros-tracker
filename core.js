@@ -538,6 +538,37 @@
     return out;
   }
 
+  // Rolling per-micronutrient averages over a trailing window. `days` is a list of
+  // { date:'YYYY-MM-DD', micros:{key:val,…} } — each day's food+supplement totals — endDate the
+  // last day to include (inclusive), windowDays the span. A day the user never logged is not a
+  // zero-intake day, so only days that appear in `days` count: the average divides each
+  // nutrient's total by the number of LOGGED days in the window, not the calendar span. That is
+  // deliberately how a rarely-taken supplement reads as a low average (a B12 pill on 2 of 7 days
+  // averages its dose over 7), which is the whole point — telling a nutrient that is consistently
+  // short from one that was a single good/bad day. `n` reports how many days actually supplied
+  // the nutrient, for a "on X of Y days" note. Returns
+  // { window, loggedDays, byKey:{ key:{avg, sum, n, days} } }.
+  function microAverages(days, endDate, windowDays, keys) {
+    const endN = isoDay(endDate);
+    const startN = endN - (Math.max(1, windowDays) - 1);
+    const inWin = (days || []).filter(d => {
+      if (!d || !d.date) return false;
+      const n = isoDay(d.date);
+      return n >= startN && n <= endN;
+    });
+    const denom = inWin.length;
+    const byKey = {};
+    (keys || []).forEach(k => {
+      let sum = 0, n = 0;
+      inWin.forEach(d => {
+        const v = d.micros ? +d.micros[k] : 0;
+        if (v > 0) { sum += v; n++; }
+      });
+      byKey[k] = { avg: denom ? sum / denom : 0, sum: sum, n: n, days: denom };
+    });
+    return { window: windowDays, loggedDays: denom, byKey: byKey };
+  }
+
   // ---- Elemental mineral content --------------------------------------------
   // A mineral supplement's label weight is the whole salt, but only the mineral ION counts
   // toward intake: 1200 mg of calcium citrate is ~250 mg of elemental calcium, and it is the
@@ -1722,7 +1753,7 @@
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
     navyBodyFat, bodyComposition, measureTrend,
     freeSugarFraction, SUGAR_INTRINSIC, SUGAR_FREE,
-    MICRO_REF, MICRO_KEYS, microRef, sumSuppMicros, ELEMENTAL_FRACTION, elementalMg,
+    MICRO_REF, MICRO_KEYS, microRef, sumSuppMicros, microAverages, ELEMENTAL_FRACTION, elementalMg,
     supplementDue, supplementNextDue, supplementWindow, supplementStats, isoWeekdayMon,
     repairJson, median, linearTrend,
     e1RM, setLoad, weightAt, classifyExercise, sessionMetrics, exerciseTrend, liftVsWeight,
