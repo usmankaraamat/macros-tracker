@@ -281,19 +281,16 @@ document.addEventListener('click', ev=>{
   if (!document.getElementById('composer').contains(ev.target)) closeComposerMenu();
 });
 
-// Ghost needle: while the manual grams field holds a value, show where the
-// instrument will land once this item is added — errors caught before they happen.
-function clearProjection(){ const p=document.getElementById('projCursor'); if (p) p.hidden = true; }
+// Ghost arc: while the manual grams field holds a value, show where the gauge
+// will land once this item is added — errors caught before they happen.
+function clearProjection(){ if (typeof setGaugeProjection === 'function') setGaugeProjection(null); }
 function updateProjection(){
-  const proj = document.getElementById('projCursor');
-  if (!proj) return;
   const name = document.getElementById('food').value;
   const grams = parseFloat(document.getElementById('grams').value);
   const base = getBase(name);
-  if (!name || !base || !grams || grams<=0){ proj.hidden = true; return; }
+  if (!name || !base || !grams || grams<=0){ clearProjection(); return; }
   const add = computeEntry(name, grams, document.getElementById('weighed').checked, base, foodSource[name]||'DB');
-  proj.style.left = scalePct(totals().kcal + add.kcal) + '%';
-  proj.hidden = false;
+  if (typeof setGaugeProjection === 'function') setGaugeProjection(totals().kcal + add.kcal);
 }
 document.getElementById('grams').addEventListener('input', updateProjection);
 document.getElementById('food').addEventListener('change', updateProjection);

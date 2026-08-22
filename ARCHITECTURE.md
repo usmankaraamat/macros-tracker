@@ -1,7 +1,11 @@
-# Ledger — Macro Tracker: Architecture Overview
+# Eatify — Macro Tracker: Architecture Overview
+
+> Formerly "Ledger". The product name is **Eatify**; the internal code global is
+> still `window.LedgerCore` and all `localStorage` keys remain `ledger_*` (renaming
+> them would strand existing user data), so those identifiers persist by design.
 
 A single-user **Progressive Web App** for tracking food, bodyweight, strength
-training, body measurements, and supplements against a hard calorie "corridor".
+training, body measurements, and supplements against a calorie "corridor".
 It is deliberately **deterministic**: the nutrition and training math is plain,
 testable arithmetic, and any AI/network use is confined to *resolving* data
 (looking a food up, reading messy text), never to computing the numbers the app
@@ -142,11 +146,15 @@ Everything else in the app is UI and storage glue around these functions.
 
 ## 6. The five tabs
 
-**Today** — the primary instrument. A calorie "corridor" (a floor and a ceiling,
-not a single target) rendered as a gauge; only out-of-tolerance states carry
-colour. A pace marker steers intake across the day against a meal plan. Macro
-rows (protein as a floor, optional carb/fat caps), micronutrients, the entry
-ledger, and one-tap "repeat" chips mined from past *meals* (not ingredients).
+**Today** — the primary screen. A calorie "corridor" (a floor and a ceiling, not
+a single target) is rendered as a **radial speedometer**: a soft "good zone" band
+spans floor→ceiling, a progress arc fills to the current intake (green inside the
+corridor, amber below the floor, red over the ceiling), and the centre shows the
+percentage of the ceiling with the raw kcal beneath it. A pace tick on the arc
+marks where you should be by now. Macro rows (protein as a floor, optional carb/fat
+caps) read as percentage + grams over smooth, per-macro-tinted bars;
+micronutrients, the entry ledger, and one-tap "repeat" chips mined from past
+*meals* (not ingredients) sit below.
 The micronutrient panel has an averaging-window selector — Today / Week /
 2 Wks / Month (weekly is the default) — so a nutrient that is *consistently*
 short reads apart from a single off day. `LedgerCore.microAverages` divides each

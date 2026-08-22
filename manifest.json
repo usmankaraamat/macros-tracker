@@ -1,12 +1,12 @@
 {
-  "name": "Ledger — Macro Tracker",
-  "short_name": "Ledger",
-  "description": "Deterministic macro, lift and supplement ledger with a hard caloric corridor",
+  "name": "Eatify — Macro Tracker",
+  "short_name": "Eatify",
+  "description": "Deterministic macro, lift and supplement tracker with a caloric corridor",
   "start_url": "/macros-tracker/",
   "scope": "/macros-tracker/",
   "display": "standalone",
-  "background_color": "#121614",
-  "theme_color": "#121614",
+  "background_color": "#0e1211",
+  "theme_color": "#0e1211",
   "orientation": "portrait",
   "icons": [
     {
