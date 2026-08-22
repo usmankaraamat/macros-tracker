@@ -1,48 +1,57 @@
 /* ============================================================================
-   LEDGER — design system
+   EATIFY — design system
    ----------------------------------------------------------------------------
-   The app is an instrument, not a dashboard. Two rules govern everything here:
-
-   1. COLOUR IS RESERVED. Being inside the corridor renders in plain chalk with
-      no hue at all. Brass and hot only ever appear when a number is out of
-      tolerance; verdigris only to confirm something landed. Nothing decorative
-      is ever coloured, so colour always carries meaning.
-   2. MOTION IS RESERVED. The corridor instrument is the only thing that moves.
-      Everything else settles instantly.
+   Modern, calm, dark. Rounded cards on a near-black ground, a single green
+   accent for "on track", and soft per-macro hues. Colour still carries meaning
+   (green good · amber under · red over), but the surface is friendly, not a
+   cockpit. Numbers are set in Inter with tabular figures so they read cleanly;
+   a mono face is kept only for dense data tables.
    ========================================================================== */
 
 :root {
-  /* ---- surface: cold graphite with a green cast, like instrument casing ---- */
-  --bench:     #121614;   /* the page itself */
-  --slab:      #1a201d;   /* raised sections */
-  --slab-lit:  #1e2522;   /* top of a raised gradient */
-  --well:      #0c100e;   /* recessed: scale track, inputs, bar grooves */
-  --rule:      #2a322e;   /* hairlines */
-  --rule-lit:  #3a443f;   /* hairline catching light on a raised edge */
+  /* ---- surface: near-black with a faint green cast, lifted cards ---- */
+  --bench:     #0e1211;   /* the page itself */
+  --slab:      #171d1b;   /* card surface */
+  --slab-lit:  #1c2321;   /* nested / raised */
+  --well:      #0a0e0d;   /* recessed: tracks, inputs, grooves */
+  --rule:      #232b28;   /* hairlines / card borders */
+  --rule-lit:  #33403b;   /* lit hairline */
 
   /* ---- ink ---- */
-  --chalk:     #e8ede9;   /* primary — also "in tolerance" */
-  --graphite:  #8a9691;   /* secondary */
-  --faint:     #5a6560;   /* labels, captions, disabled */
+  --chalk:     #eef2f0;   /* primary text */
+  --graphite:  #9aa6a1;   /* secondary text */
+  --faint:     #616f69;   /* labels, captions, disabled */
 
-  /* ---- signal: out-of-tolerance only. Never used decoratively. ---- */
-  --brass:     #d9a441;   /* below floor · behind pace · protein short */
-  --hot:       #e0533c;   /* ceiling breached · cap exceeded · regressing */
-  --verdigris: #6fc28a;   /* confirmed good, used sparingly */
+  /* ---- accent + signal ---- */
+  --accent:      #54cf86;   /* brand / on-track / good */
+  --accent-hi:   #7ee0a4;   /* brighter accent for arc caps, highlights */
+  --brass:       #e3b552;   /* below floor · behind pace · protein short */
+  --hot:         #ef6a55;   /* ceiling breached · cap exceeded · regressing */
+  --verdigris:   #54cf86;   /* confirmed good (kept as an alias of accent) */
 
-  --brass-wash:     rgba(217, 164, 65, 0.11);
-  --hot-wash:       rgba(224, 83, 60, 0.11);
-  --verdigris-wash: rgba(111, 194, 138, 0.11);
-  --chalk-wash:     rgba(232, 237, 233, 0.06);
+  /* ---- per-macro hues (validated categorical trio, dark surface) ---- */
+  --m-carbs:   #4f9ae0;   /* blue */
+  --m-protein: #cf6a97;   /* rose */
+  --m-fat:     #c08f34;   /* amber */
 
-  /* ---- type: one superfamily split by width, one mono for all data ---- */
-  --display: 'Archivo', system-ui, -apple-system, sans-serif;
-  --body:    'Archivo', system-ui, -apple-system, sans-serif;
-  --data:    'Spline Sans Mono', ui-monospace, 'SF Mono', monospace;
+  --accent-wash:    rgba(84, 207, 134, 0.13);
+  --brass-wash:     rgba(227, 181, 82, 0.12);
+  --hot-wash:       rgba(239, 106, 85, 0.12);
+  --verdigris-wash: rgba(84, 207, 134, 0.13);
+  --chalk-wash:     rgba(238, 242, 240, 0.06);
+
+  /* ---- type: Inter for everything, a mono only for data tables ---- */
+  --display: 'Inter', system-ui, -apple-system, sans-serif;
+  --body:    'Inter', system-ui, -apple-system, sans-serif;
+  --data:    'Inter', system-ui, -apple-system, sans-serif;
+  --mono:    'Spline Sans Mono', ui-monospace, 'SF Mono', monospace;
 
   --gutter: 18px;
-  --radius: 5px;          /* machined, not pill */
+  --radius: 12px;         /* rounded, friendly */
+  --radius-lg: 20px;      /* cards */
+  --radius-pill: 999px;
   --tap: 44px;            /* minimum comfortable touch target */
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.55);
 }
 
 /* ============================ reset & base ============================== */
@@ -89,27 +98,34 @@ a { color: var(--chalk); text-underline-offset: 3px; }
 
 /* ================================ type ================================== */
 
-/* Section labels are set in the data face so they read as belonging to the
-   numbers they head — a ledger column header, not a UI caption. */
-.label, .panel-title, .sub, .trend-cap, .pfix-head,
+/* Small captions — quiet, uppercase, wide-tracked. */
+.label, .sub, .trend-cap, .pfix-head,
 .stat .k, .avg-label, .rbw-label, .heatmap-days span, .sidebar-title {
-  font-family: var(--data);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.14em;
+  font-family: var(--body);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--faint);
 }
 
-.panel-title { margin-bottom: 12px; display: block; }
-
-h1 {
+/* Card titles read as headings now, not column headers. */
+.panel-title {
+  display: block;
+  margin-bottom: 14px;
   font-family: var(--display);
   font-size: 13px;
   font-weight: 700;
-  font-stretch: 125%;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  color: var(--chalk);
+}
+
+h1 {
+  font-family: var(--display);
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--chalk);
 }
 
 .data, td, .rmeta, .supp-sub, .lift-sets, .lift-sub, .sr-sub,
@@ -182,14 +198,17 @@ header h1 { flex: none; margin-right: auto; }
 
 /* ========================= sections (the sheet) ========================== */
 
-/* Not cards. A ruled sheet: sections are separated by hairlines and space,
-   with no box, no glass, no drop shadow. */
+/* Cards. Each section is a rounded, softly-bordered surface on the near-black
+   ground — the modern shape, not a ruled sheet. */
 .panel {
-  border-top: 1px solid var(--rule);
-  padding-top: 18px;
-  margin-bottom: 26px;
+  background: var(--slab);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow);
 }
-.panel:first-child { border-top: none; padding-top: 0; }
+.panel:first-child { margin-top: 0; }
 
 details.panel > summary {
   list-style: none;
@@ -243,192 +262,93 @@ details:not(.panel)[open] > summary::before { transform: rotate(45deg); }
   filter: grayscale(1);
 }
 
-/* ====================== THE INSTRUMENT (signature) ====================== */
+/* ========================= THE GAUGE (signature) ======================== */
 
-/* The one raised element in the app: an equipment fascia with a machined
-   edge, holding a recessed calibrated scale. */
-.instrument {
+/* A radial speedometer holding the day's calories against the corridor: a quiet
+   track, a soft "good zone" band from floor to ceiling, and a bright progress
+   arc with a rounded cap. The big number in the middle is the percentage of your
+   ceiling — a figure that registers at a glance, where "1,250 / 1,850" did not. */
+.gauge-card {
   background: linear-gradient(180deg, var(--slab-lit), var(--slab));
-  border: 1px solid var(--rule-lit);
-  border-radius: var(--radius);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045),
-              0 1px 0 rgba(0, 0, 0, 0.5);
-  padding: 16px 16px 14px;
-  margin-bottom: 26px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 20px 18px 16px;
+  margin-bottom: 14px;
   position: sticky;
   top: calc(6px + env(safe-area-inset-top));
   z-index: 20;
 }
+.gauge { position: relative; width: min(280px, 76vw); margin: 2px auto 6px; aspect-ratio: 1; }
+.gauge-svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.gauge-svg circle { fill: none; }
+.g-track { stroke: var(--well); }
+.g-zone  { stroke: var(--accent-wash); }
+.g-prog  { transition: stroke-dasharray .6s cubic-bezier(.22,1,.36,1), stroke .3s ease; }
+.g-prog.is-under  { stroke: var(--brass); }
+.g-prog.is-inside { stroke: var(--accent); }
+.g-prog.is-breach { stroke: var(--hot); }
+.g-ghost { stroke: var(--accent); opacity: .30; transition: stroke-dasharray .25s ease; }
+.g-tick  { stroke: var(--graphite); stroke-width: 2.5; stroke-linecap: round;
+           transition: transform .55s cubic-bezier(.22,1,.36,1); }
+.g-tick.pace { stroke: var(--brass); }
+.g-cap.is-under  { fill: var(--brass); }
+.g-cap.is-inside { fill: var(--accent-hi); }
+.g-cap.is-breach { fill: var(--hot); }
 
-/* The stamp wraps to its own line rather than being pushed off the fascia: at
-   the widest reading ("2,470 KCAL" beside "CEILING BREACH") the two do not fit
-   across a 360px phone, and a nowrap flex child with nothing to shrink simply
-   overflows. min-width:0 lets the readout column give way first. */
-.instrument-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  margin-bottom: 14px;
+.gauge-center {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center; pointer-events: none;
 }
-.instrument-readout { flex: 1 1 auto; min-width: 0; }
-
-/* The readout. Archivo at full expansion is the app's voice — it should read
-   as a machine display, not a heading. */
-.readout {
+.g-pct {
   font-family: var(--display);
   font-weight: 800;
-  font-stretch: 125%;
-  font-size: clamp(34px, 11vw, 56px);
-  line-height: 0.86;
+  font-size: clamp(40px, 16vw, 62px);
+  line-height: 1;
   letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
   color: var(--chalk);
+}
+.g-pct.is-under  { color: var(--brass); }
+.g-pct.is-inside { color: var(--accent); }
+.g-pct.is-breach { color: var(--hot); }
+.g-pct.is-empty  { color: var(--faint); }
+.g-pct .g-unit   { font-size: 0.46em; font-weight: 700; margin-left: 2px; }
+.g-kcal {
+  margin-top: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--graphite);
   font-variant-numeric: tabular-nums;
 }
-.readout.is-under  { color: var(--chalk); }     /* still filling — not an error */
-.readout.is-breach { color: var(--hot); }
-
-.readout-unit {
-  font-size: 0.28em;
-  font-weight: 600;
-  font-stretch: 100%;
-  letter-spacing: 0.16em;
-  color: var(--faint);
-  margin-left: 0.5em;
-  vertical-align: 0.9em;
+.g-verdict {
+  margin-top: 10px;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 4px 11px; border-radius: var(--radius-pill);
+  color: var(--faint); background: var(--chalk-wash);
 }
+.g-verdict.is-under  { color: var(--brass);  background: var(--brass-wash); }
+.g-verdict.is-inside { color: var(--accent); background: var(--accent-wash); }
+.g-verdict.is-breach { color: var(--hot);    background: var(--hot-wash); }
 
-.readout-sub {
-  font-family: var(--data);
+.gauge-sub {
+  text-align: center;
   font-size: 11.5px;
   color: var(--graphite);
-  margin-top: 9px;
+  margin-top: 2px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
 }
 
-.verdict-stamp {
-  font-family: var(--data);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  text-align: right;
-  padding: 5px 9px;
-  border: 1px solid var(--rule-lit);
-  border-radius: 3px;
-  color: var(--graphite);
-  white-space: nowrap;
-  flex: 0 0 auto;
-  margin-left: auto;     /* stays right-aligned on the line it lands on */
-}
-.verdict-stamp.is-under  { color: var(--brass);     border-color: var(--brass);     background: var(--brass-wash); }
-.verdict-stamp.is-inside { color: var(--chalk);     border-color: var(--rule-lit); }
-.verdict-stamp.is-breach { color: var(--hot);       border-color: var(--hot);       background: var(--hot-wash); }
-.verdict-stamp.is-empty  { color: var(--faint); }
-
-/* ---- the calibrated scale ---- */
-.scale { position: relative; height: 46px; }
-
-/* Calibration layer: ticks every 100 kcal, taller every 500, plus the notches
-   cut at the floor and ceiling. Drawn as SVG so it stays crisp at any width. */
-.scale-calibration {
-  position: absolute; inset: 0 0 auto 0;
-  height: 22px;
-  width: 100%;
-  overflow: visible;
-  pointer-events: none;
-}
-
-.scale-track {
-  position: absolute;
-  top: 22px; left: 0; right: 0;
-  height: 12px;
-  background: var(--well);
-  border-radius: 2px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8);
-  overflow: hidden;
-}
-.scale-fill {
-  position: absolute; inset: 0 auto 0 0;
-  width: 0;
-  background: var(--graphite);
-  transition: width 0.55s cubic-bezier(0.22, 1, 0.36, 1), background 0.3s ease;
-}
-.scale-fill.is-under  { background: var(--graphite); }
-.scale-fill.is-inside { background: var(--chalk); }
-.scale-fill.is-breach { background: var(--hot); }
-
-/* Floor and ceiling are cut *through* the track, so the crossing stays visible
-   after the fill has run past them. This is the machined detail the whole
-   instrument metaphor rests on. */
-.scale-notch {
-  position: absolute;
-  top: 0; bottom: 0;
-  width: 2px;
-  margin-left: -1px;
-  background: var(--bench);
-  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.6);
-  z-index: 1;
-}
-
-/* Needle: the live position. Pure chalk — it is the instrument, not a status. */
-.scale-needle {
-  position: absolute;
-  top: 16px; left: 0;
-  width: 2px; height: 24px;
-  background: var(--chalk);
-  border-radius: 1px;
-  transform: translateX(-50%);
-  box-shadow: 0 0 8px rgba(232, 237, 233, 0.55);
-  z-index: 3;
-  transition: left 0.55s cubic-bezier(0.22, 1, 0.36, 1);
-}
-/* Ghost needle: where you land if the pending grams are added. */
-.scale-proj {
-  position: absolute;
-  top: 18px; left: 0;
-  width: 1px; height: 20px;
-  background: var(--graphite);
-  transform: translateX(-50%);
-  z-index: 2;
-  transition: left 0.3s ease;
-}
-/* Pace mark: where you should be by now. Brass, because being behind it is
-   the only reason you would look at it. */
-.scale-pace {
-  position: absolute;
-  top: 18px; left: 0;
-  width: 0; height: 20px;
-  border-left: 1.5px dashed var(--brass);
-  transform: translateX(-50%);
-  opacity: 0.8;
-  z-index: 1;
-  transition: left 0.55s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.scale-legend {
-  position: absolute;
-  top: 38px; left: 0; right: 0;
-  height: 12px;
-  font-family: var(--data);
-  font-size: 9.5px;
-  color: var(--faint);
-}
-.scale-legend span {
-  position: absolute;
-  transform: translateX(-50%);
-  white-space: nowrap;
-}
-.scale-legend span.edge { transform: none; }
-.scale-legend span.edge-r { transform: translateX(-100%); }
-.scale-legend span.bound { color: var(--graphite); }
-
-/* The one orchestrated moment: crossing the ceiling flashes the fascia once. */
+/* The one orchestrated moment: crossing the ceiling flashes the card once. */
 @keyframes breachFlash {
-  0%, 100% { border-color: var(--rule-lit); }
-  30%      { border-color: var(--hot); box-shadow: inset 0 1px 0 rgba(255,255,255,.045), 0 0 22px -4px var(--hot); }
+  0%,100% { border-color: var(--rule); }
+  30%     { border-color: var(--hot); box-shadow: var(--shadow), 0 0 24px -4px var(--hot); }
 }
-.instrument.breached { animation: breachFlash 0.9s ease-out 1; }
+.gauge-card.breached { animation: breachFlash 0.9s ease-out 1; }
 
 /* Steering line under the scale — the app's single piece of live advice. */
 .pace-line {
@@ -446,69 +366,73 @@ details:not(.panel)[open] > summary::before { transform: rotate(45deg); }
 
 /* ============================ macro rows ================================= */
 
-/* Cards became rows. Faster to read, and they sit on the ledger rhythm. */
+/* Each macro reads as one clean line: name, the headline percentage, the grams,
+   and a smooth rounded bar tinted in the macro's own hue. Colour switches to a
+   state (amber/red) only when a floor is unmet or a cap is exceeded. */
 .macro-row {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 4px 12px;
+  gap: 6px 12px;
   align-items: baseline;
-  padding: 11px 0;
+  padding: 13px 0;
   border-bottom: 1px solid var(--rule);
 }
-.macro-row:last-of-type { border-bottom: none; }
+.macro-row:first-child { padding-top: 2px; }
+.macro-row:last-of-type { border-bottom: none; padding-bottom: 2px; }
 
 .macro-name {
-  font-family: var(--data);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--chalk);
+}
+.macro-name small {
+  font-weight: 500;
+  font-size: 11px;
   color: var(--faint);
+  margin-left: 2px;
 }
 .macro-val {
   font-family: var(--display);
-  font-stretch: 110%;
   font-weight: 700;
-  font-size: 19px;
+  font-size: 16px;
   letter-spacing: -0.01em;
   color: var(--chalk);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .macro-val small {
-  font-family: var(--data);
-  font-size: 10.5px;
-  font-weight: 400;
-  font-stretch: 100%;
-  letter-spacing: 0;
-  color: var(--faint);
-  margin-left: 5px;
+  font-size: 11px; font-weight: 500;
+  color: var(--faint); margin-left: 5px;
 }
 .macro-val.short { color: var(--brass); }
 .macro-val.over  { color: var(--hot); }
 
 .macro-groove {
   grid-column: 1 / -1;
-  height: 3px;
+  height: 8px;
   background: var(--well);
-  border-radius: 2px;
+  border-radius: var(--radius-pill);
   overflow: hidden;
   margin-top: 3px;
 }
 .macro-groove > span {
-  display: block;
-  height: 100%;
-  width: 0;
+  display: block; height: 100%; width: 0;
+  border-radius: var(--radius-pill);
   background: var(--graphite);
-  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.macro-groove > span.met  { background: var(--chalk); }
+.macro-groove.m-protein > span { background: var(--m-protein); }
+.macro-groove.m-carbs   > span { background: var(--m-carbs); }
+.macro-groove.m-fat     > span { background: var(--m-fat); }
+.macro-groove > span.met  { background: var(--accent); }
 .macro-groove > span.warn { background: var(--brass); }
 .macro-groove > span.over { background: var(--hot); }
 
 .macro-note {
   grid-column: 1 / -1;
-  font-family: var(--data);
   font-size: 10.5px;
   color: var(--faint);
-  margin-top: 5px;
+  margin-top: 4px;
 }
 .macro-note.warn { color: var(--brass); }
 .macro-note.over { color: var(--hot); }
@@ -1800,11 +1724,12 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
   .tern-foods { grid-template-columns: 1fr; }
 }
 
-/* The wordmark is the first thing to go: on a phone the header has to carry a
-   nav toggle, the day stepper and settings, and those are all controls. */
+/* On a phone the header carries a nav toggle, the day stepper and settings; keep
+   the wordmark but tighten the day stepper so the name stays visible beside it. */
 @media (max-width: 430px) {
-  header h1 { display: none; }
-  .daynav .date { min-width: 78px; }
+  header h1 { font-size: 17px; }
+  .daynav .date { min-width: 64px; font-size: 10px; }
+  .head-right { gap: 6px; }
   /* Below this the readout and the stamp cannot share a line at the widest
      reading, and letting them wrap only sometimes made the instrument jump
      between states. So on a phone the stamp always sits under the number. */

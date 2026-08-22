@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Ledger</title>
+<title>Eatify</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&family=Spline+Sans+Mono:wght@400..600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Spline+Sans+Mono:wght@400..600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#121614">
+<meta name="theme-color" content="#0e1211">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -22,7 +22,7 @@
 <header>
   <button type="button" id="navToggle" aria-label="Open navigation"
           aria-expanded="false" aria-controls="sidebar" title="Sections">&#9776;</button>
-  <h1>Ledger</h1>
+  <h1>Eatify</h1>
   <div class="head-right">
     <span id="syncDot" class="sync-dot off" role="img" aria-label="Sync off"
           title="Sync off — configure in Settings"></span>
@@ -258,36 +258,30 @@
 <!-- ================================ TODAY ================================ -->
 <main id="tabToday" class="tabview" role="tabpanel" aria-labelledby="tabbtn-today">
 
-  <!-- THE INSTRUMENT — the calibrated corridor this whole app is built around. -->
-  <section class="instrument" id="instrument" aria-label="Caloric corridor">
-    <div class="instrument-head">
-      <div class="instrument-readout">
-        <div class="readout" id="readout">0</div>
-        <div class="readout-sub" id="readoutSub"></div>
+  <!-- THE GAUGE — the calorie corridor rendered as a speedometer. -->
+  <section class="gauge-card" id="instrument" aria-label="Caloric corridor">
+    <div class="gauge" id="scale" role="meter" aria-label="Calories against your daily corridor">
+      <svg class="gauge-svg" viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="g-track" cx="100" cy="100" r="82" stroke-width="14" stroke-linecap="round" transform="rotate(135 100 100)"></circle>
+        <circle class="g-zone"  id="gaugeZone" cx="100" cy="100" r="82" stroke-width="14" transform="rotate(135 100 100)"></circle>
+        <circle class="g-ghost" id="projCursor" cx="100" cy="100" r="82" stroke-width="14" stroke-linecap="round" transform="rotate(135 100 100)" style="display:none"></circle>
+        <circle class="g-prog"  id="gaugeProg" cx="100" cy="100" r="82" stroke-width="14" stroke-linecap="round" transform="rotate(135 100 100)"></circle>
+        <line class="g-tick pace" id="paceMark" x1="100" y1="100" x2="100" y2="100" hidden></line>
+        <circle class="g-cap is-inside" id="gaugeCap" r="7" cx="100" cy="100" style="display:none"></circle>
+      </svg>
+      <div class="gauge-center">
+        <div class="g-pct is-empty" id="readout">0<span class="g-unit">%</span></div>
+        <div class="g-kcal" id="gaugeKcal"></div>
+        <div class="g-verdict is-empty" id="verdictStamp">no entries</div>
       </div>
-      <span class="verdict-stamp is-empty" id="verdictStamp">no entries</span>
     </div>
-
-    <div class="scale" id="scale" role="meter" aria-label="Calories against the corridor">
-      <svg class="scale-calibration" id="scaleTicks" viewBox="0 0 100 22"
-           preserveAspectRatio="none" aria-hidden="true"></svg>
-      <div class="scale-track">
-        <div class="scale-fill" id="scaleFill"></div>
-        <div class="scale-notch" id="floorNotch"></div>
-        <div class="scale-notch" id="ceilNotch"></div>
-      </div>
-      <div class="scale-pace" id="paceMark" title="where you should be by now" hidden></div>
-      <div class="scale-proj" id="projCursor" title="where you'll land if you add this" hidden></div>
-      <div class="scale-needle" id="needle"></div>
-      <div class="scale-legend" id="scaleLegend"></div>
-    </div>
-
+    <div class="gauge-sub" id="readoutSub"></div>
     <div class="pace-line" id="paceLine" hidden></div>
   </section>
 
   <!-- MACROS -->
   <section class="panel">
-    <span class="panel-title">Macros consumed</span>
+    <span class="panel-title">Macros</span>
     <div id="macroRows"></div>
     <div id="microLine" style="margin-top:16px" hidden></div>
   </section>

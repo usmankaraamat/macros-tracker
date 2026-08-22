@@ -143,8 +143,23 @@ document.getElementById('csvBtn').onclick = ()=>{
 // Weight and intake are drawn over ONE shared date axis and stacked, so a run of
 // heavy days and the scale's answer to it line up column for column. Anything
 // that only appears in one series still sits at its true date on both.
-const TREND_W = 300, TREND_H = 70, TREND_PADL = 4, TREND_PADR = 34,
-      TREND_PADT = 8, TREND_PADB = 14, TREND_DAYS = 45;
+const TREND_W = 320, TREND_H = 104, TREND_PADL = 6, TREND_PADR = 38,
+      TREND_PADT = 12, TREND_PADB = 18, TREND_DAYS = 45;
+
+// Catmull-Rom → cubic-bézier: a smooth curve through the points, so the trend
+// lines read as flowing shapes rather than jagged polylines.
+function smoothPath(P){
+  if (!P.length) return '';
+  if (P.length < 3) return P.map((p,i)=>`${i?'L':'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  let d = `M${P[0][0].toFixed(1)},${P[0][1].toFixed(1)}`;
+  for (let i=0;i<P.length-1;i++){
+    const p0=P[i-1]||P[i], p1=P[i], p2=P[i+1], p3=P[i+2]||p2;
+    const c1x=p1[0]+(p2[0]-p0[0])/6, c1y=p1[1]+(p2[1]-p0[1])/6;
+    const c2x=p2[0]-(p3[0]-p1[0])/6, c2y=p2[1]-(p3[1]-p1[1])/6;
+    d+=` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+  }
+  return d;
+}
 
 function trendSeries(){
   const map = weightsMap(), tot = {};
@@ -168,8 +183,8 @@ function trendX(s){
   return d => TREND_PADL + (t1 === t0 ? uW/2 : uW * (Date.parse(d) - t0) / (t1 - t0));
 }
 function trendAxis(s){
-  return `<text x="${TREND_PADL}" y="${TREND_H-2}" font-size="8" fill="var(--faint)" font-family="var(--data)">${s.start}</text>`
-       + `<text x="${TREND_W-2}" y="${TREND_H-2}" text-anchor="end" font-size="8" fill="var(--faint)" font-family="var(--data)">${s.end}</text>`;
+  return `<text x="${TREND_PADL}" y="${TREND_H-3}" font-size="9" fill="var(--faint)">${s.start.slice(5)}</text>`
+       + `<text x="${TREND_W-2}" y="${TREND_H-3}" text-anchor="end" font-size="9" fill="var(--faint)">${s.end.slice(5)}</text>`;
 }
 function trendSVG(inner){
   return `<svg viewBox="0 0 ${TREND_W} ${TREND_H}" style="width:100%;display:block">${inner}</svg>`;
@@ -177,38 +192,53 @@ function trendSVG(inner){
 function weightChartSVG(s, X){
   const pts = s.w;
   if (pts.length < 2) return '';
-  const uH = TREND_H - TREND_PADT - TREND_PADB;
+  const uH = TREND_H - TREND_PADT - TREND_PADB, base = TREND_H - TREND_PADB;
   const kMin = Math.min(...pts.map(p=>p.kg)), kMax = Math.max(...pts.map(p=>p.kg));
   const yPad = Math.max(0.3, (kMax-kMin)*0.15);
   const Y = k => TREND_PADT + uH*(1-(k-kMin+yPad)/((kMax-kMin)+2*yPad));
-  const path = pts.map((p,i)=>`${i?'L':'M'}${X(p.date).toFixed(1)},${Y(p.kg).toFixed(1)}`).join(' ');
-  const dots = pts.map(p=>`<circle cx="${X(p.date).toFixed(1)}" cy="${Y(p.kg).toFixed(1)}" r="2" fill="var(--chalk)"/>`).join('');
-  const last = pts[pts.length-1];
+  const P = pts.map(p=>[X(p.date), Y(p.kg)]);
+  const line = smoothPath(P);
+  const area = `${line} L${P[P.length-1][0].toFixed(1)},${base} L${P[0][0].toFixed(1)},${base} Z`;
+  const last = pts[pts.length-1], lp = P[P.length-1];
   return trendSVG(
-    `<path d="${path}" fill="none" stroke="var(--chalk)" stroke-width="1.5" stroke-linejoin="round"/>${dots}`
-    + `<text x="${TREND_W-2}" y="${Y(last.kg)+3}" text-anchor="end" font-size="9" fill="var(--graphite)" font-family="var(--data)">${last.kg}kg</text>`
+    `<defs><linearGradient id="wgGrad" x1="0" x2="0" y1="0" y2="1">`
+    + `<stop offset="0" stop-color="var(--accent)" stop-opacity=".32"/>`
+    + `<stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>`
+    + `<path d="${area}" fill="url(#wgGrad)"/>`
+    + `<path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`
+    + `<circle cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="3.4" fill="var(--accent)" stroke="var(--slab)" stroke-width="2"/>`
+    + `<text x="${TREND_W-2}" y="${Math.max(11, lp[1]-7).toFixed(1)}" text-anchor="end" font-size="11" font-weight="700" fill="var(--chalk)">${last.kg}kg</text>`
     + trendAxis(s));
 }
-// Intake against the corridor. The band is the corridor; a dot only takes colour
-// when the day landed out of tolerance, same rule as everything else here.
+// Intake against the corridor. The band is the corridor; the line is neutral and
+// a dot only takes colour when the day landed out of tolerance.
 function kcalChartSVG(s, X){
   const pts = s.k;
   if (pts.length < 2) return '';
-  const uH = TREND_H - TREND_PADT - TREND_PADB;
+  const uH = TREND_H - TREND_PADT - TREND_PADB, base = TREND_H - TREND_PADB;
   const yMax = Math.max(CEIL*1.15, ...pts.map(p=>p.kcal)) * 1.02;
   const Y = v => TREND_PADT + uH*(1 - v/yMax);
-  const bTop = Y(CEIL), bBot = Y(FLOOR);
-  const band = `<rect x="${TREND_PADL}" y="${bTop.toFixed(1)}" width="${TREND_W-TREND_PADL-TREND_PADR}" height="${(bBot-bTop).toFixed(1)}" fill="var(--chalk-wash)"/>`
+  const bTop = Y(CEIL), bBot = Y(FLOOR), W = TREND_W-TREND_PADL-TREND_PADR;
+  const band = `<rect x="${TREND_PADL}" y="${bTop.toFixed(1)}" width="${W}" height="${(bBot-bTop).toFixed(1)}" fill="var(--accent-wash)" rx="3"/>`
     + `<line x1="${TREND_PADL}" y1="${bBot.toFixed(1)}" x2="${TREND_W-TREND_PADR}" y2="${bBot.toFixed(1)}" stroke="var(--rule-lit)" stroke-width="1" stroke-dasharray="3 3"/>`
     + `<line x1="${TREND_PADL}" y1="${bTop.toFixed(1)}" x2="${TREND_W-TREND_PADR}" y2="${bTop.toFixed(1)}" stroke="var(--rule-lit)" stroke-width="1" stroke-dasharray="3 3"/>`;
-  const path = pts.map((p,i)=>`${i?'L':'M'}${X(p.date).toFixed(1)},${Y(p.kcal).toFixed(1)}`).join(' ');
-  const dots = pts.map(p=>{
-    const c = p.kcal > CEIL ? 'var(--hot)' : p.kcal >= FLOOR ? 'var(--chalk)' : 'var(--brass)';
-    return `<circle cx="${X(p.date).toFixed(1)}" cy="${Y(p.kcal).toFixed(1)}" r="2.2" fill="${c}"/>`;
+  const P = pts.map(p=>[X(p.date), Y(p.kcal)]);
+  const line = smoothPath(P);
+  const area = `${line} L${P[P.length-1][0].toFixed(1)},${base} L${P[0][0].toFixed(1)},${base} Z`;
+  const dots = pts.map((p,i)=>{
+    const c = p.kcal > CEIL ? 'var(--hot)' : p.kcal >= FLOOR ? 'var(--accent)' : 'var(--brass)';
+    const r = i===pts.length-1 ? 3.4 : 2.4;
+    const ring = i===pts.length-1 ? ` stroke="var(--slab)" stroke-width="2"` : '';
+    return `<circle cx="${P[i][0].toFixed(1)}" cy="${P[i][1].toFixed(1)}" r="${r}" fill="${c}"${ring}/>`;
   }).join('');
-  return trendSVG(band
-    + `<path d="${path}" fill="none" stroke="var(--chalk)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>${dots}`
-    + `<text x="${TREND_W-2}" y="${(bTop+3).toFixed(1)}" text-anchor="end" font-size="8" fill="var(--faint)" font-family="var(--data)">${Math.round(CEIL)}</text>`
+  return trendSVG(
+    `<defs><linearGradient id="kgGrad" x1="0" x2="0" y1="0" y2="1">`
+    + `<stop offset="0" stop-color="var(--graphite)" stop-opacity=".20"/>`
+    + `<stop offset="1" stop-color="var(--graphite)" stop-opacity="0"/></linearGradient></defs>`
+    + band
+    + `<path d="${area}" fill="url(#kgGrad)"/>`
+    + `<path d="${line}" fill="none" stroke="var(--graphite)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dots}`
+    + `<text x="${TREND_W-2}" y="${(bTop-3).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--faint)">${Math.round(CEIL)}</text>`
     + trendAxis(s));
 }
 

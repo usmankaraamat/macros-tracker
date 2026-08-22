@@ -31,70 +31,92 @@ function applyAdaptiveCorridor(){
   FLOOR = FLOOR_M; CEIL = CEIL_M;   // manual corridor (goal off, or no TDEE yet)
 }
 
-// ---- the instrument (signature element) ------------------------------------
-// Scale runs 0 .. CEIL*1.15 so a breach is always visible on the face.
+// ---- the gauge (signature element) ----------------------------------------
+// Domain runs 0 .. CEIL*1.15 so a ceiling breach is always visible on the arc.
 function scaleMaxKcal(){ return CEIL * 1.15; }
 function scalePct(x){ return Math.min(100, Math.max(0, x / scaleMaxKcal() * 100)); }
 
-// The calibration layer: a tick every 100 kcal, a taller one every 500. Redrawn
-// only when the corridor itself moves, not on every log.
-let _calibKey = '';
-function renderCalibration(){
-  const svg = document.getElementById('scaleTicks');
-  if (!svg) return;
-  const max = scaleMaxKcal();
-  const key = `${Math.round(max)}|${FLOOR}|${CEIL}`;
-  if (key === _calibKey) return;
-  _calibKey = key;
+// Radial-gauge geometry: a 270° sweep starting bottom-left (135°), running
+// clockwise to bottom-right, drawn with stroke-dasharray on rotated circles.
+// GA_VIS is the arc length of the visible sweep; a value's fraction of the
+// domain maps onto it.
+const GA_R = 82, GA_CX = 100, GA_CY = 100, GA_START = 135, GA_SWEEP = 270;
+const GA_C = 2 * Math.PI * GA_R;
+const GA_VIS = GA_C * (GA_SWEEP / 360);
+function gaugeFrac(kcal){ return Math.max(0, Math.min(1, kcal / scaleMaxKcal())); }
+// Point on the arc at fraction f (0..1 of the sweep), at radius r.
+function gaugePoint(f, r){
+  const th = (GA_START + f * GA_SWEEP) * Math.PI / 180;
+  return [GA_CX + r * Math.cos(th), GA_CY + r * Math.sin(th)];
+}
+// A progress-style arc from 0 to frac on a circle element.
+function setArc(el, frac){ if (el) el.setAttribute('stroke-dasharray', `${Math.max(0, frac) * GA_VIS} ${GA_C}`); }
+// A band segment [from,to] (fractions of the sweep) on a circle element.
+function setBand(el, from, to){
+  if (!el) return;
+  const s = Math.max(0, from) * GA_VIS, len = Math.max(0, to - from) * GA_VIS;
+  el.setAttribute('stroke-dasharray', `0 ${s} ${len} ${GA_C}`);
+}
 
-  const minor = [], major = [];
-  for (let k = 0; k <= max; k += 100){
-    const x = (k / max) * 100;
-    (k % 500 === 0 ? major : minor).push(
-      `<line x1="${x}" x2="${x}" y1="${k % 500 === 0 ? 12 : 16}" y2="22"/>`);
-  }
-  svg.innerHTML =
-    `<g stroke="var(--rule)" stroke-width="1" vector-effect="non-scaling-stroke">${minor.join('')}</g>` +
-    `<g stroke="var(--rule-lit)" stroke-width="1" vector-effect="non-scaling-stroke">${major.join('')}</g>`;
-
-  // Floor and ceiling are cut through the track as notches, so you can see
-  // exactly where you crossed even once the fill has run past them.
-  document.getElementById('floorNotch').style.left = scalePct(FLOOR) + '%';
-  document.getElementById('ceilNotch').style.left  = scalePct(CEIL) + '%';
-
-  const legend = document.getElementById('scaleLegend');
-  legend.innerHTML =
-    `<span class="edge">0</span>` +
-    `<span class="bound" style="left:${scalePct(FLOOR)}%">${Math.round(FLOOR)}</span>` +
-    `<span class="bound" style="left:${scalePct(CEIL)}%">${Math.round(CEIL)}</span>`;
+// A ghost arc from current intake to a projected intake — driven by the meal
+// composer while the grams field holds a value (see app.js).
+function setGaugeProjection(kcal){
+  const el = document.getElementById('projCursor');
+  if (!el) return;
+  if (kcal == null){ el.style.display = 'none'; return; }
+  const cur = gaugeFrac(totals().kcal), proj = gaugeFrac(kcal);
+  if (proj <= cur){ el.style.display = 'none'; return; }
+  setBand(el, cur, proj);
+  el.style.display = '';
 }
 
 let _lastCorridorKey = '';
 function renderInstrument(t){
-  renderCalibration();
   const st = corridorState(t.kcal);
   const inst = document.getElementById('instrument');
+  const max = scaleMaxKcal();
+  const valFrac = gaugeFrac(t.kcal);
+  const floorFrac = Math.max(0, Math.min(1, FLOOR / max));
+  const ceilFrac  = Math.max(0, Math.min(1, CEIL / max));
 
-  const fill = document.getElementById('scaleFill');
-  fill.style.width = scalePct(t.kcal) + '%';
-  fill.className = 'scale-fill is-' + st.key;
-  document.getElementById('needle').style.left = scalePct(t.kcal) + '%';
+  // Track spans the whole sweep; the good zone spans floor→ceiling; progress runs
+  // 0→current in the state colour.
+  const track = document.querySelector('.g-track');
+  if (track) track.setAttribute('stroke-dasharray', `${GA_VIS} ${GA_C}`);
+  setBand(document.getElementById('gaugeZone'), floorFrac, ceilFrac);
+  const prog = document.getElementById('gaugeProg');
+  setArc(prog, valFrac);
+  // SVG elements need setAttribute('class', …) — the .className property is read-only there.
+  if (prog) prog.setAttribute('class', 'g-prog is-' + st.key);
 
+  // Rounded cap at the arc tip, echoing the reference gauge; hidden when empty.
+  const cap = document.getElementById('gaugeCap');
+  if (cap){
+    if (valFrac > 0.005){
+      const [cx, cy] = gaugePoint(valFrac, GA_R);
+      cap.setAttribute('cx', cx.toFixed(2)); cap.setAttribute('cy', cy.toFixed(2));
+      cap.setAttribute('class', 'g-cap is-' + st.key); cap.style.display = '';
+    } else cap.style.display = 'none';
+  }
+
+  // Centre: the percentage of the ceiling is the headline the user asked for.
+  const pct = CEIL > 0 ? Math.round(t.kcal / CEIL * 100) : 0;
   const readout = document.getElementById('readout');
-  readout.innerHTML = Math.round(t.kcal).toLocaleString() +
-    '<span class="readout-unit">KCAL</span>';
-  readout.className = 'readout is-' + st.key;
+  readout.innerHTML = `${pct}<span class="g-unit">%</span>`;
+  readout.className = 'g-pct is-' + (t.kcal < 1 ? 'empty' : st.key);
+  const kcalLine = document.getElementById('gaugeKcal');
+  if (kcalLine) kcalLine.textContent = `${Math.round(t.kcal).toLocaleString()} / ${Math.round(CEIL).toLocaleString()} kcal`;
 
   const stamp = document.getElementById('verdictStamp');
   stamp.textContent = st.label;
-  stamp.className = 'verdict-stamp is-' + st.key;
+  stamp.className = 'g-verdict is-' + (t.kcal < 1 ? 'empty' : st.key);
 
-  // Sub-line: distance to the floor, then to the ceiling once the floor is met.
+  // Sub-line: distance to floor, then to ceiling once the floor is met; plus the
+  // auto-TDEE note when a goal is driving the corridor.
   let sub;
-  if (t.kcal < FLOOR)      sub = `${Math.round(FLOOR - t.kcal).toLocaleString()} to floor`;
-  else if (t.kcal <= CEIL) sub = `${Math.round(CEIL - t.kcal).toLocaleString()} to ceiling`;
-  else                     sub = `${Math.round(t.kcal - CEIL).toLocaleString()} over ceiling`;
-  // Say when the goal is driving the numbers rather than the manual corridor.
+  if (t.kcal < FLOOR)      sub = `${Math.round(FLOOR - t.kcal).toLocaleString()} kcal to floor (${Math.round(FLOOR).toLocaleString()})`;
+  else if (t.kcal <= CEIL) sub = `${Math.round(CEIL - t.kcal).toLocaleString()} kcal to ceiling`;
+  else                     sub = `${Math.round(t.kcal - CEIL).toLocaleString()} kcal over ceiling`;
   if (CORRIDOR_AUTO){
     const dayTxt = CORRIDOR_AUTO.cycled
       ? ` · ${CORRIDOR_AUTO.training ? CORRIDOR_AUTO.split + ' day' : 'rest day'} ${CORRIDOR_AUTO.off >= 0 ? '+' : ''}${CORRIDOR_AUTO.off}`
@@ -103,22 +125,18 @@ function renderInstrument(t){
   }
   document.getElementById('readoutSub').textContent = sub;
 
-  // The instrument is a meter to assistive tech, with the whole reading spoken.
+  // Meter semantics for assistive tech, with the whole reading spoken.
   const scale = document.getElementById('scale');
   scale.setAttribute('aria-valuemin', '0');
-  scale.setAttribute('aria-valuemax', String(Math.round(scaleMaxKcal())));
+  scale.setAttribute('aria-valuemax', String(Math.round(max)));
   scale.setAttribute('aria-valuenow', String(Math.round(t.kcal)));
   scale.setAttribute('aria-valuetext',
-    `${Math.round(t.kcal)} kcal, ${st.label}. Floor ${Math.round(FLOOR)}, ceiling ${Math.round(CEIL)}. ${sub}.`);
+    `${Math.round(t.kcal)} kcal, ${pct}% of ceiling, ${st.label}. Floor ${Math.round(FLOOR)}, ceiling ${Math.round(CEIL)}. ${sub}.`);
 
-  // The one orchestrated moment in the app: crossing into breach flashes the
-  // fascia once. Crossing back, or re-rendering while already over, does not.
+  // Crossing into breach flashes the card once — not on a re-render while over.
   const key = st.key + '|' + VIEW_DATE;
   if (st.key === 'breach' && _lastCorridorKey && _lastCorridorKey !== key && !prefersReducedMotion()){
-    inst.classList.remove('breached');
-    void inst.offsetWidth;                     // restart the animation
-    inst.classList.add('breached');
-    haptic(40);
+    inst.classList.remove('breached'); void inst.offsetWidth; inst.classList.add('breached'); haptic(40);
   }
   _lastCorridorKey = key;
 
@@ -133,7 +151,7 @@ function renderInstrument(t){
 function renderPace(t){
   const mark = document.getElementById('paceMark'), line = document.getElementById('paceLine');
   const live = VIEW_DATE === ACTIVE_DATE;
-  if (!live || CEIL <= 0){ mark.hidden = true; line.hidden = true; return; }
+  if (!live || CEIL <= 0){ mark.setAttribute('hidden', ''); line.hidden = true; return; }
 
   const nowPst = new Date(Date.now() + TZ_OFFSET_MIN*60000);
   const h = nowPst.getUTCHours() + nowPst.getUTCMinutes()/60;
@@ -154,7 +172,12 @@ function renderPace(t){
   } else {
     paceKcal = center * Math.max(0, Math.min(1, (h - 6)/(24 - 6)));
   }
-  mark.style.left = scalePct(paceKcal) + '%'; mark.hidden = false;
+  // Pace shows as a short radial tick across the arc band, at the expected fraction.
+  const pf = gaugeFrac(paceKcal);
+  const [ix, iy] = gaugePoint(pf, GA_R - 9), [ox, oy] = gaugePoint(pf, GA_R + 9);
+  mark.setAttribute('x1', ix.toFixed(2)); mark.setAttribute('y1', iy.toFixed(2));
+  mark.setAttribute('x2', ox.toFixed(2)); mark.setAttribute('y2', oy.toFixed(2));
+  mark.removeAttribute('hidden');
 
   // Protein steering, anchored to the FLOOR: the aim is to cover protein by the time you
   // reach the floor, keeping floor→ceiling purely as catch-up buffer. A 20% cushion makes
@@ -212,10 +235,9 @@ function mealPlanHours(){
 function renderMacros(t){
   const rows = [];
 
-  // Protein is a floor — the bar fills toward a target you want to reach.
+  // Protein is a floor — the bar fills toward a target you want to reach, so the
+  // headline % is progress to that floor and the bar goes green once it's met.
   const pFrac = P_TARGET > 0 ? t.p / P_TARGET : 0;
-  const pLeft = Math.max(0, P_TARGET - t.p);
-  const pTone = pFrac >= 1 ? 'met' : (pFrac >= 0.7 ? '' : 'warn');
   let pNote = '';
   const bw = latestWeight();
   if (bw > 0){
@@ -226,34 +248,36 @@ function renderMacros(t){
     }
   }
   rows.push(macroRow({
-    name: `Protein · ${P_CFG.mode === 'pct' ? `${P_CFG.val}% ≈ ${Math.round(P_TARGET)}g` : `${Math.round(P_TARGET)}g`} floor`,
-    value: t.p.toFixed(1),
-    unit: `g · ${pLeft.toFixed(0)} left`,
-    tone: pFrac >= 1 ? '' : 'short',
-    frac: pFrac, barTone: pTone, note: pNote
+    name: 'Protein', qual: `${Math.round(P_TARGET)} g floor`, hue: 'm-protein',
+    pctText: P_TARGET > 0 ? `${Math.round(pFrac*100)}%` : null,
+    value: P_TARGET > 0 ? `${t.p.toFixed(0)} / ${Math.round(P_TARGET)} g` : `${t.p.toFixed(0)} g`,
+    tone: P_TARGET > 0 && pFrac < 0.7 ? 'short' : '',
+    frac: P_TARGET > 0 ? pFrac : null,
+    barTone: pFrac >= 1 ? 'met' : (pFrac >= 0.7 ? '' : 'warn'),
+    note: pNote
   }));
 
-  // Carbs and fat are caps — the bar fills toward a limit you want to stay under.
-  [['Carbs', t.c, C_CAP, 4], ['Fat', t.f, F_CAP, 9]].forEach(([name, val, cap, kcalPerG])=>{
+  // Carbs and fat are caps — the bar fills toward a limit you want to stay under,
+  // so the headline % is share of the cap used and the bar reddens once over.
+  [['Carbs', t.c, C_CAP, 4, 'm-carbs'], ['Fat', t.f, F_CAP, 9, 'm-fat']].forEach(([name, val, cap, kcalPerG, hue])=>{
     const max = capGrams(cap, kcalPerG);
     const macroKcal = (t.p*4 + t.c*4 + t.f*9) || 1;
     const pctKcal = Math.round(val * kcalPerG / macroKcal * 100);
-    // Fat gets a composition footnote under its bar: the unhealthy share (saturated + trans)
-    // against a rough 10%-of-floor-energy ceiling, and the unsaturated share for context.
     const fat = name === 'Fat' ? fatBreakdown(t) : null;
     if (!max){
-      rows.push(macroRow({ name, value: val.toFixed(1), unit: `g · ${pctKcal}% kcal`, frac: null,
+      rows.push(macroRow({ name, hue, qual: `${pctKcal}% of kcal`,
+        pctText: null, value: `${val.toFixed(0)} g`, frac: null,
         sub: fat && fat.text, subTone: fat && fat.tone }));
       return;
     }
     const frac = val / max;
     rows.push(macroRow({
-      name: `${name} · ${cap.mode === 'pct' ? `${cap.val}% ≈ ${Math.round(max)}g` : `${max}g`} cap`,
-      value: val.toFixed(1),
-      unit: `g · ${pctKcal}% kcal`,
+      name, hue, qual: `${Math.round(max)} g cap`,
+      pctText: `${Math.round(frac*100)}%`,
+      value: `${val.toFixed(0)} / ${Math.round(max)} g`,
       tone: frac > 1 ? 'over' : '',
       frac, barTone: frac > 1 ? 'over' : (frac >= 0.85 ? 'warn' : ''),
-      note: frac > 1 ? `${Math.round(val - max)}g over the cap` : '',
+      note: frac > 1 ? `${Math.round(val - max)} g over the cap` : '',
       sub: fat && fat.text, subTone: fat && fat.tone
     }));
   });
@@ -277,12 +301,17 @@ function fatBreakdown(t){
 }
 function macroRow(o){
   const groove = o.frac == null ? '' :
-    `<span class="macro-groove"><span class="${o.barTone||''}" style="width:${Math.min(100, o.frac*100)}%"></span></span>`;
+    `<span class="macro-groove ${o.hue||''}"><span class="${o.barTone||''}" style="width:${Math.min(100, o.frac*100)}%"></span></span>`;
   const note = o.note ? `<span class="macro-note">${escapeHtml(o.note)}</span>` : '';
   const sub = o.sub ? `<span class="macro-note ${o.subTone||''}">${escapeHtml(o.sub)}</span>` : '';
+  // The headline is the percentage when there's a target; the grams ride along small.
+  const head = o.pctText != null
+    ? `${o.pctText}<small>${escapeHtml(o.value)}</small>`
+    : `${escapeHtml(o.value)}${o.unit ? `<small>${escapeHtml(o.unit)}</small>` : ''}`;
+  const qual = o.qual ? ` <small>${escapeHtml(o.qual)}</small>` : '';
   return `<div class="macro-row">
-    <span class="macro-name">${escapeHtml(o.name)}</span>
-    <span class="macro-val ${o.tone||''}">${o.value}<small>${escapeHtml(o.unit)}</small></span>
+    <span class="macro-name">${escapeHtml(o.name)}${qual}</span>
+    <span class="macro-val ${o.tone||''}">${head}</span>
     ${groove}${note}${sub}
   </div>`;
 }
