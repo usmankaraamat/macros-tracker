@@ -627,8 +627,10 @@
          the scale's answer to it line up column for column. -->
     <div class="trend-pair">
       <div class="trend-chart"><div class="trend-cap" id="wChartCap">Weight · kg</div><div id="wChart"></div></div>
-      <div class="trend-chart"><div class="trend-cap" id="kChartCap">Intake · kcal vs corridor</div><div id="kcalChart"></div></div>
+      <div class="trend-chart"><div class="trend-cap" id="kChartCap">Balance · kcal above / below maintenance</div><div id="kcalChart"></div></div>
+      <div class="trend-chart"><div class="trend-cap" id="cChartCap">Cumulative · what it adds up to</div><div id="cumChart"></div></div>
     </div>
+    <div class="tactical balance-note" id="balanceNote" hidden></div>
     <div class="tactical" id="wStats" hidden></div>
     <div class="tactical" id="tdeeMini" hidden></div>
 
@@ -660,6 +662,13 @@
   <section class="panel">
     <span class="panel-title">Volume per muscle · last 7 days</span>
     <div id="muscleVolume"><div class="empty">Log a few sessions and volume-per-muscle appears here.</div></div>
+  </section>
+
+  <!-- The six trained circumferences, read against the waist and against the training
+       that should be moving them. Collected since the Logs tab shipped, unread until now. -->
+  <section class="panel">
+    <span class="panel-title">Tissue vs training · is it going where you trained it?</span>
+    <div id="siteProgress"><div class="empty">Log body measurements on the Logs tab to see this.</div></div>
   </section>
 
   <!-- Strength against bodyweight — the reading a lifting app cannot produce,

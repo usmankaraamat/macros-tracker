@@ -2,19 +2,48 @@
 // weight/TDEE/goal, fat-change estimate, and the weekly report card.
 
 // ---- HISTORY PANEL ----
-function dayOk(t){ return t.kcal >= FLOOR && t.kcal <= CEIL && t.p >= P_TARGET; }
+// ---- Per-day corridor bounds -------------------------------------------------
+// The corridor is not one pair of numbers. With training/rest cycling on, a session
+// day's ceiling sits hundreds of kcal above a rest day's, so every question of the
+// form "was this day inside?" has to be asked against the corridor that applied to
+// THAT day. Asking it against today's bounds reads a working schedule as a miss.
+//
+// computeTDEE walks the whole history, so the closure is built once and cached until
+// render() invalidates it.
+let _boundsFn = null;
+function invalidateBounds(){ _boundsFn = null; }
+function dayBounds(){
+  if (_boundsFn) return _boundsFn;
+  const td = GOAL.mode !== 'off' ? computeTDEE() : null;
+  const live = td && td.blended > 0 ? td.blended : null;
+  _boundsFn = date => {
+    if (!live) return { floor: FLOOR_M, ceil: CEIL_M, tdee: null };
+    const off = TRAIN.cycle
+      ? (isTrainingDay(date) ? (+TRAIN.trainOffset||0) : (+TRAIN.restOffset||0))
+      : goalOffset();
+    const c = LedgerCore.corridorFromTDEE(live, off, GOAL.band||100);
+    return { floor: c.floor, ceil: c.ceil, tdee: live };
+  };
+  return _boundsFn;
+}
+// A day is "ok" against its own corridor. `date` is optional only so a caller with
+// totals and no date still gets the old behaviour rather than a crash.
+function dayOk(t, date){
+  const b = date ? dayBounds()(date) : { floor: FLOOR, ceil: CEIL };
+  return t.kcal >= b.floor && t.kcal <= b.ceil && t.p >= P_TARGET;
+}
 function renderHistSummary(){
   const el = document.getElementById('histSummary');
   // Most recent CLOSED days (the open day is excluded so its running total doesn't
   // swing the average as the user eats), newest first.
   const all = closedDays();
   if (!all.length){ el.hidden = true; return; }
-  const week = all.slice(0,7).map(d=>totalsOf(d.ledger));
-  const avgK = week.reduce((s,t)=>s+t.kcal,0)/week.length;
-  const avgP = week.reduce((s,t)=>s+t.p,0)/week.length;
-  const okN = week.filter(dayOk).length;
+  const week = all.slice(0,7).map(d=>({date:d.date, t:totalsOf(d.ledger)}));
+  const avgK = week.reduce((s,x)=>s+x.t.kcal,0)/week.length;
+  const avgP = week.reduce((s,x)=>s+x.t.p,0)/week.length;
+  const okN = week.filter(x=>dayOk(x.t, x.date)).length;
   let streak = 0;
-  for (const d of all){ if (dayOk(totalsOf(d.ledger))) streak++; else break; }
+  for (const d of all){ if (dayOk(totalsOf(d.ledger), d.date)) streak++; else break; }
   el.hidden = false;
   el.textContent = `Last ${week.length} logged ${week.length>1?'days':'day'}: avg ${Math.round(avgK)} kcal · ${avgP.toFixed(0)}g protein · ${okN} of ${week.length} on target` + (streak>1 ? ` · ${streak}-day streak` : '');
 }
@@ -172,9 +201,21 @@ function trendSeries(){
   const end = dates[dates.length - 1];
   const start = [addDaysISO(end, -(TREND_DAYS - 1)), dates[0]].sort().pop();
   const inWin = d => d >= start && d <= end;
-  return { start, end,
+  // Each intake day carries the corridor and the maintenance figure that applied to IT,
+  // so the chart can plot balance and colour dots without ever consulting today's bounds.
+  const B = dayBounds();
+  const k = dates.filter(d => inWin(d) && tot[d] && tot[d].kcal > 0).map(d => {
+    const b = B(d);
+    // With the goal off there is no TDEE — the declared corridor's midpoint is the only
+    // maintenance the user has asserted, so it becomes the reference and is labelled as such.
+    const ref = b.tdee != null ? b.tdee : (b.floor + b.ceil) / 2;
+    const kcal = tot[d].kcal;
+    return { date: d, kcal: kcal, ref: ref, floor: b.floor, ceil: b.ceil,
+             state: kcal > b.ceil ? 'over' : kcal < b.floor ? 'under' : 'in' };
+  });
+  return { start, end, refIsTDEE: !!(k.length && B(k[0].date).tdee != null),
     w: dates.filter(d => inWin(d) && +map[d] > 0).map(d => ({ date:d, kg:+map[d] })),
-    k: dates.filter(d => inWin(d) && tot[d] && tot[d].kcal > 0).map(d => ({ date:d, kcal:tot[d].kcal })) };
+    k: k };
 }
 // The shared x-mapping. Both charts call this, which is the whole point.
 function trendX(s){
@@ -210,36 +251,150 @@ function weightChartSVG(s, X){
     + `<text x="${TREND_W-2}" y="${Math.max(11, lp[1]-7).toFixed(1)}" text-anchor="end" font-size="11" font-weight="700" fill="var(--chalk)">${last.kg}kg</text>`
     + trendAxis(s));
 }
-// Intake against the corridor. The band is the corridor; the line is neutral and
-// a dot only takes colour when the day landed out of tolerance.
-function kcalChartSVG(s, X){
+// Intake as ENERGY BALANCE — the distance from maintenance, not from the goal.
+// The old chart plotted raw intake against a flat corridor, which answered "did I hit
+// my target" and could not answer "by how much did I clear maintenance". It also drew
+// one fixed band across a window whose real bounds move with the training cycle.
+//
+// Zero is maintenance. Above it is a surplus, below it a deficit, and the corridor is a
+// ribbon that follows each day's own bounds — so a bulker reads the same chart as a
+// cutter, just on the other side of the line.
+function balanceChartSVG(s, X){
   const pts = s.k;
   if (pts.length < 2) return '';
-  const uH = TREND_H - TREND_PADT - TREND_PADB, base = TREND_H - TREND_PADB;
-  const yMax = Math.max(CEIL*1.15, ...pts.map(p=>p.kcal)) * 1.02;
-  const Y = v => TREND_PADT + uH*(1 - v/yMax);
-  const bTop = Y(CEIL), bBot = Y(FLOOR), W = TREND_W-TREND_PADL-TREND_PADR;
-  const band = `<rect x="${TREND_PADL}" y="${bTop.toFixed(1)}" width="${W}" height="${(bBot-bTop).toFixed(1)}" fill="var(--accent-wash)" rx="3"/>`
-    + `<line x1="${TREND_PADL}" y1="${bBot.toFixed(1)}" x2="${TREND_W-TREND_PADR}" y2="${bBot.toFixed(1)}" stroke="var(--rule-lit)" stroke-width="1" stroke-dasharray="3 3"/>`
-    + `<line x1="${TREND_PADL}" y1="${bTop.toFixed(1)}" x2="${TREND_W-TREND_PADR}" y2="${bTop.toFixed(1)}" stroke="var(--rule-lit)" stroke-width="1" stroke-dasharray="3 3"/>`;
-  const P = pts.map(p=>[X(p.date), Y(p.kcal)]);
-  const line = smoothPath(P);
-  const area = `${line} L${P[P.length-1][0].toFixed(1)},${base} L${P[0][0].toFixed(1)},${base} Z`;
+  const uH = TREND_H - TREND_PADT - TREND_PADB;
+  const bal = p => p.kcal - p.ref;
+  const mags = pts.map(p=>Math.abs(bal(p)))
+    .concat(pts.map(p=>Math.abs(p.ceil-p.ref)), pts.map(p=>Math.abs(p.floor-p.ref)));
+  // Symmetric about zero so the maintenance line sits mid-chart and the eye reads
+  // "how far, which side" without decoding an axis.
+  const span = Math.max(300, ...mags) * 1.15;
+  const Y = v => TREND_PADT + uH*(1 - (v + span)/(2*span));
+  const z = Y(0);
+  const top = pts.map(p=>[X(p.date), Y(p.ceil - p.ref)]);
+  const bot = pts.map(p=>[X(p.date), Y(p.floor - p.ref)]);
+  const pathOf = a => a.map(q=>`${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(' L');
+  // Straight segments, not a spline: the corridor genuinely steps between training and
+  // rest days, and smoothing it would draw a gradual change that never happened.
+  const ribbon = `<path d="M${pathOf(top)} L${pathOf(bot.slice().reverse())} Z" fill="var(--accent-wash)"/>`
+    + `<path d="M${pathOf(top)}" fill="none" stroke="var(--rule-lit)" stroke-width="1" stroke-dasharray="3 3"/>`
+    + `<path d="M${pathOf(bot)}" fill="none" stroke="var(--rule-lit)" stroke-width="1" stroke-dasharray="3 3"/>`;
+  const P = pts.map(p=>[X(p.date), Y(bal(p))]);
   const dots = pts.map((p,i)=>{
-    const c = p.kcal > CEIL ? 'var(--hot)' : p.kcal >= FLOOR ? 'var(--accent)' : 'var(--brass)';
+    const c = p.state==='over' ? 'var(--hot)' : p.state==='under' ? 'var(--brass)' : 'var(--accent)';
     const r = i===pts.length-1 ? 3.4 : 2.4;
     const ring = i===pts.length-1 ? ` stroke="var(--slab)" stroke-width="2"` : '';
     return `<circle cx="${P[i][0].toFixed(1)}" cy="${P[i][1].toFixed(1)}" r="${r}" fill="${c}"${ring}/>`;
   }).join('');
+  const lastBal = Math.round(bal(pts[pts.length-1]));
   return trendSVG(
-    `<defs><linearGradient id="kgGrad" x1="0" x2="0" y1="0" y2="1">`
-    + `<stop offset="0" stop-color="var(--graphite)" stop-opacity=".20"/>`
-    + `<stop offset="1" stop-color="var(--graphite)" stop-opacity="0"/></linearGradient></defs>`
-    + band
-    + `<path d="${area}" fill="url(#kgGrad)"/>`
-    + `<path d="${line}" fill="none" stroke="var(--graphite)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dots}`
-    + `<text x="${TREND_W-2}" y="${(bTop-3).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--faint)">${Math.round(CEIL)}</text>`
+    ribbon
+    + `<line x1="${TREND_PADL}" y1="${z.toFixed(1)}" x2="${TREND_W-TREND_PADR}" y2="${z.toFixed(1)}" stroke="var(--rule-lit)" stroke-width="1.5"/>`
+    + `<text x="${TREND_PADL+1}" y="${(z-4).toFixed(1)}" font-size="9" fill="var(--faint)">${s.refIsTDEE?'TDEE':'mid'} ${Math.round(pts[pts.length-1].ref)}</text>`
+    + `<path d="${smoothPath(P)}" fill="none" stroke="var(--graphite)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dots}`
+    + `<text x="${TREND_W-2}" y="${Math.max(10, Math.min(TREND_H-TREND_PADB-1, P[P.length-1][1]-7)).toFixed(1)}" text-anchor="end" font-size="11" font-weight="700" fill="var(--chalk)">${lastBal>0?'+':''}${lastBal}</text>`
     + trendAxis(s));
+}
+// The running total of those daily balances. This is the chart that distinguishes one
+// big day from a small surplus held for three weeks — the first is a bump, the second
+// is the entire bulk. Right-hand label is the same number in kg of fat-equivalent.
+function cumChartSVG(s, X){
+  const pts = s.k;
+  if (pts.length < 2) return '';
+  const uH = TREND_H - TREND_PADT - TREND_PADB;
+  let run = 0;
+  const cum = pts.map(p=>{ run += p.kcal - p.ref; return {date:p.date, v:run}; });
+  const lo = Math.min(0, ...cum.map(c=>c.v)), hi = Math.max(0, ...cum.map(c=>c.v));
+  const pad = Math.max(200, (hi-lo)*0.12);
+  const Y = v => TREND_PADT + uH*(1 - (v - lo + pad)/((hi-lo) + 2*pad));
+  const z = Y(0);
+  const P = cum.map(c=>[X(c.date), Y(c.v)]);
+  const line = smoothPath(P);
+  const area = `${line} L${P[P.length-1][0].toFixed(1)},${z.toFixed(1)} L${P[0][0].toFixed(1)},${z.toFixed(1)} Z`;
+  const end = cum[cum.length-1].v;
+  const tint = end >= 0 ? 'var(--accent)' : 'var(--brass)';
+  const kg = (end / 7700).toFixed(2);
+  return trendSVG(
+    `<defs><linearGradient id="cumGrad" x1="0" x2="0" y1="0" y2="1">`
+    + `<stop offset="0" stop-color="${tint}" stop-opacity=".26"/>`
+    + `<stop offset="1" stop-color="${tint}" stop-opacity="0"/></linearGradient></defs>`
+    + `<path d="${area}" fill="url(#cumGrad)"/>`
+    + `<line x1="${TREND_PADL}" y1="${z.toFixed(1)}" x2="${TREND_W-TREND_PADR}" y2="${z.toFixed(1)}" stroke="var(--rule-lit)" stroke-width="1" stroke-dasharray="3 3"/>`
+    + `<path d="${line}" fill="none" stroke="${tint}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`
+    + `<circle cx="${P[P.length-1][0].toFixed(1)}" cy="${P[P.length-1][1].toFixed(1)}" r="3.4" fill="${tint}" stroke="var(--slab)" stroke-width="2"/>`
+    + `<text x="${TREND_W-2}" y="${Math.max(11, P[P.length-1][1]-7).toFixed(1)}" text-anchor="end" font-size="11" font-weight="700" fill="var(--chalk)">${end>0?'+':''}${kg}kg</text>`
+    + trendAxis(s));
+}
+// The window the balance readout covers. Shorter than the 45-day chart on purpose: a
+// bulk or a cut is steered on the last few weeks, and a stale month dilutes the signal
+// you would actually act on.
+const BALANCE_DAYS = 28;
+// Everything the balance question needs, computed once: the per-day surplus/deficit over
+// the recent window, and the scale's verdict on it.
+function balanceNow(){
+  const end = ACTIVE_DATE, start = addDaysISO(end, -(BALANCE_DAYS - 1));
+  const B = dayBounds();
+  const tot = {}; allDays(true).forEach(d => { tot[d.date] = totalsOf(d.ledger); });
+  const days = Object.keys(tot)
+    .filter(d => d >= start && d <= end && d !== ACTIVE_DATE && tot[d].kcal > 0)
+    .sort()
+    .map(d => {
+      const b = B(d);
+      const ref = b.tdee != null ? b.tdee : (b.floor + b.ceil) / 2;
+      return { date: d, kcal: tot[d].kcal, tdee: ref, floor: b.floor, ceil: b.ceil };
+    });
+  const eb = LedgerCore.energyBalance(days);
+  // Actual weight change over the same span, from the fitted trend rather than
+  // first-minus-last — a single puffy morning should not set the verdict.
+  const map = weightsMap();
+  const from = TREND_START > start ? TREND_START : start;
+  const w = Object.keys(map).filter(d => +map[d] > 0 && d >= from && d <= end).sort()
+    .map(d => ({ date: d, kg: +map[d] }));
+  let actualKg = null, spanDays = 0;
+  if (w.length >= 2){
+    const tr = LedgerCore.weightTrend(w);
+    spanDays = Math.round((Date.parse(w[w.length-1].date) - Date.parse(w[0].date))/86400000) + 1;
+    if (tr) actualKg = +(tr.ratePerWeek / 7 * spanDays).toFixed(2);
+  }
+  // The check is only fair over the days BOTH series cover.
+  const nBoth = Math.min(eb.n, spanDays || 0);
+  const scaled = (actualKg != null && spanDays > 0) ? +(actualKg * nBoth / spanDays).toFixed(2) : null;
+  const predScaled = eb.n > 0 && nBoth > 0 ? +(eb.sum * (nBoth/eb.n) / 7700).toFixed(2) : null;
+  return { eb, actualKg: scaled, check: LedgerCore.balanceCheck(predScaled, scaled, nBoth) };
+}
+// The sentence the user asked for: how far from maintenance, for how long, and what the
+// scale says about it. Written to read the same whether the number is positive or negative.
+function balanceLine(){
+  const { eb, check } = balanceNow();
+  if (!eb.n) return '';
+  const surplus = eb.avg >= 0;
+  const word = surplus ? 'surplus' : 'deficit';
+  const mag = Math.abs(eb.avg).toLocaleString();
+  const tot = Math.abs(eb.sum).toLocaleString();
+  const kg = Math.abs(eb.predictedKg).toFixed(2);
+  const ref = dayBounds()(ACTIVE_DATE).tdee != null ? 'maintenance' : 'your corridor midpoint';
+  let html = `<b>${eb.n} logged day${eb.n===1?'':'s'}</b>: average <b>${surplus?'+':'−'}${mag} kcal/day</b> `
+    + `against ${ref} — a ${word} of <b>${tot} kcal</b> in total, `
+    + `which predicts <b>${surplus?'+':'−'}${kg} kg</b>.`;
+  if (eb.n >= 3)
+    html += ` <span class="ink-dim">${eb.surplusDays} day${eb.surplusDays===1?'':'s'} over ${ref}, `
+      + `${eb.deficitDays} under · ${eb.inside}/${eb.n} inside that day's corridor.</span>`;
+  if (check.verdict === 'aligned')
+    html += ` The scale agrees (<b>${check.actualKg>0?'+':''}${check.actualKg} kg</b> actual) — the TDEE estimate is holding up.`;
+  else if (check.verdict === 'tdee-high')
+    html += ` The scale moved <b>${check.actualKg>0?'+':''}${check.actualKg} kg</b>, more than predicted. `
+      + `Either maintenance is nearer <b>${(currentTDEE()+check.tdeeShift).toLocaleString()}</b> `
+      + `(<b>${check.tdeeShift}</b> kcal/day), or intake is being under-logged — from here the two look identical. `
+      + `<span class="ink-dim">In a surplus some of the gap is lean tissue and water, which cost far less than 7700 kcal/kg.</span>`;
+  else if (check.verdict === 'tdee-low')
+    html += ` The scale moved <b>${check.actualKg>0?'+':''}${check.actualKg} kg</b>, less than predicted. `
+      + `Either maintenance is nearer <b>${(currentTDEE()+check.tdeeShift).toLocaleString()}</b> `
+      + `(<b>+${check.tdeeShift}</b> kcal/day), or intake is being over-logged.`;
+  return html;
+}
+function currentTDEE(){
+  const b = dayBounds()(ACTIVE_DATE);
+  return b.tdee != null ? Math.round(b.tdee) : Math.round((FLOOR_M + CEIL_M)/2);
 }
 
 function renderWeight(){
@@ -249,14 +404,22 @@ function renderWeight(){
   if (document.activeElement !== inEl) inEl.value = map[VIEW_DATE] || '';
   const entries = Object.keys(map).sort().map(d=>({date:d, kg:+map[d]})).filter(e=>e.kg>0);
   const chart = document.getElementById('wChart'), kChart = document.getElementById('kcalChart');
+  const cChart = document.getElementById('cumChart'), bNote = document.getElementById('balanceNote');
   const stats = document.getElementById('wStats');
 
   const s = trendSeries();
   const X = s ? trendX(s) : null;
-  chart.innerHTML  = s ? (weightChartSVG(s, X) || '<div class="empty">Two weigh-ins draw the trend.</div>') : '';
-  kChart.innerHTML = s ? (kcalChartSVG(s, X)   || '<div class="empty">Close two days to draw intake.</div>') : '';
+  chart.innerHTML  = s ? (weightChartSVG(s, X)  || '<div class="empty">Two weigh-ins draw the trend.</div>') : '';
+  kChart.innerHTML = s ? (balanceChartSVG(s, X) || '<div class="empty">Close two days to draw the balance.</div>') : '';
+  cChart.innerHTML = s ? (cumChartSVG(s, X)     || '') : '';
   document.getElementById('wChartCap').textContent = 'Weight · kg';
-  document.getElementById('kChartCap').textContent = `Intake · kcal vs ${Math.round(FLOOR)}–${Math.round(CEIL)}`;
+  document.getElementById('kChartCap').textContent =
+    `Balance · kcal above / below ${s && s.refIsTDEE ? 'maintenance' : 'the corridor midpoint'}`;
+  document.getElementById('cChartCap').textContent =
+    `Cumulative · running total across these ${s && s.k ? s.k.length : 0} logged days`;
+  const bl = balanceLine();
+  bNote.innerHTML = bl;
+  bNote.hidden = !bl;
 
   if (entries.length < 2){
     stats.hidden = false;
@@ -422,14 +585,7 @@ function corridorDriftNow(){
   // Each day is judged against the corridor that applied to IT. With the training
   // cycle on, a rest day's ceiling sits 400 kcal below a session day's, and comparing
   // both to today's bounds would read a working schedule as a mis-set goal.
-  const td = GOAL.mode!=='off' ? computeTDEE() : null;
-  const boundsFor = date => {
-    if (!td || !(td.blended>0)) return { floor: FLOOR_M, ceil: CEIL_M };
-    const off = TRAIN.cycle
-      ? (isTrainingDay(date) ? (+TRAIN.trainOffset||0) : (+TRAIN.restOffset||0))
-      : goalOffset();
-    return LedgerCore.corridorFromTDEE(td.blended, off, GOAL.band||100);
-  };
+  const boundsFor = dayBounds();
   const days=Object.keys(tot)
     .filter(d=>d>=start && d<=end && d!==ACTIVE_DATE && tot[d].kcal>0)
     .map(d=>Object.assign({kcal: tot[d].kcal}, boundsFor(d)));
@@ -586,11 +742,11 @@ function renderAverages() {
     document.getElementById(id).classList.remove('none'));
 
   const calcAvg = (arr) => {
-    const tots = arr.map(d => totalsOf(d.ledger));
+    const tots = arr.map(d => Object.assign({date:d.date}, totalsOf(d.ledger)));
     return {
       kcal: tots.reduce((s,t) => s+t.kcal, 0) / tots.length,
       p: tots.reduce((s,t) => s+t.p, 0) / tots.length,
-      ok: tots.filter(dayOk).length,
+      ok: tots.filter(t => dayOk(t, t.date)).length,
       total: tots.length
     };
   };
@@ -721,6 +877,7 @@ function renderTrendsTab(){
   renderFatEstimate();   // TDEE + goal readouts are refreshed by render(), not here
   renderDataTrust();
   renderMuscleVolume();
+  renderSiteProgress();
   renderWeeklyReport();
   renderTopFoods();
   renderRecompFromLifts();
@@ -736,12 +893,12 @@ function renderWeeklyReport() {
   const week = all.slice(0, Math.min(7, all.length));
   const tots = week.map(d => ({ date: d.date, ...totalsOf(d.ledger) }));
   const avgK = tots.reduce((s,t) => s+t.kcal, 0) / tots.length;
-  const okDays = tots.filter(dayOk).length;
+  const okDays = tots.filter(t => dayOk(t, t.date)).length;
 
   // Best and worst days
   const sorted = [...tots].sort((a,b) => {
-    const aOk = dayOk(a) ? 1 : 0;
-    const bOk = dayOk(b) ? 1 : 0;
+    const aOk = dayOk(a, a.date) ? 1 : 0;
+    const bOk = dayOk(b, b.date) ? 1 : 0;
     return bOk - aOk || Math.abs(a.kcal - FLOOR) - Math.abs(b.kcal - FLOOR);
   });
   const best = sorted[0];
@@ -864,6 +1021,88 @@ function renderMuscleVolume(){
     + rows
     + `<div class="mv-foot ink-dim">The footnote under each muscle is its <b>progression</b> — every exercise that trains it, weighted by involvement and trust, rolled into one %/month over the last 8 weeks. It reads a muscle a single lift can't: an isolation looking flat while the compounds that hit it climb still nets out as progress. ±&nbsp;is the margin; the tier is how far the pooled trend clears it.</div>`
     + (untagged ? `<div class="mv-untagged">⚠ ${untagged%1?untagged.toFixed(1):untagged} set${untagged===1?'':'s'} on exercises with no muscle tag — they are pooled, not counted per muscle. Newly-logged lifts outside the seed list need tagging.</div>` : '');
+}
+
+// ---- Tissue vs training ------------------------------------------------------
+// Nine circumferences have been collected since the Logs tab shipped and three were
+// ever read. This closes the loop the app is uniquely able to close: measured tissue,
+// against trained volume, against the strength trend for the same muscles.
+//
+// The waist is the reference, not a site. In a surplus every measurement grows, so the
+// centimetre on its own says nothing — the site's size RELATIVE to the waist is the
+// recomposition read, and it works unchanged for someone cutting.
+const SITE_VERDICT = {
+  'building':    ['up',   'gaining on the waist'],
+  'proportional':['flat', 'growing with the waist'],
+  'fat-leading': ['down', 'waist growing faster'],
+  'leaning':     ['up',   'holding while the waist shrinks'],
+  'fat-gaining': ['down', 'flat while the waist grows'],
+  'growing':     ['up',   'growing'],
+  'shrinking':   ['down', 'shrinking'],
+  'holding':     ['flat', 'holding'],
+  'thin':        ['flat', 'needs a second measurement']
+};
+const SITE_SIGNAL = {
+  'confirmed':    'the strength trend agrees',
+  'unconfirmed':  'but strength is not climbing — in a surplus this can be fat and water',
+  'strength-only':'strength is climbing without the tape moving — neural gain, or a re-sited tape',
+  'undertrained': 'and it is barely trained'
+};
+function measureSeriesByKey(){
+  const map = measureMap(), out = {};
+  Object.keys(map).sort().forEach(d => {
+    const m = map[d]; if (!m) return;
+    Object.keys(m).forEach(k => {
+      if (+m[k] > 0) (out[k] = out[k] || []).push({ date: d, v: +m[k] });
+    });
+  });
+  return out;
+}
+function renderSiteProgress(){
+  const wrap = document.getElementById('siteProgress'); if (!wrap) return;
+  const series = measureSeriesByKey();
+  const sites = LedgerCore.MEASURE_SITE_KEYS.filter(k => (series[k]||[]).length);
+  if (!sites.length){
+    wrap.innerHTML = '<div class="empty">Log a chest, shoulder, arm, forearm, thigh or calf measurement on the <b>Logs</b> tab — measured twice, they become a recomposition read the scale cannot give you.</div>';
+    return;
+  }
+  const all = allWorkouts(), cat = exerciseCatalog();
+  const sessions = Object.keys(all).map(d=>all[d]);
+  const end = Object.keys(all).sort().pop() || VIEW_DATE;
+  const vol = sessions.length ? LedgerCore.weeklyVolumeByMuscle(sessions, cat, { from: addDaysISO(end,-6), to: end }) : {};
+  const prog = sessions.length ? LedgerCore.muscleProgress(liftTrends(all, weightSeries()), cat) : {};
+  const rows = LedgerCore.siteProgress(series, vol, prog);
+  const hasWaist = (series.waist||[]).length >= 2;
+
+  const body = rows.map(r => {
+    const [cls, phrase] = SITE_VERDICT[r.verdict] || SITE_VERDICT.thin;
+    const cm = r.cmPerMonth == null ? '—'
+      : `${r.cmPerMonth>0?'+':''}${r.cmPerMonth.toFixed(2)} cm/mo`;
+    const ratio = r.ratioPctPerMonth == null ? ''
+      : ` · vs waist ${r.ratioPctPerMonth>0?'+':''}${r.ratioPctPerMonth.toFixed(1)}%/mo`;
+    const train = r.sets > 0
+      ? `${r.sets % 1 ? r.sets.toFixed(1) : r.sets} sets/wk`
+      : 'not trained this week';
+    const str = r.strengthPct == null ? ''
+      : ` · strength ${r.strengthPct>0?'+':''}${r.strengthPct.toFixed(1)}%/mo`
+        + (r.strengthConfidence ? ` <span class="lift-conf ${CONF_CLS[r.strengthConfidence]||'low'}">${r.strengthConfidence}</span>` : '');
+    const sig = r.signal !== 'none' && SITE_SIGNAL[r.signal]
+      ? `<div class="site-sig ${cls}">${SITE_SIGNAL[r.signal]}</div>` : '';
+    // Name and the headline rate share the top line; everything qualifying it sits below,
+    // so a long site name can never squeeze the number into a wrap.
+    return `<div class="site-row">
+      <div class="site-name">${escapeHtml(r.label)}</div>
+      <div class="site-move ${cls}">${cm}</div>
+      <div class="site-verdict ${cls}">${phrase}<span class="ink-dim">${ratio}</span></div>
+      <div class="site-train ink-dim">${r.latest!=null?r.latest.toFixed(1)+' cm now · ':''}${train}${str}</div>
+      ${sig}
+    </div>`;
+  }).join('');
+
+  wrap.innerHTML = `<div class="mv-cap ink-dim">Measured tissue vs trained volume · trends over every logged measurement</div>`
+    + body
+    + (hasWaist ? '' : '<div class="mv-untagged">⚠ Log your waist alongside these. Without it a centimetre is just a centimetre — the ratio to the waist is what separates tissue from a general surplus.</div>')
+    + `<div class="mv-foot ink-dim">In a surplus everything grows, so the raw centimetre is not the signal — <b>vs waist</b> is. A site gaining on the waist is tissue; a site flat while the waist climbs is not. Strength is the second opinion: a tape that moves while the lifts do too is the one reading you can trust.</div>`;
 }
 
 function renderTopFoods() {

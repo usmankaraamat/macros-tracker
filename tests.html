@@ -1432,6 +1432,119 @@ group('sessionMetrics warmup exclusion + exerciseTrend deload skip');
   check('but the deload still shows as the latest session', skipped.latest && Math.round(skipped.latest.topLoad)===80);
 })();
 
+
+// ---- energyBalance: distance from maintenance, and what it adds up to ----
+group('energyBalance — per-day surplus/deficit and the running total');
+(function(){
+  const days = [
+    {date:'2026-08-01', kcal:3000, tdee:2700, floor:2900, ceil:3100},
+    {date:'2026-08-02', kcal:2500, tdee:2700, floor:2600, ceil:2800},
+    {date:'2026-08-03', kcal:3400, tdee:2700, floor:2900, ceil:3100}];
+  const r = C.energyBalance(days);
+  check('signed balance per day', r.points.map(p=>p.balance).join(',')==='300,-200,700', r.points.map(p=>p.balance).join(','));
+  check('cum is the running sum', r.points.map(p=>p.cum).join(',')==='300,100,800');
+  check('sum and average', r.sum===800 && r.avg===267, `${r.sum} / ${r.avg}`);
+  check('predicted kg uses 7700', approx(r.predictedKg, 0.10, 0.005), `${r.predictedKg}`);
+  // Each day is judged against ITS OWN corridor, which is the whole point of the shape.
+  check('state uses that day’s bounds', r.points.map(p=>p.state).join(',')==='in,under,over', r.points.map(p=>p.state).join(','));
+  check('inside/over/under tallies', r.inside===1 && r.over===1 && r.under===1);
+  check('surplus vs deficit day counts', r.surplusDays===2 && r.deficitDays===1);
+  // The regression guard: same intake, different day-bounds, different verdict. Judging a
+  // rest day by a training day's ceiling is exactly the error this shape prevents.
+  const byFlat = C.energyBalance([{date:'2026-08-02', kcal:2700, tdee:2700, floor:2900, ceil:3100}]);
+  const byOwn  = C.energyBalance([{date:'2026-08-02', kcal:2700, tdee:2700, floor:2600, ceil:2800}]);
+  check('one corridor for all days would mislabel a rest day',
+        byFlat.points[0].state==='under' && byOwn.points[0].state==='in');
+  check('balance is unaffected by the corridor', byFlat.points[0].balance===0 && byOwn.points[0].balance===0);
+  check('unordered input is sorted', C.energyBalance([days[2],days[0],days[1]]).points[0].date==='2026-08-01');
+  check('days without intake or TDEE are dropped', C.energyBalance([{date:'x',kcal:0,tdee:2700},{date:'y',kcal:2000,tdee:0}]).n===0);
+  check('empty input is safe', C.energyBalance([]).n===0 && C.energyBalance(null).sum===0);
+  check('missing bounds report unknown, not a false pass',
+        C.energyBalance([{date:'2026-08-01',kcal:3000,tdee:2700}]).points[0].state==='unknown');
+  // A deficit is the mirror image, not a special case.
+  const cut = C.energyBalance([{date:'2026-08-01',kcal:1800,tdee:2400,floor:1900,ceil:2100}]);
+  check('a deficit reads negative', cut.points[0].balance===-600 && cut.predictedKg < 0);
+})();
+
+// ---- balanceCheck: does the scale agree with the energy math? ----
+group('balanceCheck — the TDEE self-check');
+(function(){
+  check('too few days stays thin', C.balanceCheck(0.5, 1.4, 7).verdict==='thin');
+  check('aligned inside tolerance', C.balanceCheck(0.5, 0.6, 28).verdict==='aligned');
+  const hi = C.balanceCheck(0.5, 1.4, 28);
+  // Gained MORE than predicted => real maintenance is LOWER => a negative correction.
+  check('gaining faster than predicted blames a too-high TDEE', hi.verdict==='tdee-high', hi.verdict);
+  check('and the shift is negative kcal/day', hi.tdeeShift < 0, `${hi.tdeeShift}`);
+  check('shift is diff x 7700 / days', approx(hi.tdeeShift, -0.9*7700/28, 1), `${hi.tdeeShift}`);
+  const lo = C.balanceCheck(0.5, -0.4, 28);
+  check('gaining slower blames a too-low TDEE', lo.verdict==='tdee-low' && lo.tdeeShift > 0, `${lo.verdict} ${lo.tdeeShift}`);
+  // Tolerance scales with the window, so a short window is not judged by a monthly band.
+  check('tolerance scales with the window', C.balanceCheck(0,0.3,14).tolKg < C.balanceCheck(0,0.3,28).tolKg);
+  check('0.3kg over 14d clears the scaled band', C.balanceCheck(0, 0.3, 14).verdict==='tdee-high');
+  check('the same 0.3kg over 28d does not', C.balanceCheck(0, 0.3, 28).verdict==='aligned');
+  check('nulls stay thin', C.balanceCheck(null, 1.0, 28).verdict==='thin' && C.balanceCheck(1.0, null, 28).verdict==='thin');
+})();
+
+// ---- siteProgress: measured tissue against the waist and the training ----
+group('siteProgress — circumference vs waist vs training');
+(function(){
+  const S = {
+    waist: [{date:'2026-06-01',v:84},{date:'2026-07-01',v:84.5},{date:'2026-08-01',v:85}],
+    arm:   [{date:'2026-06-01',v:35},{date:'2026-07-01',v:35.8},{date:'2026-08-01',v:36.6}],
+    thigh: [{date:'2026-06-01',v:58},{date:'2026-07-01',v:58.1},{date:'2026-08-01',v:58.0}]
+  };
+  const vol  = {biceps:9, triceps:8, quads:3, hamstrings:2, glutes:1};
+  const prog = {biceps:{pctPerMonth:2.4,confidence:'medium'}, triceps:{pctPerMonth:1.1,confidence:'low'},
+                quads:{pctPerMonth:3.0,confidence:'high'}};
+  const rows = C.siteProgress(S, vol, prog);
+  const arm = rows.find(r=>r.site==='arm'), thigh = rows.find(r=>r.site==='thigh');
+  check('only measured sites are returned', rows.length===2 && !rows.find(r=>r.site==='calf'));
+  check('arm growth is per-month cm', approx(arm.cmPerMonth, 0.79, 0.05), `${arm.cmPerMonth}`);
+  check('arm outgrows the waist', arm.ratioPctPerMonth > 0 && arm.verdict==='building', `${arm.verdict}`);
+  check('and the strength trend confirms it', arm.signal==='confirmed');
+  check('arm pools both its muscles', arm.sets===17 && arm.strengthPct!=null);
+  check('confidence is the best of the contributing muscles', arm.strengthConfidence==='medium');
+  // The diagnostic case: nothing measurable happening while the waist climbs.
+  check('a flat site under a growing waist is not progress', thigh.verdict==='fat-gaining', `${thigh.verdict}`);
+  check('strength climbing without the tape is flagged', thigh.signal==='strength-only', `${thigh.signal}`);
+  // Without a waist there is no ratio - say so rather than invent one.
+  const noWaist = C.siteProgress({arm:S.arm}, vol, prog);
+  check('no waist means no ratio, and a plainer verdict',
+        noWaist[0].ratioPctPerMonth===null && noWaist[0].verdict==='growing', `${noWaist[0].verdict}`);
+  // A tape re-sited by a couple of millimetres must not read as growth.
+  const noise = C.siteProgress({waist:S.waist, arm:[{date:'2026-06-01',v:35},{date:'2026-08-01',v:35.1}]}, {}, {});
+  check('sub-threshold movement is not called growth', noise[0].verdict!=='building' && noise[0].verdict!=='growing', `${noise[0].verdict}`);
+  check('a single measurement yields no trend', C.siteProgress({arm:[{date:'2026-06-01',v:35}]}, {}, {})[0].cmPerMonth===null);
+  check('undertrained sites are named',
+        C.siteProgress({waist:S.waist, calf:[{date:'2026-06-01',v:38},{date:'2026-08-01',v:38}]}, {calves:2}, {})[0].signal==='undertrained');
+  // Zero sets is MORE undertrained than two, not a special case that falls through.
+  check('a site with no sets at all is undertrained too',
+        C.siteProgress({waist:S.waist, calf:[{date:'2026-06-01',v:38},{date:'2026-08-01',v:38}]}, {}, {})[0].signal==='undertrained');
+  // A site that IS growing is never called undertrained, however little it was trained.
+  check('growth outranks a low set count',
+        C.siteProgress({waist:S.waist, arm:S.arm}, {}, {}).find(r=>r.site==='arm').signal!=='undertrained');
+  // A cut: waist coming down faster than the limb is the good reading, not a loss.
+  const cutS = { waist:[{date:'2026-06-01',v:90},{date:'2026-08-01',v:86}],
+                 arm:  [{date:'2026-06-01',v:35},{date:'2026-08-01',v:35}] };
+  check('holding a limb while the waist shrinks reads as leaning',
+        C.siteProgress(cutS, {}, {})[0].verdict==='leaning', `${C.siteProgress(cutS, {}, {})[0].verdict}`);
+  check('training data is optional', C.siteProgress(S).length===2);
+  check('empty input is safe', C.siteProgress({}, {}, {}).length===0 && C.siteProgress(null).length===0);
+})();
+
+// ---- ratioSeries: pairing is what makes a ratio mean anything ----
+group('ratioSeries — site as a percentage of waist');
+(function(){
+  const arm   = [{date:'2026-06-01',v:35},{date:'2026-07-01',v:36},{date:'2026-09-01',v:37}];
+  const waist = [{date:'2026-06-01',v:84},{date:'2026-07-01',v:84}];
+  const r = C.ratioSeries(arm, waist);
+  check('only dates measured on BOTH are paired', r.length===2, `${r.length}`);
+  check('ratio is a percentage of waist', approx(r[0].v, 35/84*100, 0.01));
+  check('output is date-ordered', r[0].date < r[1].date);
+  check('no waist means no pairs', C.ratioSeries(arm, []).length===0);
+  check('zero or missing values are skipped', C.ratioSeries([{date:'2026-06-01',v:0}], waist).length===0);
+})();
+
 // ---- summary ----
 const sum = document.getElementById('summary');
 sum.className = failed === 0 ? 'allpass' : 'anyfail';

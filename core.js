@@ -424,6 +424,81 @@
     return { n, sum, kcalLow, kcalHigh, kgLow: kcalLow / KCAL_PER_KG_FAT, kgHigh: kcalHigh / KCAL_PER_KG_FAT };
   }
 
+
+  // ---- Energy balance: intake measured against maintenance, day by day -------
+  // The corridor answers "did I hit my goal"; this answers "where did I actually sit
+  // relative to maintenance, and what has that added up to". They are different
+  // questions, and the second is the one a bulk or a cut is actually made of: a single
+  // ceiling breach means nothing, +150 kcal/day for three weeks is a third of a kilo.
+  //
+  // days = [{date, kcal, tdee, floor, ceil}] — floor/ceil are THAT DAY'S corridor, not
+  // today's. With training/rest cycling the bounds swing hundreds of kcal between
+  // consecutive days, and judging a whole window against one pair of numbers reads a
+  // working schedule as a miss (the same error corridorDrift exists to avoid).
+  //
+  // `balance` is signed: positive is a surplus, negative a deficit, and neither is good
+  // nor bad on its own — the goal decides that. The running `cum` is the point.
+  function energyBalance(days, opts) {
+    const xs = (days || [])
+      .filter(d => d && d.date && +d.kcal > 0 && +d.tdee > 0)
+      .slice().sort((a, b) => a.date < b.date ? -1 : 1);
+    let cum = 0;
+    const points = xs.map(d => {
+      const bal = +d.kcal - +d.tdee;
+      cum += bal;
+      const floor = +d.floor || 0, ceil = +d.ceil || 0;
+      const state = ceil > floor
+        ? (+d.kcal > ceil ? 'over' : +d.kcal < floor ? 'under' : 'in')
+        : 'unknown';
+      return { date: d.date, kcal: Math.round(+d.kcal), tdee: Math.round(+d.tdee),
+               balance: Math.round(bal), cum: Math.round(cum),
+               floor: floor || null, ceil: ceil || null, state: state };
+    });
+    const n = points.length;
+    const sum = n ? points[n - 1].cum : 0;
+    const surplusDays = points.filter(p => p.balance > 0).length;
+    return { n: n, points: points, sum: sum,
+             avg: n ? Math.round(sum / n) : 0,
+             predictedKg: n ? +(sum / KCAL_PER_KG_FAT).toFixed(2) : null,
+             surplusDays: surplusDays, deficitDays: n - surplusDays,
+             over: points.filter(p => p.state === 'over').length,
+             under: points.filter(p => p.state === 'under').length,
+             inside: points.filter(p => p.state === 'in').length,
+             first: n ? points[0].date : null, last: n ? points[n - 1].date : null };
+  }
+
+  // Did the scale do what the energy math said it would? This is the only self-check the
+  // app has on its own TDEE: predicted kg comes from Σ(intake − TDEE), actual kg from the
+  // weigh-in trend over the same days. A persistent gap means the TDEE is wrong — or that
+  // intake is being mis-logged, which is indistinguishable from here and is said out loud
+  // rather than quietly blamed on the metabolism.
+  //
+  // IMPORTANT: 7700 kcal/kg is a FAT constant. Lean tissue, and the water and glycogen
+  // that ride with it, are far cheaper per kg — so a surplus routinely puts actual ahead
+  // of predicted without the TDEE being wrong at all. Hence the wide tolerance, the
+  // minimum span, and a verdict that only points at the TDEE when the gap is too large
+  // for a body-composition explanation to carry on its own.
+  const BALANCE_MIN_DAYS = 14;
+  const BALANCE_TOL_KG_PER_MONTH = 0.5;
+  function balanceCheck(predictedKg, actualKg, days, opts) {
+    const o = opts || {};
+    const n = +days || 0;
+    const base = { verdict: 'thin', n: n, predictedKg: predictedKg, actualKg: actualKg,
+                   diffKg: null, tdeeShift: null, tolKg: null };
+    if (predictedKg == null || actualKg == null) return base;
+    if (n < (o.minDays > 0 ? o.minDays : BALANCE_MIN_DAYS)) return base;
+    // Scale the tolerance to the window: 0.5 kg of drift across a month is noise, across
+    // a week it is not, so a fixed kg band would be far too loose on short windows.
+    const tol = (o.tolPerMonth > 0 ? o.tolPerMonth : BALANCE_TOL_KG_PER_MONTH) * (n / 30);
+    const diff = +(actualKg - predictedKg).toFixed(2);
+    // Gained more than predicted ⇒ the real balance ran more positive ⇒ maintenance is
+    // LOWER than the estimate. tdeeShift is the correction to apply, in kcal/day.
+    const shift = Math.round(-diff * KCAL_PER_KG_FAT / n);
+    const verdict = Math.abs(diff) <= tol ? 'aligned' : (diff > 0 ? 'tdee-high' : 'tdee-low');
+    return { verdict: verdict, n: n, predictedKg: predictedKg, actualKg: actualKg,
+             diffKg: diff, tdeeShift: shift, tolKg: +tol.toFixed(2) };
+  }
+
   // ---- TDEE: resting burn (Mifflin-St Jeor) + adaptive calibration -----------
   // Mifflin-St Jeor BMR (kcal/day), the modern standard. sex 'female' uses the −161
   // constant, anything else the male +5. Multiply by an activity factor for TDEE.
@@ -684,6 +759,119 @@
     return { perWeek: fit.slope * 7, perMonth: fit.slope * 30,
              sePerWeek: fit.se != null ? fit.se * 7 : null,
              latest: +entries[entries.length - 1].v, first: +entries[0].v, n: fit.n };
+  }
+
+
+  // ---- Tape measurements read against training -------------------------------
+  // The app collects nine circumferences but has only ever read three (waist, neck, hip,
+  // for the Navy estimate). The other six are trained sites, and a trained site measured
+  // against the WAIST is the closest thing to a recomposition read available without a
+  // DEXA: during a surplus everything grows, so the absolute centimetre is not the
+  // signal — the site's size RELATIVE to the waist is.
+  //
+  // Waist is the reference and is deliberately not a site. Neck and hip are Navy inputs.
+  const MEASURE_SITES = {
+    chest:    { label: 'Chest',     muscles: ['chest', 'lats', 'upperBack'] },
+    shoulder: { label: 'Shoulders', muscles: ['sideDelts', 'frontDelts', 'rearDelts', 'traps'] },
+    arm:      { label: 'Upper arm', muscles: ['biceps', 'triceps'] },
+    forearm:  { label: 'Forearm',   muscles: ['forearms'] },
+    thigh:    { label: 'Thigh',     muscles: ['quads', 'hamstrings', 'glutes'] },
+    calf:     { label: 'Calf',      muscles: ['calves'] }
+  };
+  const MEASURE_SITE_KEYS = Object.keys(MEASURE_SITES);
+  // A tape re-sited by a centimetre reads as a centimetre of tissue, so nothing under
+  // this is called a change. Real limb growth is slow: a quarter-centimetre a month is
+  // already a good rate, which is exactly why the ratio matters more than the raw move.
+  const SITE_FLAT_CM = 0.25;          // cm/month
+  const SITE_RATIO_FLAT = 0.5;        // %/month of the site:waist ratio
+  const SITE_MIN_SETS = 6;            // weekly working sets below which a site is undertrained
+
+  // Site size as a percentage of waist, on the dates BOTH were measured. Pairing by date
+  // is what makes the ratio meaningful — a limb read in March against a waist read in June
+  // is not a ratio, it is two numbers.
+  function ratioSeries(siteEntries, waistEntries) {
+    const waist = {};
+    (waistEntries || []).forEach(e => { if (e && e.date && +e.v > 0) waist[e.date] = +e.v; });
+    return (siteEntries || [])
+      .filter(e => e && e.date && +e.v > 0 && waist[e.date] > 0)
+      .map(e => ({ date: e.date, v: +e.v / waist[e.date] * 100 }))
+      .sort((a, b) => a.date < b.date ? -1 : 1);
+  }
+
+  // One row per measured site: how it moved, how it moved against the waist, how much it
+  // was trained, and whether its strength trend agrees. series = {waist:[{date,v}], arm:[…]}.
+  // volume = {muscle: weeklySets} from weeklyVolumeByMuscle; prog = {muscle:{pctPerMonth,
+  // confidence}} from muscleProgress. Both are optional — the tape read stands without them.
+  function siteProgress(series, volume, prog, opts) {
+    const o = opts || {};
+    const flatCm = o.flatCm > 0 ? o.flatCm : SITE_FLAT_CM;
+    const flatRatio = o.flatRatio > 0 ? o.flatRatio : SITE_RATIO_FLAT;
+    const s = series || {};
+    const waistTr = measureTrend(s.waist || []);
+    const rows = [];
+    MEASURE_SITE_KEYS.forEach(key => {
+      const entries = (s[key] || []).filter(e => e && e.date && +e.v > 0)
+        .slice().sort((a, b) => a.date < b.date ? -1 : 1);
+      const def = MEASURE_SITES[key];
+      const tr = measureTrend(entries);
+      const rt = measureTrend(ratioSeries(entries, s.waist || []));
+      // The ratio slope is cm-per-month of a percentage; express it as %/month of itself
+      // so sites of very different girths are comparable.
+      const ratioPct = rt && rt.first > 0 ? rt.perMonth / rt.first * 100 : null;
+
+      // Trained volume and pooled strength for the muscles under this site.
+      let sets = 0, swp = 0, sw = 0, best = null;
+      const RANK = { high: 3, medium: 2, low: 1 };
+      def.muscles.forEach(m => {
+        const v = +(volume && volume[m]) || 0;
+        sets += v;
+        const p = prog && prog[m];
+        if (p && p.pctPerMonth != null) {
+          const w = v > 0 ? v : 0.5;         // an untrained-this-week muscle still votes, faintly
+          sw += w; swp += w * p.pctPerMonth;
+          if (best == null || (RANK[p.confidence] || 0) > RANK[best]) best = p.confidence;
+        }
+      });
+      const strengthPct = sw > 0 ? +(swp / sw).toFixed(1) : null;
+
+      let verdict = 'thin';
+      if (tr) {
+        const up = tr.perMonth > flatCm, down = tr.perMonth < -flatCm;
+        const rUp = ratioPct != null && ratioPct > flatRatio;
+        const rDown = ratioPct != null && ratioPct < -flatRatio;
+        if (ratioPct == null) verdict = up ? 'growing' : down ? 'shrinking' : 'holding';
+        else if (up && rUp) verdict = 'building';
+        else if (up && rDown) verdict = 'fat-leading';
+        else if (up) verdict = 'proportional';
+        else if (rUp) verdict = 'leaning';
+        else if (rDown) verdict = 'fat-gaining';
+        else verdict = down ? 'shrinking' : 'holding';
+      }
+
+      // Does the tape agree with the barbell? Disagreement is informative, not an error:
+      // strength climbing on a site that will not grow is the classic sign of neural gain
+      // (or a mis-sited tape); a site growing while strength sits flat during a surplus is
+      // as likely to be fat and water as tissue.
+      let signal = 'none';
+      const grew = tr && tr.perMonth > flatCm;
+      if (tr) {
+        if (!grew && sets < SITE_MIN_SETS) signal = 'undertrained';
+        else if (grew && strengthPct != null && strengthPct > 0) signal = 'confirmed';
+        else if (grew && strengthPct != null && strengthPct <= 0) signal = 'unconfirmed';
+        else if (!grew && strengthPct != null && strengthPct > 0 && sets >= SITE_MIN_SETS) signal = 'strength-only';
+      }
+
+      rows.push({ site: key, label: def.label, muscles: def.muscles,
+                  n: entries.length,
+                  latest: tr ? tr.latest : (entries.length ? +entries[entries.length - 1].v : null),
+                  cmPerMonth: tr ? +tr.perMonth.toFixed(2) : null,
+                  waistPerMonth: waistTr ? +waistTr.perMonth.toFixed(2) : null,
+                  ratioPctPerMonth: ratioPct != null ? +ratioPct.toFixed(1) : null,
+                  ratioN: rt ? rt.n : 0,
+                  sets: +sets.toFixed(1), strengthPct: strengthPct,
+                  strengthConfidence: best, verdict: verdict, signal: signal });
+    });
+    return rows.filter(r => r.n > 0);
   }
 
   // ---- Salvage a truncated / unbalanced JSON reply --------------------------
@@ -1856,7 +2044,9 @@
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
     FOOD_PINS, foodPin, pinMatches, applyPin,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
+    energyBalance, balanceCheck, BALANCE_MIN_DAYS,
     navyBodyFat, bodyComposition, measureTrend,
+    MEASURE_SITES, MEASURE_SITE_KEYS, ratioSeries, siteProgress,
     freeSugarFraction, SUGAR_INTRINSIC, SUGAR_FREE,
     MICRO_REF, MICRO_KEYS, microRef, sumSuppMicros, microAverages, ELEMENTAL_FRACTION, elementalMg,
     supplementDue, supplementNextDue, supplementWindow, supplementStats, isoWeekdayMon,

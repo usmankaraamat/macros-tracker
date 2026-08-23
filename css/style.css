@@ -1741,3 +1741,29 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
   .targets-grid { grid-template-columns: 1fr; }
   .report-best-worst { grid-template-columns: 1fr; }
 }
+
+/* ---- balance readout: the surplus/deficit sentence under the charts ---- */
+.balance-note { margin-top: 14px; line-height: 1.55; }
+
+/* ---- tissue vs training ---------------------------------------------- */
+/* Shares the measure/verdict rhythm of .mv-row so the two panels read as one family. */
+.site-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "name move" "verdict verdict" "train train" "sig sig";
+  gap: 2px 10px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.site-row:last-of-type { border-bottom: 0; }
+.site-name    { grid-area: name;    font-weight: 650; color: var(--chalk); }
+.site-verdict > .ink-dim { white-space: nowrap; }
+.site-move    { grid-area: move;    text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.site-verdict { grid-area: verdict; font-size: 13px; }
+.site-train   { grid-area: train;   font-size: 12px; }
+.site-sig     { grid-area: sig;     font-size: 12px; margin-top: 3px; padding-left: 9px;
+                border-left: 2px solid var(--rule-lit); }
+/* Hue only where the reading is directional — flat stays neutral. */
+.site-move.up,    .site-verdict.up,    .site-sig.up    { color: var(--accent); }
+.site-move.down,  .site-verdict.down,  .site-sig.down  { color: var(--brass); }
+.site-move.flat,  .site-verdict.flat,  .site-sig.flat  { color: var(--graphite); }

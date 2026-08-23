@@ -239,7 +239,7 @@ function dayDigest(date, t){
   byDate[date] = t;
   let streak = 0;
   for (let d = date; byDate[d]; d = prevDayStr(d)){
-    if (dayOk(byDate[d])) streak++; else break;
+    if (dayOk(byDate[d], d)) streak++; else break;
   }
   const ok = t.kcal >= FLOOR && t.kcal <= CEIL && pShort <= 0.5;
   return { date, ok, kcal: Math.round(t.kcal), kcalV, pV, streak };

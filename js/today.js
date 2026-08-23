@@ -427,6 +427,7 @@ async function editEntryGrams(i){
 // every keystroke, including the heatmap and the ternary plot; switching tabs
 // re-renders, so nothing can go stale.
 function render(){
+  invalidateBounds();        // history-wide corridor cache: one rebuild per render, not per day
   applyAdaptiveCorridor();   // set the effective corridor before anything reads FLOOR/CEIL
   computePTarget();          // resolve % protein against the current floor
   refreshTargetLabels();
