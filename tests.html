@@ -1545,6 +1545,74 @@ group('ratioSeries — site as a percentage of waist');
   check('zero or missing values are skipped', C.ratioSeries([{date:'2026-06-01',v:0}], waist).length===0);
 })();
 
+
+// ---- projectGoal: a range, never a date ----
+group('projectGoal — arrival as an interval');
+(function(){
+  const ok = C.projectGoal({current:70, target:76, ratePerWeek:0.45, sePerWeek:0.05});
+  check('midpoint is gap over rate', approx(ok.weeks, 6/0.45, 0.05), `${ok.weeks}`);
+  check('a well-pinned rate gives a bounded interval', ok.verdict==='ok' && ok.loWeeks!=null && ok.hiWeeks!=null);
+  check('the fast end arrives first', ok.loWeeks < ok.weeks && ok.weeks < ok.hiWeeks);
+  check('a tight rate earns high confidence', ok.confidence==='high', ok.confidence);
+  // The case that matters: a rate whose interval reaches zero has no upper bound at all.
+  const un = C.projectGoal({current:70, target:76, ratePerWeek:0.164, sePerWeek:0.115});
+  check('a rate indistinguishable from zero is unbounded', un.verdict==='unbounded' && un.unbounded===true);
+  check('and quotes no upper date', un.hiWeeks===null);
+  check('but still gives the fast end', un.loWeeks!=null && un.loWeeks < un.weeks);
+  check('unbounded earns no confidence', un.confidence==='none', un.confidence);
+  // Widening the error bar can only lower confidence, never raise it.
+  const mid = C.projectGoal({current:70, target:76, ratePerWeek:0.45, sePerWeek:0.12});
+  check('a looser rate drops to medium', mid.confidence==='medium', mid.confidence);
+  check('looser rate widens the interval', mid.hiWeeks > ok.hiWeeks);
+  // Direction.
+  const wrong = C.projectGoal({current:70, target:76, ratePerWeek:-0.2, sePerWeek:0.05});
+  check('moving away is wrong-way, not a slow arrival', wrong.verdict==='wrong-way' && wrong.weeks===null);
+  const down = C.projectGoal({current:90, target:84, ratePerWeek:-0.4, sePerWeek:0.05});
+  check('a cut projects the same way', down.verdict==='ok' && approx(down.weeks, 15, 0.6), `${down.weeks}`);
+  check('a cut moving up is wrong-way', C.projectGoal({current:90,target:84,ratePerWeek:0.3,sePerWeek:0.05}).verdict==='wrong-way');
+  // Arrival and absent inputs.
+  check('inside tolerance is arrived', C.projectGoal({current:76.1, target:76, ratePerWeek:0.2, sePerWeek:0.05, tol:0.2}).verdict==='arrived');
+  check('outside tolerance is not', C.projectGoal({current:76.5, target:76, ratePerWeek:-0.2, sePerWeek:0.05, tol:0.2}).verdict==='ok');
+  check('no rate stays thin', C.projectGoal({current:70, target:76}).verdict==='thin');
+  check('no target stays thin', C.projectGoal({current:70, ratePerWeek:0.4}).verdict==='thin');
+  check('no SE still projects, at low confidence',
+        C.projectGoal({current:70,target:76,ratePerWeek:0.45}).confidence==='low');
+  // A 5-year arrival is a formality, not a projection.
+  const far = C.projectGoal({current:70, target:76, ratePerWeek:0.02, sePerWeek:0.001});
+  check('an absurdly distant slow end is treated as unbounded', far.unbounded===true, `${far.hiWeeks}`);
+})();
+
+// ---- requiredRate: the inverse, which works on day one ----
+group('requiredRate — what it would take');
+(function(){
+  const r = C.requiredRate(70, 76, 100, {unit:'kg'});
+  check('rate is gap over weeks', approx(r.ratePerWeek, 6/(100/7), 0.005), `${r.ratePerWeek}`);
+  check('kcal is rate converted at 7700', approx(r.kcalPerDay, 6/(100/7)/7*7700, 1), `${r.kcalPerDay}`);
+  check('delta is reported', r.delta===6 && r.days===100);
+  const cut = C.requiredRate(90, 84, 84, {unit:'kg'});
+  check('a cut needs a negative rate and a deficit', cut.ratePerWeek < 0 && cut.kcalPerDay < 0);
+  // A centimetre has no calorie equivalent and must not be given one.
+  check('a tape target gets no kcal figure', C.requiredRate(35, 38, 100, {unit:'cm'}).kcalPerDay===null);
+  check('unit defaults to no kcal', C.requiredRate(35, 38, 100).kcalPerDay===null);
+  check('zero or negative days is refused', C.requiredRate(70,76,0,{unit:'kg'}).ratePerWeek===null
+        && C.requiredRate(70,76,-5,{unit:'kg'}).ratePerWeek===null);
+})();
+
+// ---- projectionConfidence: never above the weaker half ----
+group('projectionConfidence — the TDEE gates the intake advice');
+(function(){
+  check('takes the weaker of the two', C.projectionConfidence('high','low')==='low');
+  check('and is symmetric', C.projectionConfidence('low','high')==='low');
+  check('both high stays high', C.projectionConfidence('high','high')==='high');
+  check('an unknown TDEE sinks it', C.projectionConfidence('high','none')==='none');
+  // A tape projection owes the TDEE nothing, so it can opt out of that half.
+  check('ignoring the TDEE keeps the trend confidence',
+        C.projectionConfidence('high','none',{ignoreTDEE:true})==='high');
+  check('but never invents confidence the trend lacks',
+        C.projectionConfidence('low','high',{ignoreTDEE:true})==='low');
+  check('unknown tiers degrade to none', C.projectionConfidence('bogus','high')==='none');
+})();
+
 // ---- summary ----
 const sum = document.getElementById('summary');
 sum.className = failed === 0 ? 'allpass' : 'anyfail';

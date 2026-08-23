@@ -1767,3 +1767,20 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
 .site-move.up,    .site-verdict.up,    .site-sig.up    { color: var(--accent); }
 .site-move.down,  .site-verdict.down,  .site-sig.down  { color: var(--brass); }
 .site-move.flat,  .site-verdict.flat,  .site-sig.flat  { color: var(--graphite); }
+
+/* ---- goal projection -------------------------------------------------- */
+.proj-row { padding: 12px 0; border-bottom: 1px solid var(--rule); }
+.proj-row:last-of-type { border-bottom: 0; }
+.proj-name { font-weight: 650; color: var(--chalk); }
+.proj-now  { font-variant-numeric: tabular-nums; color: var(--graphite); margin-top: 1px; }
+.proj-line { margin-top: 6px; line-height: 1.5; }
+.proj-need { margin-top: 6px; padding-left: 9px; border-left: 2px solid var(--rule-lit); line-height: 1.5; }
+.proj-foot { font-size: 12px; margin-top: 6px; }
+/* Direction only: an arrival is not "good", it is just an arrival. Amber marks a
+   projection moving the wrong way, which is the one that needs the eye. */
+.proj-row.up   .proj-line b:first-child { color: var(--accent); }
+.proj-row.down .proj-line { color: var(--brass); }
+.proj-first {
+  margin-top: 12px; padding: 10px 12px; border-radius: var(--radius);
+  background: var(--brass-wash); color: var(--brass); line-height: 1.5;
+}

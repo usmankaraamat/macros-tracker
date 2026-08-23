@@ -50,14 +50,15 @@ function renderHistSummary(){
 function renderHistory(){
   renderHistSummary();
   const wrap = document.getElementById('histList');
-  const days = allDays(false);
+  const days = closedDays();
   if (!days.length){ wrap.innerHTML = '<div class="empty">No previous days yet.</div>'; return; }
+  const B = dayBounds();
   wrap.innerHTML = days.map((d,di)=>{
-    const t = totalsOf(d.ledger);
-    const inC = t.kcal >= FLOOR && t.kcal <= CEIL;
+    const t = totalsOf(d.ledger), b = B(d.date);
+    const inC = t.kcal >= b.floor && t.kcal <= b.ceil;
     const pOk = t.p >= P_TARGET;
     const mark = inC && pOk ? '<span style="color:var(--verdigris)">✓</span>'
-               : t.kcal > CEIL ? '<span style="color:var(--hot)">✗</span>'
+               : t.kcal > b.ceil ? '<span style="color:var(--hot)">✗</span>'
                : '<span style="color:var(--brass)">△</span>';
     const rows = d.ledger.map(e=>
       `<tr><td>${escapeHtml(e.name)} <small style="color:var(--faint)">${e.grams}g</small></td>`+
@@ -433,7 +434,7 @@ function renderWeight(){
   const tr = LedgerCore.weightTrend(recent.length>=2 ? recent : entries);
   stats.hidden = false;
   if (!tr){ stats.textContent = 'Need weigh-ins on different days for a trend.'; return; }
-  const days7 = allDays(true).slice(0,7);
+  const days7 = closedDays().slice(0,7);   // the open day's partial intake is not an average
   const avgK = days7.length ? days7.reduce((s,d)=>s+totalsOf(d.ledger).kcal,0)/days7.length : 0;
   const rate = tr.ratePerWeek;
   const dir = Math.abs(rate)<0.05 ? 'holding steady' : (rate<0 ? `losing ${Math.abs(rate).toFixed(2)} kg/wk` : `gaining ${rate.toFixed(2)} kg/wk`);
@@ -497,7 +498,9 @@ function renderFatEstimate(){
 
   const tot={}; allDays(true).forEach(d => { tot[d.date]=totalsOf(d.ledger); });
   const intakes=[];
-  Object.keys(tot).forEach(d => { if (d>=start && d<=end && tot[d].kcal>0) intakes.push(tot[d].kcal); });
+  // The open day is half-eaten. Averaging it in drags the estimate down all morning and
+  // up all evening, which is motion the body never made.
+  Object.keys(tot).forEach(d => { if (d>=start && d<=end && d!==ACTIVE_DATE && tot[d].kcal>0) intakes.push(tot[d].kcal); });
   if (!intakes.length){ out.className='tactical'; out.textContent=`No logged days between ${fmtDMY(start)} and ${fmtDMY(end)}.`; return; }
 
   const e=LedgerCore.fatEstimate(intakes, maintLow, maintHigh);
@@ -702,9 +705,11 @@ function weeklyNarrative(avgK, n, okDays){
 function maybeShowBrief(){
   try{
     if (getKey('ledger_brief_seen')===ACTIVE_DATE) return;
-    const days=allDays(false); if(!days.length) return;      // nothing to brief on yet
+    const days=closedDays(); if(!days.length) return;        // nothing to brief on yet
     const yt=totalsOf(days[0].ledger);
-    const yMark = yt.kcal>CEIL_M?'over ceiling':(yt.kcal>=FLOOR_M?'in corridor ✓':'under floor');
+    // Judged against the corridor that applied to THAT day, not today's.
+    const yb=dayBounds()(days[0].date);
+    const yMark = yt.kcal>yb.ceil?'over ceiling':(yt.kcal>=yb.floor?'in corridor ✓':'under floor');
     let msg='Good morning. ';
     msg += isTrainingDay(ACTIVE_DATE) ? `${escapeHtml(splitForDate(ACTIVE_DATE))} day (${TRAIN.start}). ` : `Rest day. `;
     msg += CORRIDOR_AUTO
@@ -718,7 +723,7 @@ function maybeShowBrief(){
     else if (dr.verdict==='under') msg += ` Heads up: ${dr.under}/${dr.n} recent days under the floor — the corridor may need lowering.`;
     const card=document.getElementById('briefCard');
     document.getElementById('briefText').innerHTML=msg;
-    card.className='digest-card '+(yMark.includes('✓')?'good':(yt.kcal>CEIL_M?'bad':'meh'));
+    card.className='digest-card '+(yMark.includes('✓')?'good':(yt.kcal>yb.ceil?'bad':'meh'));
     card.hidden = false;
     setKey('ledger_brief_seen', ACTIVE_DATE);                 // once per day, even across reloads
   }catch(e){}
@@ -878,6 +883,7 @@ function renderTrendsTab(){
   renderDataTrust();
   renderMuscleVolume();
   renderSiteProgress();
+  renderGoalProjection();
   renderWeeklyReport();
   renderTopFoods();
   renderRecompFromLifts();
@@ -1021,6 +1027,162 @@ function renderMuscleVolume(){
     + rows
     + `<div class="mv-foot ink-dim">The footnote under each muscle is its <b>progression</b> — every exercise that trains it, weighted by involvement and trust, rolled into one %/month over the last 8 weeks. It reads a muscle a single lift can't: an isolation looking flat while the compounds that hit it climb still nets out as progress. ±&nbsp;is the margin; the tier is how far the pooled trend clears it.</div>`
     + (untagged ? `<div class="mv-untagged">⚠ ${untagged%1?untagged.toFixed(1):untagged} set${untagged===1?'':'s'} on exercises with no muscle tag — they are pooled, not counted per muscle. Newly-logged lifts outside the seed list need tagging.</div>` : '');
+}
+
+// ---- Goal projection ---------------------------------------------------------
+// "I am 71 kg and want 76" is a question the app already has every input for: a fitted
+// rate, its standard error, a calibrated maintenance and that maintenance's own earned
+// confidence. What it must not do is answer with a date. A rate of 0.16 kg/wk with an
+// SE of 0.12 puts the arrival anywhere from ten weeks to never, and the interval IS the
+// finding — it says the trend has not separated from noise yet.
+//
+// The second reading is the inverse and is available immediately: what rate, and for
+// bodyweight what daily surplus, would land the target by a chosen date. That one works
+// on day one, when no trend exists.
+const PROJ_TOL = { weight: 0.2, default: 0.3 };          // "close enough to have arrived"
+const PROJ_LABEL = { weight: 'Bodyweight', waist: 'Waist', neck: 'Neck', hip: 'Hips',
+  chest: 'Chest', shoulder: 'Shoulders', arm: 'Upper arm', forearm: 'Forearm',
+  thigh: 'Thigh', calf: 'Calf' };
+const PROJ_KEYS = ['weight','waist','chest','shoulder','arm','forearm','thigh','calf','neck','hip'];
+
+function goalTargetsSave(){ saveTargets(); render(); }
+// Current value and fitted rate for one tracked quantity. Weight comes from the weigh-in
+// log (honouring TREND_START, so a diet-transition water swing never sets a projection);
+// everything else from the tape.
+function projSeries(key){
+  if (key === 'weight'){
+    const map = weightsMap();
+    const all = Object.keys(map).filter(d=>+map[d]>0).sort();
+    const use = all.filter(d => !TREND_START || d >= TREND_START);
+    return (use.length >= 2 ? use : all).map(d=>({date:d, v:+map[d]}));
+  }
+  const m = measureMap(), out = [];
+  Object.keys(m).sort().forEach(d => { if (m[d] && +m[d][key] > 0) out.push({date:d, v:+m[d][key]}); });
+  return out;
+}
+function fmtWeeks(w){
+  if (w == null) return '—';
+  if (w < 1.5) return `${Math.round(w*7)} days`;
+  if (w < 10)  return `${w.toFixed(1)} weeks`;
+  return `${Math.round(w)} weeks`;
+}
+function etaDate(weeks){
+  if (weeks == null) return null;
+  return addDaysISO(ACTIVE_DATE, Math.round(weeks * 7));
+}
+function renderGoalProjection(){
+  const wrap = document.getElementById('goalProjection'); if (!wrap) return;
+  const form = document.getElementById('goalTargetForm');
+  if (form){
+    form.innerHTML = PROJ_KEYS.map(k => {
+      const v = GOAL_TARGETS[k] != null ? GOAL_TARGETS[k] : '';
+      const unit = k === 'weight' ? 'kg' : 'cm';
+      return `<div><label for="gt_${k}">${escapeHtml(PROJ_LABEL[k])} (${unit})</label>`
+        + `<input type="number" id="gt_${k}" data-goaltarget="${k}" min="0" step="0.1" inputmode="decimal" value="${v}" placeholder="no target"></div>`;
+    }).join('') + `<div><label for="gt_date">Want it by (optional)</label>`
+        + `<input type="date" id="gt_date" value="${escapeHtml(GOAL_TARGET_DATE||'')}"></div>`;
+    form.querySelectorAll('[data-goaltarget]').forEach(el => {
+      el.onchange = () => {
+        const k = el.getAttribute('data-goaltarget'), v = parseFloat(el.value);
+        if (isFinite(v) && v > 0) GOAL_TARGETS[k] = v; else delete GOAL_TARGETS[k];
+        goalTargetsSave();
+      };
+    });
+    const dEl = document.getElementById('gt_date');
+    if (dEl) dEl.onchange = () => { GOAL_TARGET_DATE = dEl.value || ''; goalTargetsSave(); };
+  }
+
+  const keys = PROJ_KEYS.filter(k => +GOAL_TARGETS[k] > 0);
+  if (!keys.length){
+    wrap.innerHTML = '<div class="empty">Set a target below — a goal weight, or a waist you do not want to pass — and the app will project when the current trend gets there.</div>';
+    return;
+  }
+  // The TDEE's own earned confidence gates any advice that rests on it. A required
+  // surplus quoted off a formula-only maintenance is a guess wearing a number's clothes.
+  const td = computeTDEE();
+  const rd = LedgerCore.tdeeReadout({
+    formula: td.formulaBase||0, avgIntake: td.avgIntake, ratePerWeek: td.ratePerWeek,
+    sampleDays: td.sampleDays, intakes: td.intakes||[], nWeighIns: td.nWeighIns||0 });
+  const tdeeConf = rd.confidence || 'low';    // tdeeConfidence returns a tier string, not an object
+  const byDays = GOAL_TARGET_DATE
+    ? Math.round((Date.parse(GOAL_TARGET_DATE) - Date.parse(ACTIVE_DATE))/86400000) : 0;
+
+  const rows = keys.map(k => {
+    const unit = k === 'weight' ? 'kg' : 'cm';
+    const series = projSeries(k);
+    const cur = series.length ? series[series.length-1].v : null;
+    const tgt = +GOAL_TARGETS[k];
+    const tr = series.length >= 2 ? LedgerCore.measureTrend(series.map(e=>({date:e.date, v:e.v}))) : null;
+    const p = LedgerCore.projectGoal({
+      current: cur, target: tgt,
+      ratePerWeek: tr ? tr.perWeek : null, sePerWeek: tr ? tr.sePerWeek : null,
+      tol: PROJ_TOL[k] || PROJ_TOL.default });
+    // A tape projection owes nothing to the TDEE; a bodyweight one does, because the
+    // only lever on it is intake.
+    const conf = LedgerCore.projectionConfidence(p.confidence, tdeeConf, { ignoreTDEE: k !== 'weight' });
+
+    const head = `<div class="proj-name">${escapeHtml(PROJ_LABEL[k])}</div>`
+      + `<div class="proj-now">${cur!=null?cur.toFixed(1):'—'} → <b>${tgt.toFixed(1)}</b> ${unit}</div>`;
+    let body, cls = 'flat';
+    if (cur == null) body = `<div class="proj-line">Nothing logged for this yet.</div>`;
+    else if (p.verdict === 'arrived'){ cls='up'; body = `<div class="proj-line">Already there.</div>`; }
+    else if (p.verdict === 'thin')
+      body = `<div class="proj-line">Needs a second ${k==='weight'?'weigh-in':'measurement'} before a trend exists.</div>`;
+    else if (p.verdict === 'wrong-way'){
+      cls='down';
+      body = `<div class="proj-line">Moving <b>away</b> from it at ${Math.abs(p.ratePerWeek).toFixed(2)} ${unit}/wk.</div>`;
+    } else if (p.verdict === 'unbounded'){
+      cls='flat';
+      body = `<div class="proj-line">At <b>${p.ratePerWeek.toFixed(2)} ${unit}/wk</b> the midpoint is ${fmtWeeks(p.weeks)} `
+        + `(${fmtDMY(etaDate(p.weeks))}) — but the rate is not yet distinguishable from no change, `
+        + `so the honest range is <b>${fmtWeeks(p.loWeeks)} to open-ended</b>.</div>`;
+    } else {
+      cls = 'up';
+      body = `<div class="proj-line">At <b>${p.ratePerWeek.toFixed(2)} ${unit}/wk</b>: <b>${fmtDMY(etaDate(p.weeks))}</b>`
+        + (p.loWeeks!=null ? ` <span class="ink-dim">(${fmtDMY(etaDate(p.loWeeks))} – ${fmtDMY(etaDate(p.hiWeeks))})</span>` : '')
+        + ` · ${fmtWeeks(p.weeks)} away.</div>`;
+    }
+    // The inverse — but only for bodyweight. It earns its place because intake is a real
+    // lever on the scale, so "you need +0.36 kg/wk" converts into a corridor you can
+    // actually set. No such lever exists for a tape site: telling someone they need
+    // 0.36 cm/wk of arm is not advice, and on a waist kept as a LIMIT rather than a goal
+    // it reads as an instruction to gain the very thing they are watching.
+    let need = '';
+    if (k === 'weight' && byDays > 0 && cur != null && p.verdict !== 'arrived'){
+      const r = LedgerCore.requiredRate(cur, tgt, byDays, { unit: 'kg' });
+      need = `<div class="proj-need">To land it by ${fmtDMY(GOAL_TARGET_DATE)} you need `
+        + `<b>${r.ratePerWeek>0?'+':''}${r.ratePerWeek.toFixed(2)} ${unit}/wk</b>`
+        + ` — about <b>${r.kcalPerDay>0?'+':''}${r.kcalPerDay.toLocaleString()} kcal/day</b> against maintenance`
+        + `<span class="ink-dim">, so a corridor near ${Math.round(td.blended + r.kcalPerDay).toLocaleString()}`
+        + ` — worth only as much as that maintenance figure, which is <b>${escapeHtml(tdeeConf)}</b> confidence.</span>`
+        + `</div>`;
+    }
+    const confTag = (p.verdict==='ok' || p.verdict==='unbounded')
+      ? `<span class="lift-conf ${CONF_CLS[conf]||'low'}">${conf}</span>` : '';
+    return `<div class="proj-row ${cls}">${head}${body}${need}
+      <div class="proj-foot ink-dim">${series.length} reading${series.length===1?'':'s'}`
+      + (tr && tr.sePerWeek!=null ? ` · rate ±${tr.sePerWeek.toFixed(2)} ${unit}/wk` : '')
+      + (k==='weight' ? ` · maintenance ${Math.round(td.blended).toLocaleString()} kcal (${escapeHtml(tdeeConf)} confidence)` : '')
+      + ` ${confTag}</div></div>`;
+  }).join('');
+
+  // Which target arrives FIRST is the reading no single projection gives. On a bulk the
+  // waist reaching its limit before the scale reaches its goal is the signal to stop.
+  const dated = keys.map(k => {
+    const s = projSeries(k); if (s.length < 2) return null;
+    const tr = LedgerCore.measureTrend(s.map(e=>({date:e.date, v:e.v})));
+    const p = LedgerCore.projectGoal({ current: s[s.length-1].v, target: +GOAL_TARGETS[k],
+      ratePerWeek: tr?tr.perWeek:null, sePerWeek: tr?tr.sePerWeek:null, tol: PROJ_TOL[k]||PROJ_TOL.default });
+    return p.verdict === 'ok' ? { k, weeks: p.weeks } : null;
+  }).filter(Boolean).sort((a,b)=>a.weeks-b.weeks);
+  let first = '';
+  if (dated.length >= 2 && dated[0].k !== 'weight')
+    first = `<div class="proj-first">⚠ <b>${escapeHtml(PROJ_LABEL[dated[0].k])}</b> reaches its target around `
+      + `${fmtDMY(etaDate(dated[0].weeks))} — before ${escapeHtml(PROJ_LABEL[dated[dated.length-1].k])} `
+      + `(${fmtDMY(etaDate(dated[dated.length-1].weeks))}). Whichever limit you set to stop at arrives first.</div>`;
+
+  wrap.innerHTML = rows + first
+    + `<div class="mv-foot ink-dim">Projections are a <b>range</b>, never a date: the rate is a fitted slope with an error bar, and when that error bar reaches zero there is no upper bound to quote. Confidence combines how tightly the rate is pinned with how much the maintenance estimate has earned — a bodyweight projection can never be more trustworthy than the TDEE the intake advice rests on.</div>`;
 }
 
 // ---- Tissue vs training ------------------------------------------------------

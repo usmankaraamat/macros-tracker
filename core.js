@@ -704,6 +704,103 @@
     return { ratePerWeek: fit.slope * 7, latest: entries[entries.length - 1].kg };
   }
 
+
+  // ---- Goal projection: when does this trend reach that number? ---------------
+  // Dividing a gap by a rate is arithmetic. The reason this is a function is the error
+  // bar: a projection quoted as a date is a lie when the rate is barely distinguishable
+  // from zero, and the app's own weigh-in trends routinely are. So the answer is an
+  // INTERVAL, and when the rate's confidence interval straddles zero the honest output
+  // is "your data cannot answer this yet" — which is itself the useful reading, because
+  // it says the trend has not separated from noise.
+  //
+  // rate/se are per week in the value's own unit (kg for weight, cm for a tape site).
+  const PROJ_Z = 1.96;                 // 95% interval on the slope
+  const PROJ_MAX_WEEKS = 260;          // 5 years — past this the projection is a formality
+  function projectGoal(o) {
+    o = o || {};
+    const cur = +o.current, tgt = +o.target;
+    const base = { verdict: 'thin', delta: null, weeks: null, loWeeks: null, hiWeeks: null,
+                   unbounded: false, confidence: 'none', ratePerWeek: null };
+    if (!isFinite(cur) || !isFinite(tgt)) return base;
+    const delta = +(tgt - cur).toFixed(3);
+    const tol = o.tol > 0 ? o.tol : 0;
+    if (Math.abs(delta) <= tol) return Object.assign(base, { verdict: 'arrived', delta: delta });
+    const rate = o.ratePerWeek;
+    if (rate == null || !isFinite(rate)) return Object.assign(base, { delta: delta });
+    const se = o.sePerWeek != null && isFinite(o.sePerWeek) ? Math.abs(o.sePerWeek) : null;
+
+    // Moving away from the target is not a slow arrival, it is the wrong direction, and
+    // saying "in 300 weeks" would dress that up as progress.
+    const towards = delta > 0 ? rate > 0 : rate < 0;
+    const weeks = rate !== 0 ? delta / rate : null;
+    if (!towards)
+      return Object.assign(base, { delta: delta, ratePerWeek: rate, verdict: 'wrong-way' });
+
+    // The interval on time is the gap divided by each end of the interval on rate. The
+    // slow end is what can run away: if rate − z·se reaches zero or flips sign, arrival
+    // is unbounded and no upper date exists.
+    let lo = null, hi = null, unbounded = false;
+    if (se != null && se > 0) {
+      const fast = rate + (delta > 0 ? PROJ_Z * se : -PROJ_Z * se);
+      const slow = rate - (delta > 0 ? PROJ_Z * se : -PROJ_Z * se);
+      lo = delta / fast;
+      if ((delta > 0 && slow > 0) || (delta < 0 && slow < 0)) {
+        hi = delta / slow;
+        if (hi > PROJ_MAX_WEEKS) { hi = null; unbounded = true; }
+      } else unbounded = true;
+    }
+    // Confidence is earned from how well the RATE is pinned down, not from how neat the
+    // date looks. A relative half-width over ~two thirds means the interval is wider than
+    // the estimate itself, which is 'low' however confident the arithmetic feels.
+    let confidence = 'low';
+    if (se == null || se === 0) confidence = 'low';
+    else if (unbounded) confidence = 'none';
+    else {
+      const rel = PROJ_Z * se / Math.abs(rate);
+      confidence = rel < 0.33 ? 'high' : rel < 0.66 ? 'medium' : 'low';
+    }
+    return { verdict: unbounded ? 'unbounded' : 'ok', delta: delta,
+             weeks: weeks != null ? +weeks.toFixed(2) : null,
+             loWeeks: lo != null ? +lo.toFixed(2) : null,
+             hiWeeks: hi != null ? +hi.toFixed(2) : null,
+             unbounded: unbounded, confidence: confidence, ratePerWeek: rate };
+  }
+
+  // The inverse, and the more actionable half: not "when will I get there" but "what
+  // would it take to get there by then". This works on the very first day, when no trend
+  // exists yet and projectGoal can say nothing at all.
+  //
+  // For bodyweight the required rate converts straight into a daily energy figure, which
+  // is the number the corridor is actually made of. kcalPerDay is only returned when the
+  // caller says the unit is kg — a centimetre of arm has no calorie equivalent, and
+  // inventing one would be the most confident-sounding wrong number in the app.
+  function requiredRate(current, target, days, opts) {
+    const o = opts || {};
+    const cur = +current, tgt = +target, n = +days;
+    if (!isFinite(cur) || !isFinite(tgt) || !(n > 0)) return { ratePerWeek: null, kcalPerDay: null, days: n || 0 };
+    const perWeek = (tgt - cur) / (n / 7);
+    const kcal = o.unit === 'kg' ? Math.round(perWeek / 7 * KCAL_PER_KG_FAT) : null;
+    return { ratePerWeek: +perWeek.toFixed(3), kcalPerDay: kcal, days: n,
+             delta: +(tgt - cur).toFixed(3) };
+  }
+
+  // How much to believe a projection, all in. The rate's own interval is one half; the
+  // other is whether the TDEE the intake advice rests on has been earned — a required
+  // surplus quoted off a formula-only TDEE is a guess wearing a number's clothes.
+  // Never resolves ABOVE the weaker of the two: a well-fitted trend cannot rescue an
+  // unknown maintenance, and a well-known maintenance cannot rescue a noisy trend.
+  const CONF_RANK = { none: 0, low: 1, medium: 2, high: 3 };
+  const CONF_NAME = ['none', 'low', 'medium', 'high'];
+  function projectionConfidence(projConf, tdeeConf, opts) {
+    const o = opts || {};
+    const a = CONF_RANK[projConf] != null ? CONF_RANK[projConf] : 0;
+    // Intake advice leans on the TDEE; a pure tape projection does not, so the caller
+    // can opt out of that half rather than have it drag an honest reading down.
+    if (o.ignoreTDEE) return CONF_NAME[a];
+    const b = CONF_RANK[tdeeConf] != null ? CONF_RANK[tdeeConf] : 0;
+    return CONF_NAME[Math.min(a, b)];
+  }
+
   // ---- Body-fat % from a tape measure (U.S. Navy circumference method) --------
   // The only field estimate that needs no calipers and no scale — just a tape, and
   // measurements the app already asks for (height) plus two it can: waist and neck
@@ -2045,6 +2142,7 @@
     FOOD_PINS, foodPin, pinMatches, applyPin,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
     energyBalance, balanceCheck, BALANCE_MIN_DAYS,
+    projectGoal, requiredRate, projectionConfidence, PROJ_Z,
     navyBodyFat, bodyComposition, measureTrend,
     MEASURE_SITES, MEASURE_SITE_KEYS, ratioSeries, siteProgress,
     freeSugarFraction, SUGAR_INTRINSIC, SUGAR_FREE,

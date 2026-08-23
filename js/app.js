@@ -540,7 +540,7 @@ document.getElementById('exportBtn').onclick = async ()=>{
   allDays(true).forEach(d => { days[d.date] = d.ledger; });
   days[VIEW_DATE] = ledger;                       // the on-screen day's live state wins
   const payload = { exported: dateStr(), version: 2,
-    targets: {floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,trendStart:TREND_START,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN},
+    targets: {floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,trendStart:TREND_START,goalTargets:GOAL_TARGETS,goalTargetDate:GOAL_TARGET_DATE,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN},
     pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100)},
     weights: weightsMap(), measures: measureMap(), mMeta: measureMeta(), templates: templates(),
     supps: supps(), suppLog: suppLog(),

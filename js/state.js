@@ -73,6 +73,11 @@ let PROFILE = {sex:'male', age:0, height:0, activity:'moderate'};
 // No estimator can spot that from the numbers alone, because the transition is a fact
 // about your diet, not about the series. So it is declared, not inferred. '' = use all.
 let TREND_START = '';
+// Where the user is trying to end up. A map of {weight: kg, waist: cm, arm: cm, ...} —
+// bodyweight plus any tape site — and an optional date they want to be there by. Only the
+// targets actually set are ever projected, so an empty map costs nothing.
+let GOAL_TARGETS = {};
+let GOAL_TARGET_DATE = '';
 const ACTIVITY_MULT = {sedentary:1.2, light:1.375, moderate:1.55, active:1.725, athlete:1.9};
 let INFLATE = 1 + PROTOCOL.penK/100, DEDUCT = 1 - PROTOCOL.penP/100;  // unweighed adjustments
 
@@ -90,6 +95,8 @@ function loadTargets(){
             if (t.profile) PROFILE={sex:t.profile.sex==='female'?'female':'male', age:+t.profile.age||0,
                                     height:+t.profile.height||0, activity:ACTIVITY_MULT[t.profile.activity]?t.profile.activity:'moderate'};
             if (typeof t.trendStart === 'string') TREND_START = t.trendStart;
+            if (t.goalTargets && typeof t.goalTargets === 'object') GOAL_TARGETS = t.goalTargets;
+            if (typeof t.goalTargetDate === 'string') GOAL_TARGET_DATE = t.goalTargetDate;
             if (t.goal) GOAL={mode:GOAL_LABEL[t.goal.mode]?t.goal.mode:'off', offset:+t.goal.offset||0, band:+t.goal.band>0?+t.goal.band:100};
             if (Array.isArray(t.mealPlan)) MEAL_PLAN = t.mealPlan.map(m=>({t:String(m.t||''), kcal:+m.kcal||0, name:String(m.name||'meal')}));
             if (t.train){ const tn=t.train;
@@ -105,7 +112,7 @@ function loadTargets(){
   } catch(e){}
 }
 function saveTargets(){
-  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,trendStart:TREND_START,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN})); } catch(e){}
+  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,trendStart:TREND_START,goalTargets:GOAL_TARGETS,goalTargetDate:GOAL_TARGET_DATE,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN})); } catch(e){}
   stampTargets(); scheduleSync();              // a genuine local edit — wins LWW until someone edits later
 }
 function savePens(){
