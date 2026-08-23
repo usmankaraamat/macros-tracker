@@ -200,7 +200,12 @@ function trendSeries(){
   // Window the last TREND_DAYS, but never draw empty axis: with three weeks of
   // history the charts should span three weeks, not sit squashed into a corner.
   const end = dates[dates.length - 1];
-  const start = [addDaysISO(end, -(TREND_DAYS - 1)), dates[0]].sort().pop();
+  // TREND_START is the user saying "before this date the numbers are a diet transition,
+  // not my body". Honouring it here as well as in computeTDEE is what stops the charts
+  // covering a different span from the readout underneath them — which made the
+  // cumulative line dive through a pre-bulk deficit and end somewhere the text never
+  // mentioned. Latest of the three wins.
+  const start = [addDaysISO(end, -(TREND_DAYS - 1)), dates[0], TREND_START || ''].sort().pop();
   const inWin = d => d >= start && d <= end;
   // Each intake day carries the corridor and the maintenance figure that applied to IT,
   // so the chart can plot balance and colour dots without ever consulting today's bounds.
@@ -278,8 +283,8 @@ function balanceChartSVG(s, X){
   // Straight segments, not a spline: the corridor genuinely steps between training and
   // rest days, and smoothing it would draw a gradual change that never happened.
   const ribbon = `<path d="M${pathOf(top)} L${pathOf(bot.slice().reverse())} Z" fill="var(--accent-wash)"/>`
-    + `<path d="M${pathOf(top)}" fill="none" stroke="var(--rule-lit)" stroke-width="1" stroke-dasharray="3 3"/>`
-    + `<path d="M${pathOf(bot)}" fill="none" stroke="var(--rule-lit)" stroke-width="1" stroke-dasharray="3 3"/>`;
+    + `<path d="M${pathOf(top)}" fill="none" stroke="var(--rule-lit)" stroke-width="1"/>`
+    + `<path d="M${pathOf(bot)}" fill="none" stroke="var(--rule-lit)" stroke-width="1"/>`;
   const P = pts.map(p=>[X(p.date), Y(bal(p))]);
   const dots = pts.map((p,i)=>{
     const c = p.state==='over' ? 'var(--hot)' : p.state==='under' ? 'var(--brass)' : 'var(--accent)';
@@ -287,13 +292,15 @@ function balanceChartSVG(s, X){
     const ring = i===pts.length-1 ? ` stroke="var(--slab)" stroke-width="2"` : '';
     return `<circle cx="${P[i][0].toFixed(1)}" cy="${P[i][1].toFixed(1)}" r="${r}" fill="${c}"${ring}/>`;
   }).join('');
-  const lastBal = Math.round(bal(pts[pts.length-1]));
+  const avg = pts.reduce((a,p)=>a+bal(p),0) / pts.length;
+  const ya = Y(avg);
+  const avgTxt = `${avg>0?'+':'−'}${Math.abs(Math.round(avg)).toLocaleString()}`;
   return trendSVG(
     ribbon
     + `<line x1="${TREND_PADL}" y1="${z.toFixed(1)}" x2="${TREND_W-TREND_PADR}" y2="${z.toFixed(1)}" stroke="var(--rule-lit)" stroke-width="1.5"/>`
-    + `<text x="${TREND_PADL+1}" y="${(z-4).toFixed(1)}" font-size="9" fill="var(--faint)">${s.refIsTDEE?'TDEE':'mid'} ${Math.round(pts[pts.length-1].ref)}</text>`
     + `<path d="${smoothPath(P)}" fill="none" stroke="var(--graphite)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dots}`
-    + `<text x="${TREND_W-2}" y="${Math.max(10, Math.min(TREND_H-TREND_PADB-1, P[P.length-1][1]-7)).toFixed(1)}" text-anchor="end" font-size="11" font-weight="700" fill="var(--chalk)">${lastBal>0?'+':''}${lastBal}</text>`
+    + `<line x1="${TREND_PADL}" y1="${ya.toFixed(1)}" x2="${TREND_W-TREND_PADR}" y2="${ya.toFixed(1)}" stroke="var(--chalk)" stroke-width="1" opacity=".55"/>`
+    + `<text x="${TREND_W-2}" y="${Math.max(10, Math.min(TREND_H-TREND_PADB-2, ya-5)).toFixed(1)}" text-anchor="end" font-size="11" font-weight="700" fill="var(--chalk)">${avgTxt}</text>`
     + trendAxis(s));
 }
 // The running total of those daily balances. This is the chart that distinguishes one
@@ -320,36 +327,25 @@ function cumChartSVG(s, X){
     + `<stop offset="0" stop-color="${tint}" stop-opacity=".26"/>`
     + `<stop offset="1" stop-color="${tint}" stop-opacity="0"/></linearGradient></defs>`
     + `<path d="${area}" fill="url(#cumGrad)"/>`
-    + `<line x1="${TREND_PADL}" y1="${z.toFixed(1)}" x2="${TREND_W-TREND_PADR}" y2="${z.toFixed(1)}" stroke="var(--rule-lit)" stroke-width="1" stroke-dasharray="3 3"/>`
+    + `<line x1="${TREND_PADL}" y1="${z.toFixed(1)}" x2="${TREND_W-TREND_PADR}" y2="${z.toFixed(1)}" stroke="var(--rule-lit)" stroke-width="1"/>`
     + `<path d="${line}" fill="none" stroke="${tint}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`
     + `<circle cx="${P[P.length-1][0].toFixed(1)}" cy="${P[P.length-1][1].toFixed(1)}" r="3.4" fill="${tint}" stroke="var(--slab)" stroke-width="2"/>`
     + `<text x="${TREND_W-2}" y="${Math.max(11, P[P.length-1][1]-7).toFixed(1)}" text-anchor="end" font-size="11" font-weight="700" fill="var(--chalk)">${end>0?'+':''}${kg}kg</text>`
     + trendAxis(s));
 }
-// The window the balance readout covers. Shorter than the 45-day chart on purpose: a
-// bulk or a cut is steered on the last few weeks, and a stale month dilutes the signal
-// you would actually act on.
-const BALANCE_DAYS = 28;
-// Everything the balance question needs, computed once: the per-day surplus/deficit over
-// the recent window, and the scale's verdict on it.
+// The readout and the charts above it MUST describe the same span. They used to not:
+// the charts ran 45 days while the readout ran 28, so the cumulative line ended at one
+// number and the sentence under it quoted another. Deriving both from trendSeries() makes
+// them identical by construction rather than by two definitions that agree today.
 function balanceNow(){
-  const end = ACTIVE_DATE, start = addDaysISO(end, -(BALANCE_DAYS - 1));
-  const B = dayBounds();
-  const tot = {}; allDays(true).forEach(d => { tot[d.date] = totalsOf(d.ledger); });
-  const days = Object.keys(tot)
-    .filter(d => d >= start && d <= end && d !== ACTIVE_DATE && tot[d].kcal > 0)
-    .sort()
-    .map(d => {
-      const b = B(d);
-      const ref = b.tdee != null ? b.tdee : (b.floor + b.ceil) / 2;
-      return { date: d, kcal: tot[d].kcal, tdee: ref, floor: b.floor, ceil: b.ceil };
-    });
-  const eb = LedgerCore.energyBalance(days);
+  const s = trendSeries();
+  const eb = LedgerCore.energyBalance(
+    (s && s.k ? s.k : []).map(p => ({ date: p.date, kcal: p.kcal, tdee: p.ref, floor: p.floor, ceil: p.ceil })));
+  if (!s || !eb.n) return { eb, actualKg: null, check: LedgerCore.balanceCheck(null, null, 0) };
   // Actual weight change over the same span, from the fitted trend rather than
   // first-minus-last — a single puffy morning should not set the verdict.
   const map = weightsMap();
-  const from = TREND_START > start ? TREND_START : start;
-  const w = Object.keys(map).filter(d => +map[d] > 0 && d >= from && d <= end).sort()
+  const w = Object.keys(map).filter(d => +map[d] > 0 && d >= s.start && d <= s.end).sort()
     .map(d => ({ date: d, kg: +map[d] }));
   let actualKg = null, spanDays = 0;
   if (w.length >= 2){
@@ -414,10 +410,26 @@ function renderWeight(){
   kChart.innerHTML = s ? (balanceChartSVG(s, X) || '<div class="empty">Close two days to draw the balance.</div>') : '';
   cChart.innerHTML = s ? (cumChartSVG(s, X)     || '') : '';
   document.getElementById('wChartCap').textContent = 'Weight · kg';
+  const refKcal = s && s.k && s.k.length ? Math.round(s.k[s.k.length-1].ref) : 0;
   document.getElementById('kChartCap').textContent =
-    `Balance · kcal above / below ${s && s.refIsTDEE ? 'maintenance' : 'the corridor midpoint'}`;
-  document.getElementById('cChartCap').textContent =
-    `Cumulative · running total across these ${s && s.k ? s.k.length : 0} logged days`;
+    `Each day vs ${s && s.refIsTDEE ? 'maintenance' : 'the corridor midpoint'}` + (refKcal ? ` · ${refKcal.toLocaleString()} kcal` : '');
+  const kNote = document.getElementById('kChartCapNote');
+  if (kNote && s && s.k && s.k.length){
+    kNote.textContent = `Each dot is one day. Above the middle line you ate more than you burn, below it less;`
+      + ` the green band is that day's corridor. The pale horizontal line is your average across the window.`;
+    kNote.hidden = false;
+  } else if (kNote) kNote.hidden = true;
+  document.getElementById('cChartCap').textContent = 'Where that has added up to, in kilograms';
+  // The two charts confuse people in a specific way: one is a daily rate, the other is
+  // a total. Say which is which, in words, right under them.
+  const cCap = document.getElementById('cChartCapNote');
+  if (cCap && s && s.k && s.k.length){
+    const kg = (s.k.reduce((a,p)=>a+(p.kcal-p.ref),0)/7700);
+    cCap.textContent = `Every day's surplus or deficit added together, running from the`
+      + ` start of this window to now. It ends at ${kg>=0?'+':'−'}${Math.abs(kg).toFixed(2)} kg`
+      + ` — that is the whole period's net effect, not a daily figure.`;
+    cCap.hidden = false;
+  } else if (cCap) cCap.hidden = true;
   const bl = balanceLine();
   bNote.innerHTML = bl;
   bNote.hidden = !bl;

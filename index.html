@@ -258,24 +258,23 @@
 <!-- ================================ TODAY ================================ -->
 <main id="tabToday" class="tabview" role="tabpanel" aria-labelledby="tabbtn-today">
 
-  <!-- THE GAUGE — the calorie corridor rendered as a speedometer. -->
-  <section class="gauge-card" id="instrument" aria-label="Caloric corridor">
-    <div class="gauge" id="scale" role="meter" aria-label="Calories against your daily corridor">
-      <svg class="gauge-svg" viewBox="0 0 200 200" aria-hidden="true">
-        <circle class="g-track" cx="100" cy="100" r="82" stroke-width="14" stroke-linecap="round" transform="rotate(135 100 100)"></circle>
-        <circle class="g-zone"  id="gaugeZone" cx="100" cy="100" r="82" stroke-width="14" transform="rotate(135 100 100)"></circle>
-        <circle class="g-ghost" id="projCursor" cx="100" cy="100" r="82" stroke-width="14" stroke-linecap="round" transform="rotate(135 100 100)" style="display:none"></circle>
-        <circle class="g-prog"  id="gaugeProg" cx="100" cy="100" r="82" stroke-width="14" stroke-linecap="round" transform="rotate(135 100 100)"></circle>
-        <line class="g-tick pace" id="paceMark" x1="100" y1="100" x2="100" y2="100" hidden></line>
-        <circle class="g-cap is-inside" id="gaugeCap" r="7" cx="100" cy="100" style="display:none"></circle>
-      </svg>
-      <div class="gauge-center">
-        <div class="g-pct is-empty" id="readout">0<span class="g-unit">%</span></div>
-        <div class="g-kcal" id="gaugeKcal"></div>
-        <div class="g-verdict is-empty" id="verdictStamp">no entries</div>
-      </div>
+  <!-- THE CORRIDOR — a single value against a limit, which is a METER, not a dial.
+       The radial gauge spent ~40% of the first screen encoding one ratio and pushed
+       the macros below the fold; a horizontal track says the same thing in a fifth
+       of the height and leaves room for the numbers that need reading next. -->
+  <section class="corridor-card" id="instrument" aria-label="Caloric corridor">
+    <div class="cor-top">
+      <div class="cor-hero"><span class="cor-val is-empty" id="readout">0</span><span class="cor-unit">kcal</span></div>
+      <div class="cor-state is-empty" id="verdictStamp">no entries</div>
     </div>
-    <div class="gauge-sub" id="readoutSub"></div>
+    <div class="cor-gap" id="gaugeKcal"></div>
+    <div class="cor-meter" id="scale" role="meter" aria-label="Calories against your daily corridor">
+      <div class="cor-band" id="gaugeZone"></div>
+      <div class="cor-ghost" id="projCursor" hidden></div>
+      <div class="cor-fill is-empty" id="gaugeProg"></div>
+      <div class="cor-pace" id="paceMark" hidden></div>
+    </div>
+    <div class="cor-sub" id="readoutSub"></div>
     <div class="pace-line" id="paceLine" hidden></div>
   </section>
 
@@ -627,8 +626,10 @@
          the scale's answer to it line up column for column. -->
     <div class="trend-pair">
       <div class="trend-chart"><div class="trend-cap" id="wChartCap">Weight · kg</div><div id="wChart"></div></div>
-      <div class="trend-chart"><div class="trend-cap" id="kChartCap">Balance · kcal above / below maintenance</div><div id="kcalChart"></div></div>
-      <div class="trend-chart"><div class="trend-cap" id="cChartCap">Cumulative · what it adds up to</div><div id="cumChart"></div></div>
+      <div class="trend-chart"><div class="trend-cap" id="kChartCap">Each day vs maintenance</div><div id="kcalChart"></div>
+        <div class="chart-note" id="kChartCapNote" hidden></div></div>
+      <div class="trend-chart"><div class="trend-cap" id="cChartCap">Where that has added up to</div><div id="cumChart"></div>
+        <div class="chart-note" id="cChartCapNote" hidden></div></div>
     </div>
     <div class="tactical balance-note" id="balanceNote" hidden></div>
     <div class="tactical" id="wStats" hidden></div>

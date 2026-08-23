@@ -34,40 +34,24 @@ function applyAdaptiveCorridor(){
 // ---- the gauge (signature element) ----------------------------------------
 // Domain runs 0 .. CEIL*1.15 so a ceiling breach is always visible on the arc.
 function scaleMaxKcal(){ return CEIL * 1.15; }
-function scalePct(x){ return Math.min(100, Math.max(0, x / scaleMaxKcal() * 100)); }
 
 // Radial-gauge geometry: a 270° sweep starting bottom-left (135°), running
 // clockwise to bottom-right, drawn with stroke-dasharray on rotated circles.
-// GA_VIS is the arc length of the visible sweep; a value's fraction of the
-// domain maps onto it.
-const GA_R = 82, GA_CX = 100, GA_CY = 100, GA_START = 135, GA_SWEEP = 270;
-const GA_C = 2 * Math.PI * GA_R;
-const GA_VIS = GA_C * (GA_SWEEP / 360);
-function gaugeFrac(kcal){ return Math.max(0, Math.min(1, kcal / scaleMaxKcal())); }
-// Point on the arc at fraction f (0..1 of the sweep), at radius r.
-function gaugePoint(f, r){
-  const th = (GA_START + f * GA_SWEEP) * Math.PI / 180;
-  return [GA_CX + r * Math.cos(th), GA_CY + r * Math.sin(th)];
-}
-// A progress-style arc from 0 to frac on a circle element.
-function setArc(el, frac){ if (el) el.setAttribute('stroke-dasharray', `${Math.max(0, frac) * GA_VIS} ${GA_C}`); }
-// A band segment [from,to] (fractions of the sweep) on a circle element.
-function setBand(el, from, to){
-  if (!el) return;
-  const s = Math.max(0, from) * GA_VIS, len = Math.max(0, to - from) * GA_VIS;
-  el.setAttribute('stroke-dasharray', `0 ${s} ${len} ${GA_C}`);
-}
+// The meter is linear, so "where does this value sit" is just a percentage of the
+// track. Everything below is that one idea; there is no geometry left to get wrong.
+function meterPct(kcal){ return Math.max(0, Math.min(100, kcal / scaleMaxKcal() * 100)); }
 
-// A ghost arc from current intake to a projected intake — driven by the meal
+// A ghost segment from current intake to a projected intake — driven by the meal
 // composer while the grams field holds a value (see app.js).
 function setGaugeProjection(kcal){
   const el = document.getElementById('projCursor');
   if (!el) return;
-  if (kcal == null){ el.style.display = 'none'; return; }
-  const cur = gaugeFrac(totals().kcal), proj = gaugeFrac(kcal);
-  if (proj <= cur){ el.style.display = 'none'; return; }
-  setBand(el, cur, proj);
-  el.style.display = '';
+  if (kcal == null){ el.hidden = true; return; }
+  const cur = meterPct(totals().kcal), proj = meterPct(kcal);
+  if (proj <= cur + 0.2){ el.hidden = true; return; }
+  el.style.left = cur.toFixed(2) + '%';
+  el.style.width = (proj - cur).toFixed(2) + '%';
+  el.hidden = false;
 }
 
 let _lastCorridorKey = '';
@@ -75,53 +59,44 @@ function renderInstrument(t){
   const st = corridorState(t.kcal);
   const inst = document.getElementById('instrument');
   const max = scaleMaxKcal();
-  const valFrac = gaugeFrac(t.kcal);
-  const floorFrac = Math.max(0, Math.min(1, FLOOR / max));
-  const ceilFrac  = Math.max(0, Math.min(1, CEIL / max));
 
-  // Track spans the whole sweep; the good zone spans floor→ceiling; progress runs
-  // 0→current in the state colour.
-  const track = document.querySelector('.g-track');
-  if (track) track.setAttribute('stroke-dasharray', `${GA_VIS} ${GA_C}`);
-  setBand(document.getElementById('gaugeZone'), floorFrac, ceilFrac);
-  const prog = document.getElementById('gaugeProg');
-  setArc(prog, valFrac);
-  // SVG elements need setAttribute('class', …) — the .className property is read-only there.
-  if (prog) prog.setAttribute('class', 'g-prog is-' + st.key);
-
-  // Rounded cap at the arc tip, echoing the reference gauge; hidden when empty.
-  const cap = document.getElementById('gaugeCap');
-  if (cap){
-    if (valFrac > 0.005){
-      const [cx, cy] = gaugePoint(valFrac, GA_R);
-      cap.setAttribute('cx', cx.toFixed(2)); cap.setAttribute('cy', cy.toFixed(2));
-      cap.setAttribute('class', 'g-cap is-' + st.key); cap.style.display = '';
-    } else cap.style.display = 'none';
+  // Track: corridor band spans floor→ceiling, fill runs 0→current in the state colour.
+  const band = document.getElementById('gaugeZone');
+  if (band){
+    const l = meterPct(FLOOR);
+    band.style.left = l.toFixed(2) + '%';
+    band.style.width = Math.max(0, meterPct(CEIL) - l).toFixed(2) + '%';
+  }
+  const fill = document.getElementById('gaugeProg');
+  if (fill){
+    fill.style.width = meterPct(t.kcal).toFixed(2) + '%';
+    fill.className = 'cor-fill is-' + (t.kcal < 1 ? 'empty' : st.key);
   }
 
-  // Centre: the percentage of the ceiling is the headline the user asked for.
-  const pct = CEIL > 0 ? Math.round(t.kcal / CEIL * 100) : 0;
+  // Hero: the calories eaten. The ratio it used to shout as a percentage is what the
+  // meter underneath is FOR, so the headline can be the number you actually act on.
   const readout = document.getElementById('readout');
-  readout.innerHTML = `${pct}<span class="g-unit">%</span>`;
-  readout.className = 'g-pct is-' + (t.kcal < 1 ? 'empty' : st.key);
-  const kcalLine = document.getElementById('gaugeKcal');
-  if (kcalLine) kcalLine.textContent = `${Math.round(t.kcal).toLocaleString()} / ${Math.round(CEIL).toLocaleString()} kcal`;
+  readout.textContent = Math.round(t.kcal).toLocaleString();
+  readout.className = 'cor-val is-' + (t.kcal < 1 ? 'empty' : st.key);
 
   const stamp = document.getElementById('verdictStamp');
   stamp.textContent = st.label;
-  stamp.className = 'g-verdict is-' + (t.kcal < 1 ? 'empty' : st.key);
+  stamp.className = 'cor-state is-' + (t.kcal < 1 ? 'empty' : st.key);
 
-  // Sub-line: distance to floor, then to ceiling once the floor is met; plus the
-  // auto-TDEE note when a goal is driving the corridor.
-  let sub;
-  if (t.kcal < FLOOR)      sub = `${Math.round(FLOOR - t.kcal).toLocaleString()} kcal to floor (${Math.round(FLOOR).toLocaleString()})`;
-  else if (t.kcal <= CEIL) sub = `${Math.round(CEIL - t.kcal).toLocaleString()} kcal to ceiling`;
-  else                     sub = `${Math.round(t.kcal - CEIL).toLocaleString()} kcal over ceiling`;
+  // Two short lines instead of one run-on: what to do next, then the settings behind it.
+  let gap;
+  if (t.kcal < 1)          gap = `corridor ${Math.round(FLOOR).toLocaleString()}–${Math.round(CEIL).toLocaleString()}`;
+  else if (t.kcal < FLOOR) gap = `${Math.round(FLOOR - t.kcal).toLocaleString()} kcal to the floor`;
+  else if (t.kcal <= CEIL) gap = `${Math.round(CEIL - t.kcal).toLocaleString()} kcal of headroom`;
+  else                     gap = `${Math.round(t.kcal - CEIL).toLocaleString()} kcal over the ceiling`;
+  document.getElementById('gaugeKcal').textContent = gap;
+
+  let sub = `corridor ${Math.round(FLOOR).toLocaleString()}–${Math.round(CEIL).toLocaleString()}`;
   if (CORRIDOR_AUTO){
     const dayTxt = CORRIDOR_AUTO.cycled
       ? ` · ${CORRIDOR_AUTO.training ? CORRIDOR_AUTO.split + ' day' : 'rest day'} ${CORRIDOR_AUTO.off >= 0 ? '+' : ''}${CORRIDOR_AUTO.off}`
       : '';
-    sub += `  ·  auto ${GOAL_LABEL[GOAL.mode]}${dayTxt}, TDEE ${CORRIDOR_AUTO.tdee.toLocaleString()}`;
+    sub += ` · ${GOAL_LABEL[GOAL.mode]}${dayTxt} · TDEE ${CORRIDOR_AUTO.tdee.toLocaleString()}`;
   }
   document.getElementById('readoutSub').textContent = sub;
 
@@ -130,8 +105,9 @@ function renderInstrument(t){
   scale.setAttribute('aria-valuemin', '0');
   scale.setAttribute('aria-valuemax', String(Math.round(max)));
   scale.setAttribute('aria-valuenow', String(Math.round(t.kcal)));
+  const pctOfCeil = CEIL > 0 ? Math.round(t.kcal / CEIL * 100) : 0;
   scale.setAttribute('aria-valuetext',
-    `${Math.round(t.kcal)} kcal, ${pct}% of ceiling, ${st.label}. Floor ${Math.round(FLOOR)}, ceiling ${Math.round(CEIL)}. ${sub}.`);
+    `${Math.round(t.kcal)} kcal, ${pctOfCeil}% of ceiling, ${st.label}. Floor ${Math.round(FLOOR)}, ceiling ${Math.round(CEIL)}. ${sub}.`);
 
   // Crossing into breach flashes the card once — not on a re-render while over.
   const key = st.key + '|' + VIEW_DATE;
@@ -172,12 +148,9 @@ function renderPace(t){
   } else {
     paceKcal = center * Math.max(0, Math.min(1, (h - 6)/(24 - 6)));
   }
-  // Pace shows as a short radial tick across the arc band, at the expected fraction.
-  const pf = gaugeFrac(paceKcal);
-  const [ix, iy] = gaugePoint(pf, GA_R - 9), [ox, oy] = gaugePoint(pf, GA_R + 9);
-  mark.setAttribute('x1', ix.toFixed(2)); mark.setAttribute('y1', iy.toFixed(2));
-  mark.setAttribute('x2', ox.toFixed(2)); mark.setAttribute('y2', oy.toFixed(2));
-  mark.removeAttribute('hidden');
+  // Pace shows as a tick across the track, at where you should be by now.
+  mark.style.left = meterPct(paceKcal).toFixed(2) + '%';
+  mark.hidden = false;
 
   // Protein steering, anchored to the FLOOR: the aim is to cover protein by the time you
   // reach the floor, keeping floor→ceiling purely as catch-up buffer. A 20% cushion makes
