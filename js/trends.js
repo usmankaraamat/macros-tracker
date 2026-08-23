@@ -517,14 +517,26 @@ function renderFatEstimate(){
   // Scale check: does the actual weight change across the window agree with the calorie math?
   const map=weightsMap();
   const wIn=Object.keys(map).filter(d=>+map[d]>0 && d>=start && d<=end).sort();
+  // A weight delta only means fat over a long enough window. Across a few days it is
+  // water, gut fill and glycogen, and dividing it into calories produced an "implied
+  // maintenance" 760 kcal from the app's own TDEE on real data. Both readings below are
+  // gated on the same span the balance check uses.
+  const wSpan = wIn.length>=2
+    ? Math.round((Date.parse(wIn[wIn.length-1])-Date.parse(wIn[0]))/86400000) : 0;
+  const wUsable = wIn.length>=2 && wSpan >= LedgerCore.BALANCE_MIN_DAYS;
   let eva='';
-  if (wIn.length>=2){
-    const actual = +map[wIn[wIn.length-1]] - +map[wIn[0]];
+  if (wUsable){
+    // Fitted, not first-minus-last: one puffy morning at either end should not set the verdict.
+    const tr = LedgerCore.weightTrend(wIn.map(d=>({date:d, kg:+map[d]})));
+    const actual = tr ? tr.ratePerWeek/7*wSpan : (+map[wIn[wIn.length-1]] - +map[wIn[0]]);
     const expected = (e.sum - ((maintLow+maintHigh)/2)*e.n)/7700;
     const agree = Math.abs(actual-expected) < 0.4;
     eva = `<span style="display:block;margin-top:5px;color:var(--graphite);border-left:2px solid var(--rule);padding-left:8px">`
       + `Scale check: expected ${expected>=0?'+':''}${expected.toFixed(2)} kg, actual ${actual>=0?'+':''}${actual.toFixed(2)} kg`
-      + ` — ${agree?'model is tracking your weight':'diverging — logging gaps or maintenance is off'}.</span>`;
+      + ` over ${wSpan} days — ${agree?'model is tracking your weight':'diverging — logging gaps or maintenance is off'}.</span>`;
+  } else if (wIn.length>=2){
+    eva = `<span style="display:block;margin-top:5px;color:var(--graphite);border-left:2px solid var(--rule);padding-left:8px">`
+      + `Scale check needs a wider range — ${wSpan} day${wSpan===1?'':'s'} of weigh-ins here, and a weight change only reads as fat over ${LedgerCore.BALANCE_MIN_DAYS}+.</span>`;
   }
   // Raw ingredients for a by-hand maintenance check: avg intake + real weight delta over the range.
   const avgIn=Math.round(e.sum/e.n);
@@ -534,10 +546,14 @@ function renderFatEstimate(){
     const first=+map[wIn[0]], last=+map[wIn[wIn.length-1]];
     const dw=last-first, wdays=Math.round((Date.parse(wIn[wIn.length-1])-Date.parse(wIn[0]))/86400000);
     raw+=` · weight ${first}→${last} kg (<b>${dw>=0?'+':''}${dw.toFixed(1)} kg</b> over ${wdays} day${wdays>1?'s':''})`;
-    // Maintenance from your own numbers: intake minus the daily kcal the weight change accounts for.
-    if (wdays>0){
+    // Maintenance from your own numbers: intake minus the daily kcal the weight change
+    // accounts for. Only over a window where the weight change is plausibly tissue —
+    // otherwise this quietly contradicts the adaptive TDEE by hundreds of kcal.
+    if (wUsable){
       const maint=Math.round((avgIn - dw*7700/wdays)/5)*5;
       raw+=` → implied maintenance ≈ <b>${maint.toLocaleString()}</b> kcal/day`;
+    } else if (wdays>0){
+      raw+=` <span class="ink-dim">— too short a span to imply a maintenance figure</span>`;
     }
   } else {
     raw+=` · weight Δ n/a — needs 2+ weigh-ins in range`;
@@ -962,7 +978,7 @@ function renderDataTrust(){
       + `<span class="ink-dim">kcal CV ${kcalCV!=null?kcalCV+'%':'—'} · protein ${pStat.n?Math.round(pStat.mean)+'g ±'+pStat.sd:'—'}</span></div>`
     : '';
   wrap.innerHTML = tdeeLine + rows + consist
-    + `<div class="trust-foot ink-dim">Trust tier: <b class="trust-${trust.tier}">${trust.tier}</b>. `
+    + `<div class="trust-foot ink-dim">Input quality: <b class="trust-${trust.tier}">${trust.tier}</b>. `
     + `These gate how much to believe the adaptive corridor, the fat-change estimate and the recomp read.</div>`;
 }
 
@@ -1234,7 +1250,7 @@ function renderSiteProgress(){
   const vol = sessions.length ? LedgerCore.weeklyVolumeByMuscle(sessions, cat, { from: addDaysISO(end,-6), to: end }) : {};
   const prog = sessions.length ? LedgerCore.muscleProgress(liftTrends(all, weightSeries()), cat) : {};
   const rows = LedgerCore.siteProgress(series, vol, prog);
-  const hasWaist = (series.waist||[]).length >= 2;
+  const hasWaist = (series.waist||[]).length >= 2;   // any waist history at all enables the ratio path
 
   const body = rows.map(r => {
     const [cls, phrase] = SITE_VERDICT[r.verdict] || SITE_VERDICT.thin;
@@ -1242,8 +1258,12 @@ function renderSiteProgress(){
       : `${r.cmPerMonth>0?'+':''}${r.cmPerMonth.toFixed(2)} cm/mo`;
     const ratio = r.ratioPctPerMonth == null ? ''
       : ` · vs waist ${r.ratioPctPerMonth>0?'+':''}${r.ratioPctPerMonth.toFixed(1)}%/mo`;
+    // The set count is a SUM across every muscle under the site, so it is deliberately
+    // larger than any one of them in the Volume-per-muscle panel. Name them, or the two
+    // panels look like they disagree.
+    const mNames = r.muscles.map(m=>(LedgerCore.MUSCLE_LABEL[m]||m).toLowerCase()).join(', ');
     const train = r.sets > 0
-      ? `${r.sets % 1 ? r.sets.toFixed(1) : r.sets} sets/wk`
+      ? `${r.sets % 1 ? r.sets.toFixed(1) : r.sets} sets/wk across ${escapeHtml(mNames)}`
       : 'not trained this week';
     const str = r.strengthPct == null ? ''
       : ` · strength ${r.strengthPct>0?'+':''}${r.strengthPct.toFixed(1)}%/mo`
@@ -1252,18 +1272,25 @@ function renderSiteProgress(){
       ? `<div class="site-sig ${cls}">${SITE_SIGNAL[r.signal]}</div>` : '';
     // Name and the headline rate share the top line; everything qualifying it sits below,
     // so a long site name can never squeeze the number into a wrap.
+    // Not enough baseline to quote a rate: say what is missing instead of extrapolating
+    // tape noise into a monthly figure.
+    const verdictLine = r.reliable
+      ? `<div class="site-verdict ${cls}">${phrase}<span class="ink-dim site-ratio">${ratio}</span></div>`
+      : `<div class="site-verdict flat"><span class="ink-dim">no rate yet — ${escapeHtml(r.reason || 'needs more readings')}</span></div>`;
     return `<div class="site-row">
       <div class="site-name">${escapeHtml(r.label)}</div>
-      <div class="site-move ${cls}">${cm}</div>
-      <div class="site-verdict ${cls}">${phrase}<span class="ink-dim">${ratio}</span></div>
+      <div class="site-move ${r.reliable?cls:'flat'}">${r.reliable?cm:`${r.n} reading${r.n===1?'':'s'}`}</div>
+      ${verdictLine}
       <div class="site-train ink-dim">${r.latest!=null?r.latest.toFixed(1)+' cm now · ':''}${train}${str}</div>
-      ${sig}
+      ${r.reliable?sig:''}
     </div>`;
   }).join('');
 
   wrap.innerHTML = `<div class="mv-cap ink-dim">Measured tissue vs trained volume · trends over every logged measurement</div>`
     + body
     + (hasWaist ? '' : '<div class="mv-untagged">⚠ Log your waist alongside these. Without it a centimetre is just a centimetre — the ratio to the waist is what separates tissue from a general surplus.</div>')
+    + (rows.length && !rows.some(r=>r.reliable)
+        ? `<div class="mv-untagged">⚠ No site has a long enough baseline yet. A tape carries about half a centimetre of placement noise and real tissue moves a quarter-centimetre a month, so a slope fitted across a few days is noise, not growth. Keep measuring — about ${LedgerCore.MEASURE_MIN_SPAN} days apart, same conditions — and the rates appear on their own.</div>` : '')
     + `<div class="mv-foot ink-dim">In a surplus everything grows, so the raw centimetre is not the signal — <b>vs waist</b> is. A site gaining on the waist is tissue; a site flat while the waist climbs is not. Strength is the second opinion: a tape that moves while the lifts do too is the one reading you can trust.</div>`;
 }
 

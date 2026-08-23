@@ -847,15 +847,27 @@
   // per-month rate, plus the standard error so a caller can tell a real move from noise.
   // Null when there is nothing to fit. Deliberately parallel to weightTrend so both read
   // the same way at the call site.
+  // A tape has roughly half a centimetre of placement noise in it, and real tissue moves
+  // a quarter-centimetre a month. So a slope fitted across a few DAYS, then multiplied out
+  // to a month, is placement noise wearing a growth rate: six readings over five days
+  // produced "+30 cm/month" of thigh on real data. `reliable` says whether the baseline is
+  // long enough to carry a monthly figure at all; callers must not quote perMonth without
+  // checking it. The fit is still returned — the caller decides what to say, not this.
+  const MEASURE_MIN_SPAN = 21;        // days of baseline before a monthly rate means anything
+  const MEASURE_MIN_N = 3;            // and enough readings to have a residual
   function measureTrend(entries) {
     if (!entries || entries.length < 2) return null;
     const t0 = Date.parse(entries[0].date + 'T00:00:00Z');
     const fit = linearTrend(entries.map(e =>
       ({ x: (Date.parse(e.date + 'T00:00:00Z') - t0) / 86400000, y: +e.v })));
     if (!fit) return null;
+    const spanDays = Math.round(
+      (Date.parse(entries[entries.length - 1].date + 'T00:00:00Z') - t0) / 86400000);
     return { perWeek: fit.slope * 7, perMonth: fit.slope * 30,
              sePerWeek: fit.se != null ? fit.se * 7 : null,
-             latest: +entries[entries.length - 1].v, first: +entries[0].v, n: fit.n };
+             latest: +entries[entries.length - 1].v, first: +entries[0].v, n: fit.n,
+             spanDays: spanDays,
+             reliable: fit.n >= MEASURE_MIN_N && spanDays >= MEASURE_MIN_SPAN };
   }
 
 
@@ -914,11 +926,12 @@
       const rt = measureTrend(ratioSeries(entries, s.waist || []));
       // The ratio slope is cm-per-month of a percentage; express it as %/month of itself
       // so sites of very different girths are comparable.
-      const ratioPct = rt && rt.first > 0 ? rt.perMonth / rt.first * 100 : null;
+      const ratioPct = rt && rt.reliable && rt.first > 0 ? rt.perMonth / rt.first * 100 : null;
 
       // Trained volume and pooled strength for the muscles under this site.
-      let sets = 0, swp = 0, sw = 0, best = null;
-      const RANK = { high: 3, medium: 2, low: 1 };
+      let sets = 0, swp = 0, sw = 0, weakest = null;
+      const RANK = { none: 0, low: 1, medium: 2, high: 3 };
+      const votes = [];
       def.muscles.forEach(m => {
         const v = +(volume && volume[m]) || 0;
         sets += v;
@@ -926,13 +939,28 @@
         if (p && p.pctPerMonth != null) {
           const w = v > 0 ? v : 0.5;         // an untrained-this-week muscle still votes, faintly
           sw += w; swp += w * p.pctPerMonth;
-          if (best == null || (RANK[p.confidence] || 0) > RANK[best]) best = p.confidence;
+          votes.push(p.pctPerMonth);
+          // The WEAKEST contributor sets the confidence, never the strongest. Taking the
+          // best let a site pooling biceps (−15%, low) with triceps (+89%, high) report
+          // its +35% average as "high" — a number no contributor supports.
+          if (weakest == null || (RANK[p.confidence] || 0) < RANK[weakest]) weakest = p.confidence;
         }
       });
       const strengthPct = sw > 0 ? +(swp / sw).toFixed(1) : null;
+      // Muscles under one site pulling opposite ways cannot produce a confident average,
+      // however well-fitted either of them is on its own.
+      const split = votes.length > 1 && votes.some(v => v > 0) && votes.some(v => v < 0);
+      if (split && RANK[weakest] > 1) weakest = 'low';
 
-      let verdict = 'thin';
-      if (tr) {
+      // A slope is only a slope once the baseline can carry one. Below that the honest
+      // output is "not yet", not a monthly rate computed from tape placement noise.
+      const usable = !!(tr && tr.reliable);
+      let verdict = 'thin', reason = null;
+      if (tr && !usable)
+        reason = tr.spanDays < MEASURE_MIN_SPAN
+          ? `${tr.spanDays} day${tr.spanDays === 1 ? '' : 's'} between the first and last reading — a tape needs about ${MEASURE_MIN_SPAN}`
+          : `${tr.n} readings — needs at least ${MEASURE_MIN_N}`;
+      if (usable) {
         const up = tr.perMonth > flatCm, down = tr.perMonth < -flatCm;
         const rUp = ratioPct != null && ratioPct > flatRatio;
         const rDown = ratioPct != null && ratioPct < -flatRatio;
@@ -950,8 +978,8 @@
       // (or a mis-sited tape); a site growing while strength sits flat during a surplus is
       // as likely to be fat and water as tissue.
       let signal = 'none';
-      const grew = tr && tr.perMonth > flatCm;
-      if (tr) {
+      const grew = usable && tr.perMonth > flatCm;
+      if (usable) {
         if (!grew && sets < SITE_MIN_SETS) signal = 'undertrained';
         else if (grew && strengthPct != null && strengthPct > 0) signal = 'confirmed';
         else if (grew && strengthPct != null && strengthPct <= 0) signal = 'unconfirmed';
@@ -960,13 +988,14 @@
 
       rows.push({ site: key, label: def.label, muscles: def.muscles,
                   n: entries.length,
-                  latest: tr ? tr.latest : (entries.length ? +entries[entries.length - 1].v : null),
-                  cmPerMonth: tr ? +tr.perMonth.toFixed(2) : null,
-                  waistPerMonth: waistTr ? +waistTr.perMonth.toFixed(2) : null,
+                  latest: entries.length ? +entries[entries.length - 1].v : null,
+                  spanDays: tr ? tr.spanDays : 0, reliable: usable, reason: reason,
+                  cmPerMonth: usable ? +tr.perMonth.toFixed(2) : null,
+                  waistPerMonth: waistTr && waistTr.reliable ? +waistTr.perMonth.toFixed(2) : null,
                   ratioPctPerMonth: ratioPct != null ? +ratioPct.toFixed(1) : null,
                   ratioN: rt ? rt.n : 0,
                   sets: +sets.toFixed(1), strengthPct: strengthPct,
-                  strengthConfidence: best, verdict: verdict, signal: signal });
+                  strengthConfidence: weakest, verdict: verdict, signal: signal });
     });
     return rows.filter(r => r.n > 0);
   }
@@ -2145,6 +2174,7 @@
     projectGoal, requiredRate, projectionConfidence, PROJ_Z,
     navyBodyFat, bodyComposition, measureTrend,
     MEASURE_SITES, MEASURE_SITE_KEYS, ratioSeries, siteProgress,
+    MEASURE_MIN_SPAN, MEASURE_MIN_N,
     freeSugarFraction, SUGAR_INTRINSIC, SUGAR_FREE,
     MICRO_REF, MICRO_KEYS, microRef, sumSuppMicros, microAverages, ELEMENTAL_FRACTION, elementalMg,
     supplementDue, supplementNextDue, supplementWindow, supplementStats, isoWeekdayMon,

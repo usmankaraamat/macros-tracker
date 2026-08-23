@@ -1503,29 +1503,32 @@ group('siteProgress — circumference vs waist vs training');
   check('arm outgrows the waist', arm.ratioPctPerMonth > 0 && arm.verdict==='building', `${arm.verdict}`);
   check('and the strength trend confirms it', arm.signal==='confirmed');
   check('arm pools both its muscles', arm.sets===17 && arm.strengthPct!=null);
-  check('confidence is the best of the contributing muscles', arm.strengthConfidence==='medium');
+  // biceps is 'medium' and triceps 'low', and they point the same way — the WEAKEST wins.
+  check('confidence is the weakest of the contributing muscles', arm.strengthConfidence==='low', arm.strengthConfidence);
   // The diagnostic case: nothing measurable happening while the waist climbs.
   check('a flat site under a growing waist is not progress', thigh.verdict==='fat-gaining', `${thigh.verdict}`);
   check('strength climbing without the tape is flagged', thigh.signal==='strength-only', `${thigh.signal}`);
   // Without a waist there is no ratio - say so rather than invent one.
-  const noWaist = C.siteProgress({arm:S.arm}, vol, prog);
+  const noWaist = C.siteProgress({arm:S.arm}, vol, prog);   // S.arm spans Jun->Aug, so the rate is real
   check('no waist means no ratio, and a plainer verdict',
         noWaist[0].ratioPctPerMonth===null && noWaist[0].verdict==='growing', `${noWaist[0].verdict}`);
   // A tape re-sited by a couple of millimetres must not read as growth.
-  const noise = C.siteProgress({waist:S.waist, arm:[{date:'2026-06-01',v:35},{date:'2026-08-01',v:35.1}]}, {}, {});
+  const noise = C.siteProgress({waist:S.waist,
+    arm:[{date:'2026-06-01',v:35},{date:'2026-07-01',v:35.05},{date:'2026-08-01',v:35.1}]}, {}, {});
   check('sub-threshold movement is not called growth', noise[0].verdict!=='building' && noise[0].verdict!=='growing', `${noise[0].verdict}`);
   check('a single measurement yields no trend', C.siteProgress({arm:[{date:'2026-06-01',v:35}]}, {}, {})[0].cmPerMonth===null);
+  const flatCalf = [{date:'2026-06-01',v:38},{date:'2026-07-01',v:38},{date:'2026-08-01',v:38}];
   check('undertrained sites are named',
-        C.siteProgress({waist:S.waist, calf:[{date:'2026-06-01',v:38},{date:'2026-08-01',v:38}]}, {calves:2}, {})[0].signal==='undertrained');
+        C.siteProgress({waist:S.waist, calf:flatCalf}, {calves:2}, {})[0].signal==='undertrained');
   // Zero sets is MORE undertrained than two, not a special case that falls through.
   check('a site with no sets at all is undertrained too',
-        C.siteProgress({waist:S.waist, calf:[{date:'2026-06-01',v:38},{date:'2026-08-01',v:38}]}, {}, {})[0].signal==='undertrained');
+        C.siteProgress({waist:S.waist, calf:flatCalf}, {}, {})[0].signal==='undertrained');
   // A site that IS growing is never called undertrained, however little it was trained.
   check('growth outranks a low set count',
         C.siteProgress({waist:S.waist, arm:S.arm}, {}, {}).find(r=>r.site==='arm').signal!=='undertrained');
   // A cut: waist coming down faster than the limb is the good reading, not a loss.
-  const cutS = { waist:[{date:'2026-06-01',v:90},{date:'2026-08-01',v:86}],
-                 arm:  [{date:'2026-06-01',v:35},{date:'2026-08-01',v:35}] };
+  const cutS = { waist:[{date:'2026-06-01',v:90},{date:'2026-07-01',v:88},{date:'2026-08-01',v:86}],
+                 arm:  [{date:'2026-06-01',v:35},{date:'2026-07-01',v:35},{date:'2026-08-01',v:35}] };
   check('holding a limb while the waist shrinks reads as leaning',
         C.siteProgress(cutS, {}, {})[0].verdict==='leaning', `${C.siteProgress(cutS, {}, {})[0].verdict}`);
   check('training data is optional', C.siteProgress(S).length===2);
@@ -1611,6 +1614,79 @@ group('projectionConfidence — the TDEE gates the intake advice');
   check('but never invents confidence the trend lacks',
         C.projectionConfidence('low','high',{ignoreTDEE:true})==='low');
   check('unknown tiers degrade to none', C.projectionConfidence('bogus','high')==='none');
+})();
+
+
+// ---- measureTrend: a slope needs a baseline long enough to carry it ----
+group('measureTrend — span guard against extrapolated tape noise');
+(function(){
+  // The real failing case: six readings across five days produced "+30 cm/month".
+  const short = [{date:'2026-08-21',v:56},{date:'2026-08-23',v:58}];
+  const t = C.measureTrend(short);
+  check('the fit is still returned', t && approx(t.perMonth, 30, 0.01), `${t && t.perMonth}`);
+  check('but the span is reported', t.spanDays===2, `${t.spanDays}`);
+  check('and it is marked unreliable', t.reliable===false);
+  // Long enough baseline, enough readings.
+  const good = [{date:'2026-06-01',v:56},{date:'2026-07-01',v:56.3},{date:'2026-08-01',v:56.6}];
+  const g = C.measureTrend(good);
+  check('a proper baseline is reliable', g.reliable===true, `span ${g.spanDays} n ${g.n}`);
+  check('and reports a sane monthly rate', approx(g.perMonth, 0.3, 0.02), `${g.perMonth}`);
+  // Both conditions are required, not either.
+  const twoFar = [{date:'2026-06-01',v:56},{date:'2026-08-01',v:57}];
+  check('a long span with only two readings is not reliable', C.measureTrend(twoFar).reliable===false);
+  const manyClose = [{date:'2026-08-20',v:56},{date:'2026-08-21',v:56.5},{date:'2026-08-22',v:57},{date:'2026-08-23',v:57.5}];
+  check('many readings over a few days is not reliable either', C.measureTrend(manyClose).reliable===false);
+  check('fewer than two readings is still null', C.measureTrend([{date:'2026-08-01',v:56}])===null);
+})();
+
+// ---- siteProgress: refuses to quote a rate it cannot support ----
+group('siteProgress — no rate without a baseline');
+(function(){
+  const short = {
+    waist: [{date:'2026-08-18',v:76.5},{date:'2026-08-21',v:77},{date:'2026-08-23',v:76}],
+    thigh: [{date:'2026-08-21',v:56},{date:'2026-08-23',v:58}]
+  };
+  const r = C.siteProgress(short, {quads:20}, {})[0];
+  check('an unusable baseline yields no cm/month', r.cmPerMonth===null, `${r.cmPerMonth}`);
+  check('and no ratio', r.ratioPctPerMonth===null);
+  check('the verdict stays thin', r.verdict==='thin', r.verdict);
+  check('and no signal is claimed', r.signal==='none', r.signal);
+  check('but the span and a reason are reported', r.spanDays===2 && r.reliable===false && !!r.reason, r.reason);
+  check('the latest reading still shows', r.latest===58);
+  // The same site with a real baseline recovers everything.
+  const long = {
+    waist: [{date:'2026-06-01',v:84},{date:'2026-07-01',v:84.5},{date:'2026-08-01',v:85}],
+    thigh: [{date:'2026-06-01',v:56},{date:'2026-07-01',v:56.5},{date:'2026-08-01',v:57}]
+  };
+  const L = C.siteProgress(long, {quads:20}, {})[0];
+  check('a real baseline produces a rate again', L.reliable===true && L.cmPerMonth!=null && L.ratioPctPerMonth!=null);
+  check('and a directional verdict', L.verdict!=='thin', L.verdict);
+})();
+
+// ---- siteProgress: confidence is set by the WEAKEST contributor ----
+group('siteProgress — pooled confidence cannot exceed its parts');
+(function(){
+  const S = { waist:[{date:'2026-06-01',v:84},{date:'2026-07-01',v:84.5},{date:'2026-08-01',v:85}],
+              arm:  [{date:'2026-06-01',v:35},{date:'2026-07-01',v:35.8},{date:'2026-08-01',v:36.6}] };
+  const vol = {biceps:18, triceps:17};
+  // The real case: biceps regressing at low confidence, triceps climbing at high.
+  const split = {biceps:{pctPerMonth:-15.0,confidence:'low'}, triceps:{pctPerMonth:89.1,confidence:'high'}};
+  const r = C.siteProgress(S, vol, split)[0];
+  check('the average is still the weighted mean', approx(r.strengthPct, (18*-15+17*89.1)/35, 0.2), `${r.strengthPct}`);
+  check('but confidence is not "high"', r.strengthConfidence!=='high', r.strengthConfidence);
+  check('it is the weakest contributor', r.strengthConfidence==='low', r.strengthConfidence);
+  // Agreeing muscles keep the weakest tier, but are not punished further.
+  const agree = {biceps:{pctPerMonth:12,confidence:'medium'}, triceps:{pctPerMonth:9,confidence:'high'}};
+  check('agreeing muscles keep the weakest tier', C.siteProgress(S, vol, agree)[0].strengthConfidence==='medium');
+  const bothHigh = {biceps:{pctPerMonth:12,confidence:'high'}, triceps:{pctPerMonth:9,confidence:'high'}};
+  check('two agreeing high muscles stay high', C.siteProgress(S, vol, bothHigh)[0].strengthConfidence==='high');
+  // Opposite signs cap the tier even when both contributors are individually high.
+  const bothHighSplit = {biceps:{pctPerMonth:-12,confidence:'high'}, triceps:{pctPerMonth:9,confidence:'high'}};
+  check('disagreement caps two high muscles at low',
+        C.siteProgress(S, vol, bothHighSplit)[0].strengthConfidence==='low');
+  // A single contributor cannot "disagree" with itself.
+  const one = C.siteProgress(S, {biceps:18}, {biceps:{pctPerMonth:12,confidence:'high'}})[0];
+  check('one muscle keeps its own tier', one.strengthConfidence==='high', one.strengthConfidence);
 })();
 
 // ---- summary ----

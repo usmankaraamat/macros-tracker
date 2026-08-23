@@ -131,7 +131,13 @@ function renderBodyFat(){
       const last = s[s.length-1].date;
       const recent = s.filter(e => (Date.parse(last)-Date.parse(e.date))/86400000 <= 60);
       const tr = LedgerCore.measureTrend(recent.length>=2 ? recent : s);
-      if (tr){
+      // Same guard as everywhere else: a body-fat slope fitted across a few days is tape
+      // placement noise multiplied by thirty, not a monthly change.
+      if (tr && !tr.reliable){
+        trendEl.hidden = false; trendEl.className = 'tactical';
+        trendEl.innerHTML = `<b>Body fat trend not ready</b> — ${tr.n} reading${tr.n===1?'':'s'} over ${tr.spanDays} day${tr.spanDays===1?'':'s'}. `
+          + `A monthly rate needs about ${LedgerCore.MEASURE_MIN_SPAN} days of baseline.`;
+      } else if (tr){
         const pm = tr.perMonth;
         const dir = Math.abs(pm) < 0.2 ? 'holding steady'
                   : pm < 0 ? `down ${Math.abs(pm).toFixed(1)} pts/month` : `up ${pm.toFixed(1)} pts/month`;

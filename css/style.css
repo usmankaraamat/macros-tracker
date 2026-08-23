@@ -1757,7 +1757,7 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
 }
 .site-row:last-of-type { border-bottom: 0; }
 .site-name    { grid-area: name;    font-weight: 650; color: var(--chalk); }
-.site-verdict > .ink-dim { white-space: nowrap; }
+.site-ratio { white-space: nowrap; }
 .site-move    { grid-area: move;    text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .site-verdict { grid-area: verdict; font-size: 13px; }
 .site-train   { grid-area: train;   font-size: 12px; }
