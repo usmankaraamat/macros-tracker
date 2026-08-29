@@ -1037,7 +1037,8 @@ function renderTrainingConsistency(){
 // The app knew every set but never rolled it up per muscle, so a muscle trained at half its
 // planned volume, or on back-to-back days, was invisible. This reads it back — fractional
 // working-sets by muscle over the trailing 7 days, the gaps that expose frequency, and a
-// prompt to tag any exercise the metadata does not yet know.
+// prompt to tag any exercise the metadata does not yet know. Clicking a muscle row expands
+// its per-exercise volume breakdown with individual progression.
 function renderMuscleVolume(){
   const wrap = document.getElementById('muscleVolume'); if (!wrap) return;
   const all = allWorkouts(), cat = exerciseCatalog();
@@ -1054,6 +1055,31 @@ function renderMuscleVolume(){
   // trust-weighted mean of the lifts that train it, which cancels the per-exercise confounders
   // (session order, pre-exhaustion) that make a single lift's progress hard to read.
   const prog = LedgerCore.muscleProgress(liftTrends(all, weightSeries()), cat);
+
+  // ---- per-exercise volume breakdown by muscle (for the expandable detail) ----
+  // Mirrors weeklyVolumeByMuscle but keeps the per-exercise identity so the dropdown can
+  // show "Bench Press — 4 sets" rather than just the aggregate total.
+  const byId = {};
+  (cat || []).forEach(c => { if (c && c.id) byId[c.id] = c; });
+  const exByMuscle = {};   // { muscle: { exId: { name, sets } } }
+  (sessions || []).forEach(s => {
+    if (!s) return;
+    if (range.from && s.date < range.from) return;
+    if (range.to && s.date > range.to) return;
+    (s.exercises || []).forEach(ex => {
+      const n = LedgerCore.workingSetCount(ex);
+      if (!n) return;
+      const meta = LedgerCore.exerciseMeta(byId[ex.id] || ex);
+      if (!meta.muscles) return;
+      Object.keys(meta.muscles).forEach(g => {
+        const contrib = n * meta.muscles[g];
+        if (!exByMuscle[g]) exByMuscle[g] = {};
+        const bucket = exByMuscle[g][ex.id] || (exByMuscle[g][ex.id] = { name: ex.name || ex.id, sets: 0 });
+        bucket.sets += contrib;
+      });
+    });
+  });
+
   const untagged = vol.__untagged || 0;
   const groups = Object.keys(vol).filter(g=>g!=='__untagged').sort((a,b)=>vol[b]-vol[a]);
   if (!groups.length && !untagged){ wrap.innerHTML = '<div class="empty">No sets in the last 7 days.</div>'; return; }
@@ -1074,6 +1100,42 @@ function renderMuscleVolume(){
       + `<span>${pctTxt(p.pctPerMonth)}${moe} · ${word}</span>${conf}`
       + `<span class="mv-drivers">${p.nExercises} lift${p.nExercises===1?'':'s'}: ${drivers}</span></div>`;
   };
+  // Build a lookup from exercise id to per-exercise progression from the muscleProgress
+  // contributors, so the dropdown can show "+2.1%/month" next to each exercise.
+  const exProgByMuscle = {};   // { muscle: { exId: { pct, confidence, cls } } }
+  groups.forEach(g => {
+    const p = prog[g];
+    if (!p || !p.contributors) return;
+    const map = {};
+    p.contributors.forEach(c => {
+      const cls = c.pct > (LedgerCore.LIFT_FLAT_PCT||1) ? 'up' : c.pct < -(LedgerCore.LIFT_FLAT_PCT||1) ? 'down' : 'flat';
+      map[c.id] = { pct: c.pct, confidence: c.confidence, cls };
+    });
+    exProgByMuscle[g] = map;
+  });
+
+  const exerciseDetail = g => {
+    const bucket = exByMuscle[g];
+    if (!bucket || !Object.keys(bucket).length) return '';
+    const progMap = exProgByMuscle[g] || {};
+    const items = Object.keys(bucket)
+      .map(id => ({ id, name: bucket[id].name, sets: bucket[id].sets }))
+      .sort((a, b) => b.sets - a.sets);
+    const lines = items.map(it => {
+      const setsStr = it.sets % 1 ? it.sets.toFixed(1) : String(it.sets);
+      const ep = progMap[it.id];
+      let progTag = '';
+      if (ep) {
+        const arrow = ep.cls === 'up' ? '▲' : ep.cls === 'down' ? '▼' : '→';
+        progTag = ` <span class="mv-ex-prog ${ep.cls}">${arrow} ${pctTxt(ep.pct)}`
+          + ` <span class="lift-conf ${CONF_CLS[ep.confidence]||'low'}">${ep.confidence}</span></span>`;
+      }
+      return `<div class="mv-ex-item"><span class="mv-ex-name">${escapeHtml(it.name)}</span>`
+        + `<span class="mv-ex-sets">${setsStr} set${it.sets===1?'':'s'}</span>${progTag}</div>`;
+    }).join('');
+    return `<div class="mv-detail" hidden>${lines}</div>`;
+  };
+
   const rows = groups.map(g=>{
     const sets = vol[g], tgt = +targets[g]||0;
     const f = freq[g] || {sessions:0, gaps:[]};
@@ -1081,19 +1143,36 @@ function renderMuscleVolume(){
     const pct = Math.max(6, sets/maxV*100), tpct = tgt>0 ? Math.min(100, tgt/maxV*100) : null;
     const short = tgt>0 && sets < tgt*0.75;
     const gapNote = f.sessions>=2 ? `${f.sessions}× · gaps ${f.gaps.join('/')}d` + (backToBack?' ⚠':'') : `${f.sessions}× this week`;
-    return `<div class="mv-row">
-      <div class="mv-name">${escapeHtml(LedgerCore.MUSCLE_LABEL[g]||g)}</div>
+    const hasDetail = exByMuscle[g] && Object.keys(exByMuscle[g]).length;
+    return `<div class="mv-row${hasDetail ? ' mv-expandable' : ''}" data-muscle="${g}">
+      <div class="mv-name">${escapeHtml(LedgerCore.MUSCLE_LABEL[g]||g)}${hasDetail ? '<span class="mv-chevron">&#x25b8;</span>' : ''}</div>
       <div class="mv-bar-wrap"><div class="mv-bar${short?' short':''}" style="width:${pct}%"></div>`
       + (tpct!=null?`<div class="mv-target" style="left:${tpct}%" title="target ${tgt}"></div>`:'') + `</div>
       <div class="mv-val">${sets%1?sets.toFixed(1):sets}${tgt>0?` / ${tgt}`:''}</div>
       <div class="mv-freq ink-dim">${gapNote}</div>
       ${progLine(g)}
+      ${exerciseDetail(g)}
     </div>`;
   }).join('');
   wrap.innerHTML = `<div class="mv-cap ink-dim">Working sets per muscle · last 7 days${Object.keys(targets).length?' · target marker shown':''}</div>`
     + rows
     + `<div class="mv-foot ink-dim">The footnote under each muscle is its <b>progression</b> — every exercise that trains it, weighted by involvement and trust, rolled into one %/month over the last 8 weeks. It reads a muscle a single lift can't: an isolation looking flat while the compounds that hit it climb still nets out as progress. ±&nbsp;is the margin; the tier is how far the pooled trend clears it.</div>`
     + (untagged ? `<div class="mv-untagged">⚠ ${untagged%1?untagged.toFixed(1):untagged} set${untagged===1?'':'s'} on exercises with no muscle tag — they are pooled, not counted per muscle. Newly-logged lifts outside the seed list need tagging.</div>` : '');
+
+  // Wire up expand/collapse on each muscle row
+  wrap.querySelectorAll('.mv-expandable').forEach(row => {
+    row.addEventListener('click', e => {
+      // Don't toggle if user clicked a link or interactive element inside
+      if (e.target.closest('a, button, input, select')) return;
+      const detail = row.querySelector('.mv-detail');
+      const chevron = row.querySelector('.mv-chevron');
+      if (!detail) return;
+      const opening = detail.hidden;
+      detail.hidden = !opening;
+      if (chevron) chevron.textContent = opening ? '\u25be' : '\u25b8';
+      row.classList.toggle('mv-open', opening);
+    });
+  });
 }
 
 // ---- Goal projection ---------------------------------------------------------

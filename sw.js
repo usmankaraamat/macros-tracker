@@ -1,7 +1,7 @@
 // Service worker for Eatify PWA.
 // Scope is /macros-tracker/ — all cached paths are relative to this file's location,
 // so they resolve correctly under the repo subpath without hardcoding the origin.
-const CACHE = 'eatify-v93';
+const CACHE = 'eatify-v94';
 const FONT_CACHE = 'ledger-fonts-v1';
 const SHELL = [
   './',
