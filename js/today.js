@@ -292,6 +292,9 @@ function macroRow(o){
 // ---- the entry ledger ------------------------------------------------------
 function renderLedgerTable(){
   const body = document.getElementById('ledgerBody');
+  const title=document.getElementById('ledgerTitle'), count=document.getElementById('ledgerCount');
+  if(title)title.textContent=VIEW_DATE===ACTIVE_DATE?"Today's entries":`${prettyDate(VIEW_DATE)} entries`;
+  if(count)count.textContent=ledger.length?`${ledger.length} item${ledger.length===1?'':'s'}`:'No items yet';
   if (!ledger.length){
     body.innerHTML = emptyLedgerCell();
     wireEmptyLedgerChips();
@@ -300,20 +303,27 @@ function renderLedgerTable(){
   }
   const badgeFor = e => (e.source && e.source !== 'DB')
     ? `<span class="badge ${e.source === 'USDA' ? 'usda' : 'est'}">${escapeHtml(e.source)}</span>` : '';
-  const actionsFor = (e, i) => `<div class="meal-actions">
+  const actionsFor = (e, i) => `<div class="meal-actions" aria-label="Entry actions">
     <button type="button" class="edit" data-edit="${i}" aria-label="Edit grams for ${escapeAttr(e.name)}" title="Edit grams">${uiIcon('edit', 17)}</button>
     <button type="button" class="del" data-del="${i}" aria-label="Remove ${escapeAttr(e.name)}" title="Remove">${uiIcon('trash', 17)}</button>
   </div>`;
   const macrosFor = e => `<div class="meal-macros" aria-label="Macronutrients">
-    <span><small>P</small><b>${e.p.toFixed(1)}g</b></span>
-    <span><small>C</small><b>${(e.c||0).toFixed(1)}g</b></span>
-    <span><small>F</small><b>${e.f.toFixed(1)}g</b></span>
+    <span class="meal-macro protein"><small>Protein</small><b>${e.p.toFixed(1)}<em>g</em></b></span>
+    <span class="meal-macro carbs"><small>Carbs</small><b>${(e.c||0).toFixed(1)}<em>g</em></b></span>
+    <span class="meal-macro fat"><small>Fat</small><b>${e.f.toFixed(1)}<em>g</em></b></span>
   </div>`;
   const timeFor = e => {
     const at=e.eatenAt||e.at||e.loggedAt; if(!at)return '';
     const d=new Date(at); if(isNaN(d.getTime()))return '';
-    return ` · ${d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+    return d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
   };
+  const metaFor=e=>`<span class="meal-meta"><span>${Math.round(e.grams)} g</span>${timeFor(e)?`<span>${escapeHtml(timeFor(e))}</span>`:''}</span>`;
+  const energyFor=e=>`<span class="meal-kcal"><strong>${Math.round(e.kcal)}</strong><small>kcal</small></span>`;
+  const componentMacros=e=>`<span class="component-macros">
+    <span class="protein"><small>Protein</small>${e.p.toFixed(1)}g</span>
+    <span class="carbs"><small>Carbs</small>${(e.c||0).toFixed(1)}g</span>
+    <span class="fat"><small>Fat</small>${e.f.toFixed(1)}g</span>
+  </span>`;
   const row = (e,i)=>{
     const badge = (e.source && e.source !== 'DB')
       ? `<span class="badge ${e.source === 'USDA' ? 'usda' : 'est'}">${escapeHtml(e.source)}</span>` : '';
@@ -321,8 +331,8 @@ function renderLedgerTable(){
       ? `<div class="flags">${escapeHtml(e.flags.join(' · '))}</div>` : '';
     return `<article class="meal-entry">
       <div class="meal-head">
-        <span class="meal-name">${badge}${escapeHtml(e.name)}<small>${Math.round(e.grams)}g${timeFor(e)}</small></span>
-        <span class="meal-kcal">${Math.round(e.kcal)} <small>kcal</small></span>
+        <span class="meal-name">${badge}<span class="meal-name-text">${escapeHtml(e.name)}</span>${metaFor(e)}</span>
+        ${energyFor(e)}
       </div>
       <div class="meal-foot">${macrosFor(e)}${actionsFor(e, i)}</div>${flags}
     </article>`;
@@ -341,13 +351,13 @@ function renderLedgerTable(){
                             {kcal:0,p:0,f:0,c:0});
     html.push(`<section class="meal-entry dish-entry">
       <div class="meal-head">
-        <span class="meal-name">${escapeHtml(dish)}<small>${part.length} ingredient${part.length>1?'s':''} · ${Math.round(part.reduce((s,e)=>s+(+e.grams||0),0))}g</small></span>
-        <span class="meal-kcal">${Math.round(sum.kcal)} <small>kcal</small></span>
+        <span class="meal-name"><span class="dish-label">Dish</span><span class="meal-name-text">${escapeHtml(dish)}</span><span class="meal-meta"><span>${part.length} ingredient${part.length>1?'s':''}</span><span>${Math.round(part.reduce((s,e)=>s+(+e.grams||0),0))} g</span></span></span>
+        ${energyFor(sum)}
       </div>
       <div class="meal-foot dish-total">${macrosFor(sum)}</div>
         <div class="meal-components">${part.map((e,k)=>`<div class="meal-component">
-          <span class="component-name">${badgeFor(e)}${escapeHtml(e.name)}<small>${Math.round(e.grams)}g · ${Math.round(e.kcal)} kcal${timeFor(e)}</small></span>
-          <span class="component-macros">P ${e.p.toFixed(1)}g · C ${(e.c||0).toFixed(1)}g · F ${e.f.toFixed(1)}g</span>
+          <span class="component-name">${badgeFor(e)}${escapeHtml(e.name)}<small>${Math.round(e.grams)} g · ${Math.round(e.kcal)} kcal${timeFor(e)?` · ${escapeHtml(timeFor(e))}`:''}</small></span>
+          ${componentMacros(e)}
           ${actionsFor(e, i + k)}
         </div>`).join('')}</div>
     </section>`);

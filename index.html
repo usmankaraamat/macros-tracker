@@ -333,11 +333,14 @@
   </section>
 
   <!-- LEDGER -->
-  <section class="panel">
-    <span class="panel-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-      <span>Today's entries</span>
+  <section class="panel meal-ledger-panel">
+    <div class="ledger-titlebar">
+      <div class="ledger-heading">
+        <span class="panel-title" id="ledgerTitle">Today's entries</span>
+        <span class="ledger-count" id="ledgerCount"></span>
+      </div>
       <button type="button" class="sm ghost" id="saveTplBtn">Save as usual</button>
-    </span>
+    </div>
     <div id="ledgerBody" class="meal-ledger" aria-label="Foods logged for the day on screen"></div>
   </section>
 
