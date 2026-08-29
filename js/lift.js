@@ -11,9 +11,9 @@ const WK_PREFIX = 'ledger_workout_';
 function workoutFor(ds){
   try{
     const w = JSON.parse(localStorage.getItem(WK_PREFIX+ds)||'null');
-    if (w && Array.isArray(w.exercises)) return w;
+    if (w && Array.isArray(w.exercises)) return ensureWorkoutMeta(w,ds);
   }catch(e){}
-  return { date: ds, split: splitForDate(ds), exercises: [] };
+  return ensureWorkoutMeta({ date: ds, split: splitForDate(ds), exercises: [] },ds);
 }
 function allWorkouts(){
   const out = {};
@@ -22,7 +22,7 @@ function allWorkouts(){
       const k = localStorage.key(i);
       const m = k && k.match(/^ledger_workout_(\d{4}-\d{2}-\d{2})$/);
       if (!m) continue;
-      try{ const w = JSON.parse(localStorage.getItem(k)); if (w && Array.isArray(w.exercises)) out[m[1]] = w; }catch(e){}
+      try{ const w = JSON.parse(localStorage.getItem(k)); if (w && Array.isArray(w.exercises)) out[m[1]] = ensureWorkoutMeta(w,m[1]); }catch(e){}
     }
   }catch(e){}
   return out;
@@ -30,6 +30,7 @@ function allWorkouts(){
 function workoutMeta(){ try{ return JSON.parse(localStorage.getItem('ledger_workout_meta')||'{}'); }catch(e){ return {}; } }
 function saveWorkoutMeta(m){ try{ localStorage.setItem('ledger_workout_meta', JSON.stringify(m)); }catch(e){} }
 function saveWorkout(w){
+  w=ensureWorkoutMeta(w,w.date);
   try{ localStorage.setItem(WK_PREFIX+w.date, JSON.stringify(w)); }catch(e){}
   const m = workoutMeta(); m[w.date] = new Date().toISOString(); saveWorkoutMeta(m);
   scheduleSync();
@@ -370,14 +371,19 @@ function liftCommit(){
   if (!liftPending || !liftPending.exercises.length) return;
   const w = workoutFor(VIEW_DATE);
   w.date = VIEW_DATE; w.split = splitForDate(VIEW_DATE);
+  const now=new Date().toISOString();
+  if(!w.startedAt)w.startedAt=now;
+  w.endedAt=now; w.updatedAt=now;
   let cat = exerciseCatalog(), added = 0;
   liftPending.exercises.forEach(x=>{
     // A lift the catalogue has never seen joins it on first use — that is what keeps
     // every later spelling of it landing on the same trend line.
     if (!cat.some(c=>c.id===x.id)){ cat = cat.concat([{id:x.id, name:x.name, aliases:[]}]); added++; }
+    const freshSets=x.sets.map(s=>Object.assign({},s,{_id:newRecordId('set'),loggedAt:now,updatedAt:now}));
     const cur = w.exercises.filter(e=>e.id===x.id)[0];
-    if (cur){ cur.sets = (cur.sets||[]).concat(x.sets); if (x.rir!=null) cur.rir = x.rir; }
-    else w.exercises.push({id:x.id, name:x.name, sets:x.sets.slice(), rir: x.rir==null?null:x.rir});
+    if (cur){ cur.sets = (cur.sets||[]).concat(freshSets); cur.updatedAt=now; if (x.rir!=null) cur.rir = x.rir; }
+    else w.exercises.push({_id:`exercise_${hashId(`${VIEW_DATE}|${x.id}|${x.equipment||''}`)}`,id:x.id,name:x.name,sets:freshSets,
+      rir:x.rir==null?null:x.rir,loggedAt:now,updatedAt:now});
   });
   const n = liftPending.exercises.length;
   const restSecs = restSecondsFor(liftPending.exercises);
@@ -480,6 +486,14 @@ function renderLiftSession(all, W){
       </div>
     </details>`;
   }).join('');
+  const perf=LedgerCore.sessionPerformance(w,Object.keys(all).map(d=>all[d]),{weights:W});
+  const timing=w.startedAt?`${new Date(w.startedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`
+    +(w.endedAt&&w.endedAt!==w.startedAt?`–${new Date(w.endedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`:''):'';
+  const duration=w.startedAt&&w.endedAt?Math.max(0,Math.round((Date.parse(w.endedAt)-Date.parse(w.startedAt))/60000)):0;
+  const meta=document.createElement('div');meta.className='tactical lift-session-read';
+  meta.innerHTML=(timing?`Session ${escapeHtml(timing)}${duration?` · ${duration} min`:''}`:'Session time starts with the first logged sets')
+    +(perf.status==='ok'?` · <b>${perf.scorePct>=0?'+':''}${perf.scorePct.toFixed(1)}% vs expected</b> across ${perf.n} comparable lift${perf.n===1?'':'s'} <span class="lift-conf ${CONF_CLS[perf.confidence]||'low'}">${perf.confidence}</span>`:' · expected-vs-actual appears after repeated lifts');
+  el.prepend(meta);
   el.querySelectorAll('[data-le]').forEach(s=>{
     s.onclick = ()=>{ liftEditIdx = +s.dataset.le; renderLiftSession(allWorkouts(), weightSeries()); };
   });
@@ -489,9 +503,12 @@ function renderLiftSession(all, W){
       const ex = cur.exercises[i];
       if (!ex) return;
       if (liftEditIdx === i) liftEditIdx = null;
+      const at=new Date().toISOString();cur._tombstones=cur._tombstones||{};
+      cur._tombstones[ex._id]=at;(ex.sets||[]).forEach(x=>cur._tombstones[x._id]=at);
       cur.exercises.splice(i,1); saveWorkout(cur); render();
       toast(`Removed ${ex.name}`, { undo: ()=>{
         const back = workoutFor(VIEW_DATE);
+        delete back._tombstones[ex._id];(ex.sets||[]).forEach(x=>delete back._tombstones[x._id]);
         back.exercises.splice(i, 0, ex); saveWorkout(back); render();
       } });
     };
@@ -503,6 +520,7 @@ function renderLiftSession(all, W){
       const cur = workoutFor(VIEW_DATE), s = cur.exercises[i] && cur.exercises[i].sets[si];
       if (!s) return;
       if (s.warmup) delete s.warmup; else s.warmup = true;
+      s.updatedAt=new Date().toISOString();
       saveWorkout(cur); render();
     };
   });
@@ -511,6 +529,7 @@ function renderLiftSession(all, W){
       const i = +inp.dataset.lr, cur = workoutFor(VIEW_DATE), v = inp.value.trim();
       if (!cur.exercises[i]) return;
       cur.exercises[i].rir = v==='' ? null : Math.max(0, Math.min(10, +v||0));
+      cur.exercises[i].updatedAt=new Date().toISOString();
       saveWorkout(cur); render();
     };
   });
@@ -574,7 +593,10 @@ function bindLiftEditor(w){
     // A rename onto an exercise the catalogue hasn't seen joins it, same as first-time logging.
     let cat = exerciseCatalog();
     if (!cat.some(c=>c.id===p.id)) saveCatalog(cat.concat([{id:p.id, name:p.name, aliases:[]}]));
-    cur.exercises[i] = { id:p.id, name:p.name, sets:p.sets.slice(), rir };
+    const old=cur.exercises[i],now=new Date().toISOString();cur._tombstones=cur._tombstones||{};
+    (old.sets||[]).forEach(s=>cur._tombstones[s._id]=now);
+    cur.exercises[i]={_id:old._id,id:p.id,name:p.name,rir,loggedAt:old.loggedAt,updatedAt:now,
+      sets:p.sets.map(s=>Object.assign({},s,{_id:newRecordId('set'),loggedAt:now,updatedAt:now}))};
     saveWorkout(cur); liftEditIdx = null; haptic(); render();
     toast(`Updated ${p.name}`);
   };

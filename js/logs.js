@@ -87,10 +87,22 @@ function renderMeasureForm(){
   wrap.innerHTML = MEASURE_FIELDS.map(f=>{
     const need = f.navy === true || (f.navy === 'female' && sex === 'female');
     const tag = need ? ' <span class="measure-req" title="feeds the body-fat estimate">◈</span>' : '';
-    const v = cur[f.key] != null ? cur[f.key] : '';
+    const samples=cur._samples&&cur._samples[f.key];
+    const v = samples&&samples.length ? samples.join(', ') : (cur[f.key] != null ? cur[f.key] : '');
     return `<div><label for="m_${f.key}">${escapeHtml(f.label)}${tag}</label>`
-      + `<input type="number" id="m_${f.key}" data-mkey="${f.key}" min="0" step="0.1" inputmode="decimal" placeholder="cm" value="${v}"></div>`;
+      + `<input type="text" id="m_${f.key}" data-mkey="${f.key}" inputmode="decimal" placeholder="cm or 3 readings" value="${escapeAttr(v)}"></div>`;
   }).join('');
+  const cadence=document.getElementById('measureCadence');
+  if(cadence){
+    const prior=Object.keys(measureMap()).filter(d=>d<VIEW_DATE).sort().pop();
+    if(!prior)cadence.textContent='Measure weekly in the same conditions. Enter 2-3 readings separated by commas; the median is stored.';
+    else { const days=Math.round((Date.parse(VIEW_DATE)-Date.parse(prior))/86400000);
+      cadence.textContent=days<6?`Last set was ${days} day${days===1?'':'s'} ago. Weekly is enough; extra readings today mainly add tape-placement noise.`
+        :`Last set was ${days} days ago. This is a useful time for the next weekly set; comma-separated repeats are reduced to their median.`; }
+  }
+}
+function parseMeasureSamples(raw){
+  return String(raw||'').split(/[,;/]+/).map(s=>parseFloat(s.trim())).filter(v=>v>0);
 }
 function renderMeasureHowto(){
   const el = document.getElementById('measureHowtoBody'); if (!el) return;
@@ -182,11 +194,16 @@ function renderLogsTab(){
 
 // ---- form actions ----------------------------------------------------------
 document.getElementById('mSaveBtn').onclick = ()=>{
-  const cur = {};
+  const cur = {}, samples={};
   document.querySelectorAll('#measureForm [data-mkey]').forEach(inp=>{
-    const v = parseFloat(inp.value);
-    if (v > 0) cur[inp.dataset.mkey] = Math.round(v*10)/10;
+    const vs=parseMeasureSamples(inp.value);
+    if(vs.length){
+      const rounded=vs.map(v=>Math.round(v*10)/10);
+      cur[inp.dataset.mkey]=Math.round(LedgerCore.median(rounded)*10)/10;
+      if(rounded.length>1)samples[inp.dataset.mkey]=rounded;
+    }
   });
+  if(Object.keys(samples).length)cur._samples=samples;
   const map = measureMap(), meta = measureMeta();
   if (Object.keys(cur).length){ map[VIEW_DATE] = cur; }
   else { delete map[VIEW_DATE]; }        // all-blank save clears the day
@@ -195,7 +212,7 @@ document.getElementById('mSaveBtn').onclick = ()=>{
   renderBodyFat(); renderMeasureLog();
   const msg = document.getElementById('mFormMsg');
   msg.hidden = false;
-  const n = Object.keys(cur).length;
+  const n = MEASURE_FIELDS.filter(f=>cur[f.key]>0).length;
   msg.textContent = n ? `Saved ${n} measurement${n>1?'s':''} for ${VIEW_DATE===ACTIVE_DATE?'today':prettyDate(VIEW_DATE)}.`
                       : `Cleared measurements for ${VIEW_DATE===ACTIVE_DATE?'today':prettyDate(VIEW_DATE)}.`;
   toast(n ? 'Measurements saved' : 'Measurements cleared');

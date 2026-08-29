@@ -19,6 +19,7 @@
       if (num != null) m[String(num)] = n.value != null ? n.value : (n.amount || 0);
     });
     const g = num => Number(m[num] || 0);
+    const has = num => Object.prototype.hasOwnProperty.call(m, String(num));
     const p = g('203'), f = g('204'), c = g('205');
     // Prefer Atwater factors (reliable on Foundation foods) over #208, which USDA
     // sometimes ships as a bogus low placeholder — e.g. "Potatoes, gold, raw" reports
@@ -32,9 +33,13 @@
     //   304 magnesium · 303 iron · 309 zinc (mg) · 401 vitamin C(mg) · 328 vitamin D(µg).
     // Fat breakdown (g): 606 saturated · 645 monounsaturated · 646 polyunsaturated · 605 trans.
     // Unsaturated is mono+poly; the "unhealthy" share the footnote flags is saturated+trans.
+    const known = { ca:has('301'), ph:has('305'), fib:has('291'), sug:has('269'),
+      fsug:has('269'), na:has('307'), k:has('306'), mg:has('304'), fe:has('303'),
+      zn:has('309'), vc:has('401'), vd:has('328'), sfa:has('606'),
+      ufa:has('645')||has('646'), tfa:has('605') };
     return { kcal, p, f, c, ca: g('301'), ph: g('305'), fib: g('291'), sug: g('269'), na: g('307'),
              k: g('306'), mg: g('304'), fe: g('303'), zn: g('309'), vc: g('401'), vd: g('328'),
-             sfa: g('606'), ufa: g('645') + g('646'), tfa: g('605') };
+             sfa: g('606'), ufa: g('645') + g('646'), tfa: g('605'), _known:known };
   }
 
   // ---- Target resolution ---------------------------------------------------
@@ -513,13 +518,23 @@
   // Confidence w ramps 0→1 as the sample grows from 7 to 28 days, so the number leans on
   // the formula early and on measured reality as the history accumulates — recalibrating
   // every day. Needs a real weight trend and some logged intake, else it's formula-only.
-  function calibrateTDEE(formula, avgIntake, ratePerWeek, sampleDays) {
+  function calibrateTDEE(formula, avgIntake, ratePerWeek, sampleDays, opts) {
+    const o = opts || {};
     const hasData = avgIntake > 0 && sampleDays >= 7 && ratePerWeek != null;
     const dataTDEE = hasData ? avgIntake - (ratePerWeek / 7) * KCAL_PER_KG_FAT : null;
-    const w = hasData ? Math.max(0, Math.min(1, (sampleDays - 7) / 21)) : 0;
+    let w = hasData ? Math.max(0, Math.min(1, (sampleDays - 7) / 21)) : 0;
+    if (hasData && Object.keys(o).length) {
+      const coverage = o.coverage == null ? 1 : Math.max(0, Math.min(1, +o.coverage || 0));
+      const energySE = o.rateSEPerWeek == null ? 0 : Math.abs(+o.rateSEPerWeek) * KCAL_PER_KG_FAT / 7;
+      const precision = energySE > 0 ? Math.max(0.2, Math.min(1, 200 / energySE)) : 1;
+      const weighReliability = o.nWeighIns == null ? 1 : Math.max(0.1, Math.min(1, ((+o.nWeighIns||0)-1)/9));
+      w *= coverage * precision * weighReliability;
+    }
     const formulaN = formula > 0 ? formula : (dataTDEE || 0);
     const blended = dataTDEE != null ? Math.round(w * dataTDEE + (1 - w) * formulaN) : Math.round(formulaN);
-    return { formula: Math.round(formulaN), dataTDEE: dataTDEE != null ? Math.round(dataTDEE) : null, blended, w };
+    return { formula: Math.round(formulaN), dataTDEE: dataTDEE != null ? Math.round(dataTDEE) : null, blended, w,
+             energySE:o.rateSEPerWeek==null?null:Math.round(Math.abs(+o.rateSEPerWeek)*KCAL_PER_KG_FAT/7),
+             coverage:o.coverage==null?null:+o.coverage };
   }
   // Derive a calorie corridor from a maintenance (TDEE) number and a goal offset:
   //   cut −500, maintain 0, lean bulk +300, etc. The band is the ± half-width around the
@@ -634,12 +649,16 @@
     const denom = inWin.length;
     const byKey = {};
     (keys || []).forEach(k => {
-      let sum = 0, n = 0;
+      let sum = 0, n = 0, knownKcal = 0, totalKcal = 0;
       inWin.forEach(d => {
         const v = d.micros ? +d.micros[k] : 0;
         if (v > 0) { sum += v; n++; }
+        const cv = d.coverage && d.coverage[k];
+        if (cv) { knownKcal += +cv.knownKcal || 0; totalKcal += +cv.totalKcal || 0; }
       });
-      byKey[k] = { avg: denom ? sum / denom : 0, sum: sum, n: n, days: denom };
+      byKey[k] = { avg: denom ? sum / denom : 0, sum: sum, n: n, days: denom,
+                   coverage: totalKcal > 0 ? knownKcal / totalKcal : null,
+                   knownKcal, totalKcal };
     });
     return { window: windowDays, loggedDays: denom, byKey: byKey };
   }
@@ -702,6 +721,32 @@
       ({ x: (Date.parse(e.date + 'T00:00:00Z') - t0) / 86400000, y: e.kg })));
     if (!fit) return null;
     return { ratePerWeek: fit.slope * 7, latest: entries[entries.length - 1].kg };
+  }
+
+  // Robust scale trend. The median pairwise slope keeps a single water-weight outlier
+  // from moving maintenance by hundreds of calories; MAD supplies a conservative error.
+  function robustWeightTrend(entries) {
+    const xs = (entries || []).filter(e => e && e.date && +e.kg > 0).slice()
+      .sort((a, b) => a.date < b.date ? -1 : 1);
+    if (xs.length < 2) return null;
+    const t0 = Date.parse(xs[0].date + 'T00:00:00Z');
+    const pts = xs.map(e => ({ x:(Date.parse(e.date + 'T00:00:00Z') - t0) / 86400000, y:+e.kg }));
+    const slopes = [];
+    for (let i=0; i<pts.length; i++) for (let j=i+1; j<pts.length; j++) {
+      const dx = pts[j].x - pts[i].x;
+      if (dx > 0) slopes.push((pts[j].y - pts[i].y) / dx);
+    }
+    if (!slopes.length) return null;
+    const slope = median(slopes);
+    const intercept = median(pts.map(p => p.y - slope * p.x));
+    const residuals = pts.map(p => p.y - (intercept + slope * p.x));
+    const centre = median(residuals), mad = median(residuals.map(r => Math.abs(r - centre))) || 0;
+    const mx = pts.reduce((s,p)=>s+p.x,0)/pts.length;
+    const sxx = pts.reduce((s,p)=>s+(p.x-mx)*(p.x-mx),0);
+    const seDay = pts.length > 2 && sxx > 0 ? 1.4826 * mad / Math.sqrt(sxx) : null;
+    return { ratePerWeek:slope*7, sePerWeek:seDay==null?null:seDay*7,
+             latest:xs[xs.length-1].kg, n:xs.length,
+             spanDays:pts[pts.length-1].x-pts[0].x, slope, intercept, residualMAD:mad };
   }
 
 
@@ -1394,6 +1439,77 @@
              spanDays: end - t0, latest: b.latest,
              setsTotal: b.setsTotal, setsCapped: b.setsCapped };
   }
+
+  // Compare one performance with what that exercise's own prior trajectory predicted.
+  // The current point never helps fit its expectation, avoiding a circular "actual vs itself".
+  function exercisePerformance(history, current, opts) {
+    const o = opts || {}, cur = current || {};
+    const prior = (history || []).filter(s => s && s.date && s.date < cur.date && !s.deload)
+      .slice().sort((a,b)=>a.date<b.date?-1:1).slice(-10);
+    const base = {status:'thin', actual:null, expected:null, residualPct:null,
+                  metric:null, priorSessions:prior.length, confidence:'none'};
+    if (prior.length < 2 || !cur.date) return base;
+    let cls = classifyExercise(prior.concat([cur]));
+    const t0 = isoDay(prior[0].date);
+    const points = prior.map(s => {
+      const m = sessionMetrics(s.sets, {bodyweightKg:o.weights?weightAt(o.weights,s.date):null, rir:s.rir});
+      return {x:isoDay(s.date)-t0, y:cls==='volume'?m.bestCapacity:m.bestE1RM};
+    }).filter(p=>p.y!=null&&p.y>0);
+    if (cls==='strength' && points.length < 2) {
+      cls='volume'; points.length=0;
+      prior.forEach(s=>{ const m=sessionMetrics(s.sets,{bodyweightKg:o.weights?weightAt(o.weights,s.date):null,rir:s.rir});
+        if (m.bestCapacity>0) points.push({x:isoDay(s.date)-t0,y:m.bestCapacity}); });
+    }
+    const fit = linearTrend(points);
+    if (!fit || points.length < 2) return base;
+    const cm = sessionMetrics(cur.sets, {bodyweightKg:o.weights?weightAt(o.weights,cur.date):null, rir:cur.rir});
+    const actual = cls==='volume'?cm.bestCapacity:cm.bestE1RM;
+    const expected = fit.intercept + fit.slope*(isoDay(cur.date)-t0);
+    if (!(actual>0) || !(expected>0)) return base;
+    const residual = (actual-expected)/expected*100;
+    const noisePct = fit.se!=null && fit.mean>0 ? fit.se*30/fit.mean*100 : null;
+    const confidence = points.length>=5&&noisePct!=null&&noisePct<=5?'high':points.length>=3?'medium':'low';
+    return {status:'ok', actual, expected, residualPct:+residual.toFixed(1),
+            metric:cls==='volume'?'capacity':'e1RM', priorSessions:points.length,
+            confidence, noisePct:noisePct==null?null:+noisePct.toFixed(1)};
+  }
+
+  // One comparable score for a mixed session: the median exercise residual resists one odd
+  // lift, while the detail rows retain exactly which movements drove the result.
+  function sessionPerformance(session, sessions, opts) {
+    const s = session || {}, all = sessions || [], details=[];
+    (s.exercises||[]).forEach(ex=>{
+      const key = ex.equipment ? ex.id+'@'+ex.equipment : ex.id;
+      const hist=[];
+      all.forEach(w=>(w.exercises||[]).forEach(h=>{
+        const hk=h.equipment?h.id+'@'+h.equipment:h.id;
+        if (hk===key && w.date<s.date) hist.push({date:w.date,sets:h.sets||[],rir:h.rir,deload:!!w.deload});
+      }));
+      const p=exercisePerformance(hist,{date:s.date,sets:ex.sets||[],rir:ex.rir},{weights:opts&&opts.weights});
+      if(p.status==='ok') details.push(Object.assign({id:ex.id,name:ex.name||ex.id},p));
+    });
+    if(!details.length) return {status:'thin',scorePct:null,n:0,details:[]};
+    const score=median(details.map(d=>d.residualPct));
+    const confidence=details.length>=4&&details.filter(d=>d.confidence==='low').length===0?'high':details.length>=2?'medium':'low';
+    return {status:'ok',scorePct:+score.toFixed(1),n:details.length,confidence,details};
+  }
+
+  // Frequency without a fixed programme: compare the latest rolling seven days with the
+  // person's own preceding six seven-day blocks. Changing split names do not matter.
+  function frequencyConsistency(sessions, asOf) {
+    const end=isoDay(asOf), dates=(sessions||[]).filter(s=>s&&s.date&&(s.exercises||[]).length)
+      .map(s=>isoDay(s.date));
+    const count=(lo,hi)=>dates.filter(d=>d>=lo&&d<=hi).length;
+    const current=count(end-6,end), prior=[];
+    for(let i=1;i<=6;i++) prior.push(count(end-6-i*7,end-i*7));
+    const usable=prior.filter(n=>n>0), expected=usable.length?median(usable):null;
+    const last=dates.filter(d=>d<=end).sort((a,b)=>b-a)[0];
+    let status='thin';
+    if(expected!=null) status=current>=expected?'on-pace':current>=Math.max(1,expected-1)?'near':'below';
+    return {status,current,expected,prior,weeks:usable.length,
+            pct:expected>0?+(current/expected*100).toFixed(0):null,
+            daysSince:last==null?null:end-last};
+  }
   // The reason this lives in a food tracker: cross-reference strength against bodyweight.
   // A surplus that is not buying strength is buying fat, and no lifting app can see that
   // because it does not know what you ate or what you weigh.
@@ -1992,15 +2108,17 @@
     const sd = Math.sqrt(xs.reduce((s, v) => s + (v - mean) * (v - mean), 0) / xs.length);
     return { n: xs.length, mean: Math.round(mean), sd: Math.round(sd), cv: mean > 0 ? +(sd / mean * 100).toFixed(1) : null };
   }
-  // The confidence tier an adaptive TDEE has earned. It cannot rise above 'low' without
-  // enough intake days AND enough valid weigh-ins AND a tight enough intake CV.
+  // Confidence is about matched data and a precise scale trend. Day-to-day intake
+  // variation is behavioural context, not evidence that accurately logged data is bad.
   function tdeeConfidence(o) {
     o = o || {};
-    const nI = +o.nIntakeDays || 0, nW = +o.nWeighIns || 0, cv = o.cv;
-    if (nI < 7 || nW < 2 || cv == null) return 'none';
-    if (nI < 14 || nW < 10) return 'low';
-    if (cv < 10) return 'high';
-    if (cv < 15) return 'medium';
+    const nI = +o.nIntakeDays || 0, nW = +o.nWeighIns || 0;
+    const coverage = o.coverage == null ? 1 : +o.coverage;
+    const span = +o.spanDays || 0, se = o.energySE;
+    if (nI < 7 || nW < 2 || coverage < 0.5) return 'none';
+    if (nI < 14 || nW < 7 || span < 14 || coverage < 0.8) return 'low';
+    if (nI >= 21 && nW >= 12 && span >= 21 && coverage >= 0.9 && (se == null || se <= 175)) return 'high';
+    if (se == null || se <= 300) return 'medium';
     return 'low';
   }
   // A TDEE readout that surfaces its own uncertainty: a point estimate, an interval, the two
@@ -2012,10 +2130,12 @@
     const stats = intakeStats(o.intakes || []);
     const avgIntake = o.avgIntake != null ? +o.avgIntake : stats.mean;
     const rate = o.ratePerWeek;
-    const cal = calibrateTDEE(formula, avgIntake, rate == null ? null : rate, +o.sampleDays || 0);
+    const cal = calibrateTDEE(formula, avgIntake, rate == null ? null : rate, +o.sampleDays || 0,
+      {coverage:o.coverage, rateSEPerWeek:o.rateSEPerWeek, nWeighIns:o.nWeighIns});
     const regression = cal.dataTDEE;                 // weight-trend implied
     const predictive = cal.formula;                  // Mifflin × activity implied
-    const confidence = tdeeConfidence({ nIntakeDays: stats.n, nWeighIns: +o.nWeighIns || 0, cv: stats.cv });
+    const confidence = tdeeConfidence({ nIntakeDays: stats.n, nWeighIns: +o.nWeighIns || 0,
+      coverage:o.coverage, spanDays:+o.sampleDays||0, energySE:cal.energySE });
     const gapKcal = (regression != null && predictive > 0) ? Math.abs(regression - predictive) : null;
     // Interval: the span between the two methods when both exist and disagree; otherwise a
     // ±band that tightens as confidence rises.
@@ -2027,11 +2147,13 @@
       lo = Math.round(cal.blended * (1 - band)); hi = Math.round(cal.blended * (1 + band));
     }
     const warnings = [];
-    if (stats.cv != null && stats.cv >= 15) warnings.push('intake too variable to read (CV ≥ 15%)');
+    if (o.coverage != null && +o.coverage < 0.9) warnings.push(`intake logged on ${Math.round(+o.coverage*100)}% of matched days`);
+    if (cal.energySE != null && cal.energySE > 300) warnings.push('weight trend is still noisy');
     if ((+o.nWeighIns || 0) < 10) warnings.push('fewer than 10 valid weigh-ins');
     if (stats.n < 14) warnings.push('fewer than 14 logged intake days');
-    return { pointEstimate: cal.blended, interval: [lo, hi], method: cal.w >= 0.66 ? 'regression' : cal.w <= 0.34 ? 'predictive' : 'blended',
+    return { pointEstimate: cal.blended, interval: [lo, hi], modelRange:[lo,hi], method: cal.w >= 0.66 ? 'regression' : cal.w <= 0.34 ? 'predictive' : 'blended',
              confidence: confidence, cv: stats.cv, nIntakeDays: stats.n, nWeighIns: +o.nWeighIns || 0,
+             coverage:o.coverage==null?null:+o.coverage, energySE:cal.energySE,
              disagreement: { regression: regression, predictive: predictive, gapKcal: gapKcal }, warnings: warnings };
   }
   // A single "how much should I trust the app's reads right now" score from the input
@@ -2039,15 +2161,17 @@
   function dataTrust(o) {
     o = o || {};
     const cv = o.intakeCV, nI = +o.nIntakeDays || 0, nW = +o.nWeighIns || 0, span = +o.spanDays || 0;
+    const coverage = o.coverage == null ? 1 : +o.coverage;
     const items = [];
     items.push({ key: 'intakeDays', ok: nI >= 14, label: `${nI} intake day${nI === 1 ? '' : 's'} logged`, want: '14+' });
-    items.push({ key: 'intakeCV', ok: cv != null && cv < 10, warn: cv != null && cv < 15,
-                 label: cv == null ? 'intake variability — no data' : `intake CV ${cv}%`, want: '<10%' });
+    items.push({ key: 'coverage', ok: coverage >= 0.9, warn: coverage >= 0.8,
+                 label:`matched-day coverage ${Math.round(coverage*100)}%`, want:'90%+' });
     items.push({ key: 'weighIns', ok: nW >= 10, label: `${nW} weigh-in${nW === 1 ? '' : 's'}`, want: '10+' });
     items.push({ key: 'history', ok: span >= 42, label: `${span} days of history`, want: '42+' });
     const score = items.filter(i => i.ok).length / items.length;
     const tier = score >= 0.75 ? 'high' : score >= 0.5 ? 'medium' : 'low';
-    return { tier: tier, score: +score.toFixed(2), items: items };
+    return { tier: tier, score: +score.toFixed(2), items: items,
+             consistency:cv==null?null:(cv<10?'steady':cv<20?'varied':'highly varied') };
   }
 
   // A deliberately lighter week reads as "regressing" unless it is recognised as a deload.
@@ -2097,7 +2221,95 @@
     return 'reload';
   }
 
-  // ---- Sync merge: last-write-wins per DAY ----------------------------------
+  // ---- Sync merge -----------------------------------------------------------
+  const recordStamp = (r, fallback) => (r && (r.updatedAt || r.loggedAt || r.at)) || fallback || '';
+  function tombMap(list) {
+    const out={};
+    (list||[]).forEach(t=>{ if(t&&t.id&&(!out[t.id]||String(t.deletedAt||'')>out[t.id])) out[t.id]=String(t.deletedAt||''); });
+    return out;
+  }
+  // Entry-level merge for food days. Stable ids and deletion tombstones let two devices add
+  // different meals to the same date without either whole-day edit erasing the other.
+  function mergeRecordStates(local, remote) {
+    local=local||{}; remote=remote||{};
+    const days={},meta={},tombstones={},clears={};
+    const dates=new Set(Object.keys(local.days||{}).concat(Object.keys(remote.days||{}),
+      Object.keys(local.tombstones||{}),Object.keys(remote.tombstones||{}),Object.keys(local.clears||{}),Object.keys(remote.clears||{})));
+    dates.forEach(d=>{
+      const la=(local.days||{})[d], ra=(remote.days||{})[d];
+      const lm=(local.meta||{})[d]||'', rm=(remote.meta||{})[d]||'';
+      const lclear=(local.clears||{})[d]||'', rclear=(remote.clears||{})[d]||'', clear=lclear>rclear?lclear:rclear;
+      const lt=tombMap((local.tombstones||{})[d]), rt=tombMap((remote.tombstones||{})[d]), tm={};
+      Object.keys(Object.assign({},lt,rt)).forEach(id=>tm[id]=(lt[id]||'')>(rt[id]||'')?lt[id]:rt[id]);
+      const both=[].concat(Array.isArray(la)?la:[],Array.isArray(ra)?ra:[]);
+      // Legacy un-keyed arrays cannot be safely unioned. Keep the established day-LWW rule;
+      // the boot migration keys every local record before the next sync.
+      if(both.some(x=>!x||!x._id)) {
+        const win=rm>lm?ra:la;
+        days[d]=Array.isArray(win)?win.slice():Array.isArray(la)?la.slice():Array.isArray(ra)?ra.slice():[];
+      } else {
+        const by={};
+        const take=(x,fallback)=>{
+          const old=by[x._id];
+          if(!old||recordStamp(x,fallback)>recordStamp(old.item,old.fallback)) by[x._id]={item:x,fallback};
+        };
+        (la||[]).forEach(x=>take(x,lm)); (ra||[]).forEach(x=>take(x,rm));
+        days[d]=Object.keys(by).map(id=>by[id]).filter(x=>{
+          const st=recordStamp(x.item,x.fallback);
+          return !(clear&&clear>=st)&&!(tm[x.item._id]&&tm[x.item._id]>=st);
+        }).map(x=>x.item).sort((a,b)=>{
+          const aa=a.eatenAt||a.at||a.loggedAt||'', bb=b.eatenAt||b.at||b.loggedAt||'';
+          return aa===bb?String(a._id).localeCompare(String(b._id)):aa<bb?-1:1;
+        });
+      }
+      meta[d]=lm>rm?lm:rm;
+      if(clear) clears[d]=clear;
+      const tl=Object.keys(tm).map(id=>({id,deletedAt:tm[id]})); if(tl.length)tombstones[d]=tl;
+    });
+    return {days,meta,tombstones,clears};
+  }
+
+  function mergeWorkoutDay(a,b,aStamp,bStamp) {
+    if(!a)return b; if(!b)return a;
+    const newer=bStamp>aStamp?b:a, older=newer===a?b:a;
+    const out=Object.assign({},older,newer), tm=Object.assign({},older._tombstones||{},newer._tombstones||{});
+    Object.keys(older._tombstones||{}).forEach(id=>{
+      if(String(older._tombstones[id])>String(tm[id]||''))tm[id]=older._tombstones[id];
+    });
+    const mergeList=(xs,ys)=>{
+      const by={};
+      [].concat(xs||[],ys||[]).forEach(x=>{
+        if(!x)return; const id=x._id||x.id;
+        if(!id)return;
+        const old=by[id]; if(!old||recordStamp(x)>recordStamp(old))by[id]=x;
+      });
+      return Object.keys(by).filter(id=>!(tm[id]&&tm[id]>=recordStamp(by[id]))).map(id=>by[id]);
+    };
+    const exBy={};
+    [].concat(a.exercises||[],b.exercises||[]).forEach(ex=>{
+      if(!ex)return; const id=ex._id||ex.id;
+      const old=exBy[id];
+      if(!old)exBy[id]=Object.assign({},ex,{sets:(ex.sets||[]).slice()});
+      else {
+        const win=recordStamp(ex)>recordStamp(old)?ex:old;
+        exBy[id]=Object.assign({},old,ex,win,{sets:mergeList(old.sets,ex.sets)});
+      }
+    });
+    out.exercises=Object.keys(exBy).filter(id=>!(tm[id]&&tm[id]>=recordStamp(exBy[id])))
+      .map(id=>exBy[id]);
+    out._tombstones=tm;
+    return out;
+  }
+
+  function mergeWorkoutStates(local,remote){
+    local=local||{};remote=remote||{};const days={},meta={};
+    const dates=new Set(Object.keys(local.days||{}).concat(Object.keys(remote.days||{})));
+    dates.forEach(d=>{const lm=(local.meta||{})[d]||'',rm=(remote.meta||{})[d]||'';
+      days[d]=mergeWorkoutDay((local.days||{})[d],(remote.days||{})[d],lm,rm);meta[d]=lm>rm?lm:rm;});
+    return {days,meta};
+  }
+
+  // Legacy last-write-wins per day remains for scalar per-day maps (weight, tape, doses).
   // A sync state is {days:{'YYYY-MM-DD':[entries]}, meta:{'YYYY-MM-DD':isoStamp}}.
   // Per-day (not per-blob) LWW makes "phone logs lunch, PC logs dinner on another
   // day" trivially safe; a same-day conflict resolves to the most recent editor.
@@ -2197,7 +2409,7 @@
     nutrientsFrom, resolvePTarget, capGrams, computeEntry, mineRepeats, macrosComplete,
     corridorDrift, DRIFT_MIN_DAYS, singularise,
     completeMacros, macroKcal, KCAL_PER_G,
-    solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend,
+    solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend, robustWeightTrend,
     FOOD_PINS, foodPin, pinMatches, applyPin,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
     energyBalance, balanceCheck, BALANCE_MIN_DAYS,
@@ -2209,7 +2421,8 @@
     MICRO_REF, MICRO_KEYS, microRef, sumSuppMicros, microAverages, ELEMENTAL_FRACTION, elementalMg,
     supplementDue, supplementNextDue, supplementWindow, supplementStats, isoWeekdayMon,
     repairJson, median, linearTrend,
-    e1RM, setLoad, weightAt, classifyExercise, sessionMetrics, exerciseTrend, liftVsWeight,
+    e1RM, setLoad, weightAt, classifyExercise, sessionMetrics, exerciseTrend,
+    exercisePerformance, sessionPerformance, frequencyConsistency, liftVsWeight,
     normalizeName, exerciseId, matchExercise, parseWorkoutLine, parseWorkout, SEED_EXERCISES,
     MUSCLE_GROUPS, MUSCLE_LABEL, EXERCISE_META, exerciseMeta, normalizeMuscles, cleanCategory, workingSetCount,
     weeklyVolumeByMuscle, muscleFrequency, muscleProgress, volumeDrift, fatigueIndex, loadJumpCheck,
@@ -2217,6 +2430,6 @@
     LIFT_REP_CAP, LIFT_MIN_SESSIONS, LIFT_FLAT_PCT, LIFT_RIR_DRIFT, LIFT_WINDOW_DAYS,
     LIFT_SE_HIGH, LIFT_SE_MED,
     liftWindowOpen, hhmmMinutes, isTrainingSplit, LIFT_OPEN_LEAD_MIN, LIFT_OPEN_TAIL_MIN,
-    KCAL_PER_KG_FAT, mergeSyncStates, ternary, swUpdateAction
+    KCAL_PER_KG_FAT, mergeSyncStates, mergeRecordStates, mergeWorkoutStates, ternary, swUpdateAction
   };
 });

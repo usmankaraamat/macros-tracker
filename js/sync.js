@@ -109,11 +109,15 @@ async function syncNow(){
       try { remote = await syncDecrypt(remoteBlob); }
       catch(e){ throw new Error('cannot decrypt — passphrase collision or corrupt blob'); }
     }
-    const merged = LedgerCore.mergeSyncStates({days: collectDays(), meta: syncMeta()}, remote || {days:{}, meta:{}});
+    const merged = LedgerCore.mergeRecordStates(
+      {days:collectDays(),meta:syncMeta(),tombstones:entryTombstones(),clears:dayClears()},
+      remote || {days:{},meta:{},tombstones:{},clears:{}});
     Object.keys(merged.days).forEach(d=>{
       try { localStorage.setItem('ledger_'+d, JSON.stringify(merged.days[d])); } catch(e){}
     });
     try { localStorage.setItem(SYNC_META_KEY, JSON.stringify(merged.meta)); } catch(e){}
+    try { localStorage.setItem(TOMBSTONE_KEY,JSON.stringify(merged.tombstones||{}));
+          localStorage.setItem(CLEAR_KEY,JSON.stringify(merged.clears||{})); } catch(e){}
     if (remote && remote.targets && (remote.tUpdated||'') > targetsStamp()){
       try {
         localStorage.setItem('ledger_targets', JSON.stringify(remote.targets));
@@ -154,7 +158,7 @@ async function syncNow(){
     saveSuppLog(sm.days, sm.meta);
     // Training sessions are one object per day — the same shape the per-day LWW merge
     // already handles, so logging legs on the phone and arms on the PC is safe.
-    const km = LedgerCore.mergeSyncStates(
+    const km = LedgerCore.mergeWorkoutStates(
       {days: allWorkouts(), meta: workoutMeta()},
       {days: (remote && remote.workouts) || {}, meta: (remote && remote.wkMeta) || {}});
     Object.keys(km.days).forEach(d=>{
@@ -168,7 +172,7 @@ async function syncNow(){
         setKey('ledger_exercises_updated', remote.exUpdated);
       } catch(e){}
     }
-    load(); updateDayLabel(); render();        // reflect whatever the merge decided for the on-screen day
+    migrateLocalData(); load(); updateDayLabel(); render();
     const state = { v:1, days: merged.days, meta: merged.meta,
       targets: {floor:FLOOR_M, ceil:CEIL_M, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP, maint:MAINT, profile:PROFILE, trendStart:TREND_START, goalTargets:GOAL_TARGETS, goalTargetDate:GOAL_TARGET_DATE, goal:GOAL, mealPlan:MEAL_PLAN, train:TRAIN},
       pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100)},
@@ -178,6 +182,7 @@ async function syncNow(){
       suppLog: sm.days, sMeta: sm.meta,
       workouts: km.days, wkMeta: km.meta,
       exercises: exerciseCatalog(), exUpdated: catalogStamp(),
+      tombstones:merged.tombstones||{}, clears:merged.clears||{}, schema:DATA_SCHEMA_VERSION,
       weights: wm.days, wMeta: wm.meta,
       measures: mm.days, mMeta: mm.meta };
     const blob = await syncEncrypt(state);
@@ -194,6 +199,7 @@ async function syncNow(){
   }
 }
 function scheduleSync(){
+  durableMirrorSoon();
   if (!syncConfigured()) return;
   setSyncDot('pending');
   clearTimeout(syncTimer);

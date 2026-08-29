@@ -194,10 +194,11 @@ function nextDay(ds){ const [y,m,d]=ds.split('-').map(Number); const dt=new Date
 // Persistence: no-op-safe. In a real host these use localStorage; in-sandbox they may throw.
 // Keyed on VIEW_DATE so edits land on whichever day is on screen (usually the live day).
 function save(){
+  ledger = ensureLedgerDay(ledger, VIEW_DATE);
   try{ localStorage.setItem('ledger_'+VIEW_DATE, JSON.stringify(ledger)); }catch(e){}
   stampSyncMeta(VIEW_DATE); scheduleSync();    // mark this day edited now; sync (if configured) follows
 }
-function load(){ ledger=[]; try{ const r=localStorage.getItem('ledger_'+VIEW_DATE); if(r)ledger=JSON.parse(r);}catch(e){} }
+function load(){ ledger=[]; try{ const r=localStorage.getItem('ledger_'+VIEW_DATE); if(r)ledger=ensureLedgerDay(JSON.parse(r),VIEW_DATE);}catch(e){} }
 
 // Retarget the screen to a different day (day arrows, heatmap, history) or back
 // to the live day. Never past the live day — there is nothing to log in the future.

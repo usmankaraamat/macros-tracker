@@ -1399,11 +1399,11 @@ group('intakeStats / tdeeConfidence / tdeeReadout / dataTrust');
 (function(){
   check('clean week reads a low CV', C.intakeStats([3000,3100,2950,3050,3080,3000,3067]).cv < 10);
   check('a 4904 next to a 1623 blows CV past 15%', C.intakeStats([4904,1623,3200,3100,3000]).cv > 15);
-  check('confidence gated by CV and counts',
-        C.tdeeConfidence({nIntakeDays:20,nWeighIns:12,cv:7})==='high' &&
-        C.tdeeConfidence({nIntakeDays:20,nWeighIns:12,cv:13})==='medium' &&
-        C.tdeeConfidence({nIntakeDays:20,nWeighIns:12,cv:20})==='low' &&
-        C.tdeeConfidence({nIntakeDays:10,nWeighIns:12,cv:5})==='low');
+  check('confidence gated by matched coverage, span and trend uncertainty',
+        C.tdeeConfidence({nIntakeDays:22,nWeighIns:14,coverage:.95,spanDays:28,energySE:120})==='high' &&
+        C.tdeeConfidence({nIntakeDays:20,nWeighIns:12,coverage:.85,spanDays:21,energySE:220})==='medium' &&
+        C.tdeeConfidence({nIntakeDays:20,nWeighIns:12,coverage:.45,spanDays:21,energySE:120})==='none' &&
+        C.tdeeConfidence({nIntakeDays:10,nWeighIns:12,coverage:1,spanDays:21,energySE:120})==='low');
   const rd = C.tdeeReadout({formula:2500, avgIntake:3067, ratePerWeek:0.2, sampleDays:28,
                             intakes:[3067,3000,3100,3050,3080], nWeighIns:12});
   check('readout surfaces the method disagreement', rd.disagreement.gapKcal != null && rd.interval[0] <= rd.interval[1], JSON.stringify(rd.interval));
@@ -1734,6 +1734,51 @@ group('swUpdateAction — service-worker update policy');
     });
   }))));
   check('every input combination returns a known verb', ok);
+})();
+
+group('new durability and zero-friction insights');
+(function(){
+  const covered = C.microAverages([
+    {date:'2026-08-20',micros:{fe:8},coverage:{fe:{knownKcal:1500,totalKcal:2000}}},
+    {date:'2026-08-19',micros:{fe:6},coverage:{fe:{knownKcal:500,totalKcal:1000}}}
+  ], '2026-08-20', 7, ['fe']);
+  check('micronutrient coverage is calorie-weighted', approx(covered.byKey.fe.coverage, 2/3, .001), `got ${covered.byKey.fe.coverage}`);
+
+  const robust=C.robustWeightTrend([
+    {date:'2026-07-01',kg:80},{date:'2026-07-08',kg:79.8},{date:'2026-07-15',kg:79.6},
+    {date:'2026-07-16',kg:84},{date:'2026-07-22',kg:79.4}
+  ]);
+  check('robust trend resists one scale outlier', robust && robust.ratePerWeek<0 && robust.ratePerWeek>-0.3, JSON.stringify(robust));
+  check('robust trend exposes uncertainty', robust && robust.sePerWeek!=null && robust.spanDays===21, JSON.stringify(robust));
+
+  const date='2026-08-20', a={_id:'a',name:'egg',loggedAt:'2026-08-20T08:00:00Z'},
+        b={_id:'b',name:'rice',loggedAt:'2026-08-20T12:00:00Z'};
+  const m=C.mergeRecordStates(
+    {days:{[date]:[a]},meta:{[date]:'2026-08-20T08:00:00Z'}},
+    {days:{[date]:[b]},meta:{[date]:'2026-08-20T12:00:00Z'}});
+  check('concurrent same-day additions both survive', m.days[date].length===2, JSON.stringify(m.days[date]));
+  const del=C.mergeRecordStates(
+    {days:{[date]:[a,b]},tombstones:{[date]:[{id:'a',deletedAt:'2026-08-20T13:00:00Z'}]}},
+    {days:{[date]:[a,b]}});
+  check('entry tombstone propagates deletion', del.days[date].length===1 && del.days[date][0]._id==='b');
+
+  const wa={date,exercises:[{_id:'exA',id:'squat',updatedAt:'t1',sets:[{_id:'s1',kg:100,reps:5,updatedAt:'t1'}]}]},
+        wb={date,exercises:[{_id:'exB',id:'bench',updatedAt:'t2',sets:[{_id:'s2',kg:80,reps:5,updatedAt:'t2'}]}]};
+  const wm=C.mergeWorkoutStates({days:{[date]:wa},meta:{[date]:'t1'}},{days:{[date]:wb},meta:{[date]:'t2'}});
+  check('concurrent workout exercises both survive', wm.days[date].exercises.length===2, JSON.stringify(wm.days[date]));
+  const wc={date,exercises:[{_id:'sameEx',id:'squat',updatedAt:'t1',sets:[{_id:'leftSet',kg:100,reps:5,updatedAt:'t1'}]}]},
+        wd={date,exercises:[{_id:'sameEx',id:'squat',updatedAt:'t2',sets:[{_id:'rightSet',kg:102,reps:5,updatedAt:'t2'}]}]};
+  const setMerge=C.mergeWorkoutStates({days:{[date]:wc},meta:{[date]:'t1'}},{days:{[date]:wd},meta:{[date]:'t2'}});
+  check('concurrent sets on one exercise both survive', setMerge.days[date].exercises[0].sets.length===2, JSON.stringify(setMerge.days[date]));
+
+  const sessions=[];
+  ['2026-07-01','2026-07-08','2026-07-15','2026-07-22'].forEach((d,i)=>sessions.push({date:d,exercises:[
+    {id:'bench',name:'Bench',sets:[{kg:80+i*2,reps:5}],rir:2}
+  ]}));
+  const p=C.sessionPerformance(sessions[3],sessions);
+  check('actual-vs-expected derives from prior lift history', p.status==='ok' && p.n===1, JSON.stringify(p));
+  const f=C.frequencyConsistency(sessions.concat([{date:'2026-08-18',exercises:[{id:'row',sets:[{kg:50,reps:8}]}]}]),'2026-08-20');
+  check('frequency derives a personal baseline', f.expected!=null && f.current===1, JSON.stringify(f));
 })();
 
 // ---- summary ----

@@ -1889,7 +1889,7 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
 .read-item.bad { color: var(--hot); }
 .read-item .grow { flex: 1; min-width: 0; }
 
-/* Full-row meal disclosures replace the five-column phone table. */
+/* Uniform, always-open meal rows: the useful macros stay visible without a tap. */
 /* minmax(0,1fr), not the implicit `auto`: an auto column sizes to its widest content,
    and a nowrap kcal figure beside a long food name then pushes the whole ledger past
    the viewport (measured 522px inside a 405px screen). */
@@ -1899,49 +1899,33 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
   transition: background .16s ease, border-color .16s ease;
 }
 .meal-entry:first-child { border-top: 0; }
-.meal-entry > summary {
+.meal-head {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   min-height: 62px;
-  padding: 10px 24px 10px 0;
-  cursor: pointer;
-  list-style: none;
+  padding: 11px 0 4px;
 }
-.meal-entry > summary::-webkit-details-marker { display: none; }
-.meal-entry > summary::before,
 .settings-section > summary::before,
 #liftSession .session-exercise > summary::before { display: none; }
-.meal-entry > summary::after {
-  content: '';
-  position: absolute;
-  right: 2px;
-  width: 7px;
-  height: 7px;
-  border-right: 1.5px solid var(--faint);
-  border-bottom: 1.5px solid var(--faint);
-  transform: rotate(45deg);
-  transition: transform .16s ease;
-}
-.meal-entry[open] > summary::after { transform: rotate(225deg); }
-.meal-entry[open] { background: var(--chalk-wash); }
-.meal-name { min-width: 0; overflow: hidden; color: var(--chalk); font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.meal-name { min-width: 0; color: var(--chalk); font-size: 13px; font-weight: 650; overflow-wrap:anywhere; }
 .meal-name > small { display: block; margin-top: 3px; color: var(--faint); font-family: var(--data); font-size: 10.5px; font-weight: 450; }
 .meal-kcal { color: var(--chalk); font-family: var(--data); font-size: 14px; font-weight: 650; white-space: nowrap; }
 .meal-kcal small { color: var(--faint); font-size: 9px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; }
-.meal-detail { padding: 0 0 13px; }
-.meal-macros { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; overflow: hidden; background: var(--rule); border: 1px solid var(--rule); border-radius: var(--radius); }
-.meal-macros span { padding: 8px 7px; color: var(--faint); background: var(--well); font-size: 9.5px; text-align: center; }
-.meal-macros b { display: block; color: var(--graphite); font-family: var(--data); font-size: 11.5px; }
-.meal-actions { display: flex; justify-content: flex-end; gap: 4px; margin-top: 9px; }
+.meal-foot { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:2px 0 10px; }
+.meal-macros { display:flex; min-width:0; gap:12px; color:var(--faint); font-family:var(--data); }
+.meal-macros span { display:flex; align-items:baseline; gap:3px; font-size:10px; white-space:nowrap; }
+.meal-macros small { color:var(--faint); font-size:9px; font-weight:650; }
+.meal-macros b { color:var(--graphite); font-size:11px; }
+.meal-actions { display: flex; flex:0 0 auto; justify-content: flex-end; gap: 4px; margin:0; }
 .meal-actions button {
   display: grid;
   place-items: center;
-  width: var(--tap);
-  height: var(--tap);
-  min-height: var(--tap);
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
   padding: 0;
   color: var(--faint);
   background: transparent;
@@ -1949,9 +1933,10 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
   border-radius: var(--radius);
 }
 .meal-actions .del:hover { color: var(--hot); border-color: var(--hot); }
-.meal-detail > .flags { margin: 8px 2px 0; }
+.meal-entry > .flags { margin:-5px 2px 10px; }
 .dish-entry { border-left: 2px solid var(--accent); padding-left: 12px; }
-.meal-components { margin-top: 10px; border-top: 1px solid var(--rule); }
+.dish-total { border-bottom:1px solid var(--rule); }
+.meal-components { border-top: 0; }
 .meal-component {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1967,7 +1952,7 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
 .component-name small { display: block; margin-top: 2px; color: var(--faint); font-family: var(--data); font-size: 10px; }
 .component-macros { grid-area: macros; color: var(--faint); font-family: var(--data); font-size: 9.5px; }
 .meal-component .meal-actions { grid-area: actions; margin: 0; }
-.meal-component .meal-actions button { width: var(--tap); height: var(--tap); min-height: var(--tap); }
+.meal-component .meal-actions button { width: 36px; height: 36px; min-height: 36px; }
 @keyframes mealSettle { from { background: var(--accent-wash); } to { background: transparent; } }
 .meal-entry.rowNew { animation: mealSettle .9s ease-out; }
 

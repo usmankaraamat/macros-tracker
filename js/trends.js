@@ -501,9 +501,11 @@ function renderFatEstimate(){
   } else {
     const td=computeTDEE();
     if (!(td.blended>0)){ out.className='tactical'; out.innerHTML='Fill in your <b>body profile</b> in Settings (or a maintenance range above) to estimate fat change.'; return; }
-    const m=Math.round(150 - 75*td.w);            // ±150 early, tightening to ±75 fully calibrated
-    maintLow=td.blended-m; maintHigh=td.blended+m;
-    maintTxt = `adaptive TDEE ${td.blended.toLocaleString()} ±${m}`;
+    const rd=LedgerCore.tdeeReadout({formula:td.formulaBase||0,avgIntake:td.avgIntake,
+      ratePerWeek:td.ratePerWeek,rateSEPerWeek:td.rateSEPerWeek,sampleDays:td.sampleDays,
+      intakes:td.intakes||[],nWeighIns:td.nWeighIns||0,coverage:td.coverage});
+    maintLow=rd.modelRange[0]; maintHigh=rd.modelRange[1];
+    maintTxt = `adaptive TDEE ${td.blended.toLocaleString()} (model range ${maintLow.toLocaleString()}–${maintHigh.toLocaleString()})`;
   }
   let start=startEl.value, end=endEl.value;
   if (start>end){ const t=start; start=end; end=t; }        // tolerate a reversed range
@@ -595,17 +597,23 @@ function computeTDEE(){
   // swing is not fat and must not be read as one. It only ever narrows the window.
   const from = TREND_START > start ? TREND_START : start;
   const winW=Object.keys(map).filter(d=>+map[d]>0 && d>=from && d<=end).sort().map(d=>({date:d, kg:+map[d]}));
-  const tr = winW.length>=2 ? LedgerCore.weightTrend(winW) : null;
+  const tr = winW.length>=2 ? LedgerCore.robustWeightTrend(winW) : null;
   const sampleDays = winW.length>=2 ? Math.round((Date.parse(winW[winW.length-1].date)-Date.parse(winW[0].date))/86400000)+1 : 0;
   const tot={}; allDays(true).forEach(d=>{ tot[d.date]=totalsOf(d.ledger); });
   // Exclude the still-open day: its partial intake would drag the average (and thus the
   // adaptive corridor) around as you log meals. TDEE only moves when a day closes.
-  const intakes=Object.keys(tot).filter(d=>d>=start && d<=end && d!==ACTIVE_DATE && tot[d].kcal>0).map(d=>tot[d].kcal);
+  const intakeFrom=winW.length?winW[0].date:from;
+  const intakeTo=winW.length?winW[winW.length-1].date:end;
+  const intakeDates=Object.keys(tot).filter(d=>d>=intakeFrom&&d<=intakeTo&&d!==ACTIVE_DATE&&tot[d].kcal>0);
+  const intakes=intakeDates.map(d=>tot[d].kcal);
+  const calendarDays=sampleDays>0?sampleDays-(ACTIVE_DATE>=intakeFrom&&ACTIVE_DATE<=intakeTo?1:0):0;
+  const coverage=calendarDays>0?Math.min(1,intakeDates.length/calendarDays):0;
   const avgIntake = intakes.length ? intakes.reduce((a,b)=>a+b,0)/intakes.length : 0;
-  const cal = LedgerCore.calibrateTDEE(formula, avgIntake, tr?tr.ratePerWeek:null, sampleDays);
+  const cal = LedgerCore.calibrateTDEE(formula,avgIntake,tr?tr.ratePerWeek:null,sampleDays,
+    {coverage,rateSEPerWeek:tr?tr.sePerWeek:null,nWeighIns:winW.length});
   return Object.assign(cal, {kg, avgIntake:Math.round(avgIntake), sampleDays,
-    formulaBase: formula, ratePerWeek: tr?tr.ratePerWeek:null,
-    intakes: intakes, nWeighIns: winW.length});
+    formulaBase:formula,ratePerWeek:tr?tr.ratePerWeek:null,rateSEPerWeek:tr?tr.sePerWeek:null,
+    intakes,nWeighIns:winW.length,coverage,intakeFrom,intakeTo});
 }
 // Has the corridor stopped describing what you actually eat? Reads the last 28 closed
 // days against the corridor now in force. A ceiling breached most days is not a warning
@@ -666,6 +674,9 @@ function renderTDEE(){
     return;
   }
   const bits=[];
+  const rd=LedgerCore.tdeeReadout({formula:td.formulaBase||0,avgIntake:td.avgIntake,
+    ratePerWeek:td.ratePerWeek,rateSEPerWeek:td.rateSEPerWeek,sampleDays:td.sampleDays,
+    intakes:td.intakes||[],nWeighIns:td.nWeighIns||0,coverage:td.coverage});
   if (hasProfile) bits.push(`formula ${td.formula.toLocaleString()}`);
   bits.push(td.dataTDEE!=null
     ? `measured ${td.dataTDEE.toLocaleString()} (${Math.round(td.w*100)}% weighted over ${td.sampleDays}d)`
@@ -673,8 +684,10 @@ function renderTDEE(){
   // Say so when weigh-ins are being excluded, or the number looks unexplained.
   if (TREND_START) bits.push(`weigh-ins before ${TREND_START} excluded`);
   out.className='tactical good';
-  out.innerHTML = `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${bits.join(' · ')}.`;
-  echo('tactical good', `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${bits.join(' · ')}. Edit your profile in Settings.`);
+  const range=`model range ${rd.modelRange[0].toLocaleString()}–${rd.modelRange[1].toLocaleString()}`;
+  const caveat=rd.warnings.length?` · ${rd.warnings.join(' · ')}`:'';
+  out.innerHTML = `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${range} · ${bits.join(' · ')}${caveat}.`;
+  echo('tactical good', `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${range} · ${Math.round((td.coverage||0)*100)}% matched-day coverage. Edit your profile in Settings.`);
 }
 // Goal readout: the corridor the goal will impose + suggested protein for the phase.
 function renderGoal(){
@@ -909,6 +922,7 @@ function renderTrendsTab(){
   renderWeightLog();
   renderFatEstimate();   // TDEE + goal readouts are refreshed by render(), not here
   renderDataTrust();
+  renderTrainingConsistency();
   renderMuscleVolume();
   renderSiteProgress();
   renderGoalProjection();
@@ -968,15 +982,16 @@ function renderDataTrust(){
   const spanDays = cDays.length ? Math.round((Date.parse(cDays[0].date)-Date.parse(cDays[cDays.length-1].date))/86400000)+1 : 0;
   const rd = LedgerCore.tdeeReadout({
     formula: td.formulaBase||0, avgIntake: td.avgIntake, ratePerWeek: td.ratePerWeek,
-    sampleDays: td.sampleDays, intakes: td.intakes||[], nWeighIns: td.nWeighIns||0 });
+    rateSEPerWeek:td.rateSEPerWeek,sampleDays:td.sampleDays,intakes:td.intakes||[],
+    nWeighIns:td.nWeighIns||0,coverage:td.coverage });
   const trust = LedgerCore.dataTrust({
-    intakeCV: rd.cv, nIntakeDays: rd.nIntakeDays, nWeighIns: rd.nWeighIns, spanDays: spanDays });
+    intakeCV:rd.cv,nIntakeDays:rd.nIntakeDays,nWeighIns:rd.nWeighIns,spanDays,coverage:td.coverage });
   const dot = it => it.ok ? '<span class="trust-dot ok">●</span>'
                    : it.warn ? '<span class="trust-dot warn">●</span>' : '<span class="trust-dot bad">●</span>';
   const rows = trust.items.map(it =>
     `<div class="trust-row">${dot(it)}<span>${escapeHtml(it.label)}</span><span class="ink-dim">want ${escapeHtml(it.want)}</span></div>`).join('');
   // The TDEE disagreement is the headline the old readout hid: regression vs formula can be
-  // hundreds of kcal apart, and the honest answer is the interval, not one number.
+  // hundreds of kcal apart; this span is a model range, not a statistical interval.
   const dis = rd.disagreement;
   let tdeeLine = '';
   if (dis.regression != null && dis.predictive > 0){
@@ -991,7 +1006,31 @@ function renderDataTrust(){
     : '';
   wrap.innerHTML = tdeeLine + rows + consist
     + `<div class="trust-foot ink-dim">Input quality: <b class="trust-${trust.tier}">${trust.tier}</b>. `
-    + `These gate how much to believe the adaptive corridor, the fat-change estimate and the recomp read.</div>`;
+    + `Intake pattern: <b>${escapeHtml(trust.consistency||'unknown')}</b> — variation describes behaviour and no longer lowers confidence by itself. These gate how much to believe the adaptive corridor, the fat-change estimate and the recomp read.</div>`;
+}
+
+// No fixed programme required: expected frequency is this user's median session count
+// in the preceding six active weeks, and expected performance comes from each lift's
+// own prior trajectory. A changing split therefore does not invalidate either read.
+function renderTrainingConsistency(){
+  const wrap=document.getElementById('trainingConsistency'); if(!wrap)return;
+  const all=allWorkouts();
+  const sessions=Object.keys(all).map(d=>all[d]).filter(s=>(s.exercises||[]).length);
+  if(!sessions.length){wrap.innerHTML='<div class="empty">Log a few sessions and your rolling frequency baseline appears here.</div>';return;}
+  const f=LedgerCore.frequencyConsistency(sessions,VIEW_DATE);
+  const freq=f.expected==null
+    ? `<b>${f.current} session${f.current===1?'':'s'} in the last 7 days</b> · a personal baseline appears after activity in earlier weeks.`
+    : `<b>${f.current} vs ${f.expected} expected session${f.expected===1?'':'s'}</b> in the last 7 days · <span class="lift-conf ${f.status==='on-pace'?'high':f.status==='near'?'med':'low'}">${f.status.replace('-', ' ')}</span>`;
+  const W=weightSeries();
+  const scored=sessions.slice().sort((a,b)=>a.date<b.date?-1:1)
+    .map(s=>({s,p:LedgerCore.sessionPerformance(s,sessions,{weights:W})}))
+    .filter(x=>x.p.status==='ok');
+  const latest=scored[scored.length-1];
+  const perf=latest
+    ? `<div class="trust-tdee" style="margin-top:10px">Latest comparable session (${fmtDMY(latest.s.date)}): <b>${latest.p.scorePct>=0?'+':''}${latest.p.scorePct.toFixed(1)}% vs expected</b> across ${latest.p.n} lift${latest.p.n===1?'':'s'} <span class="lift-conf ${CONF_CLS[latest.p.confidence]||'low'}">${latest.p.confidence}</span></div>`
+    : `<div class="tactical" style="margin-top:10px">Expected-vs-actual performance appears after at least two prior logs of a lift. No planned sets are needed.</div>`;
+  const last=f.daysSince==null?'':(f.daysSince===0?'Last trained today.':`Last trained ${f.daysSince} day${f.daysSince===1?'':'s'} ago.`);
+  wrap.innerHTML=`<div class="trust-tdee">${freq}</div><div class="ink-dim" style="margin-top:5px">${last} Expected frequency is your own rolling median, so changing the split does not reset it.</div>${perf}`;
 }
 
 // ---- weekly training volume per muscle ----
@@ -1004,7 +1043,7 @@ function renderMuscleVolume(){
   const all = allWorkouts(), cat = exerciseCatalog();
   const sessions = Object.keys(all).map(d=>all[d]);
   if (!sessions.some(s=>(s.exercises||[]).length)){ wrap.innerHTML = '<div class="empty">Log a few sessions and volume-per-muscle appears here.</div>'; return; }
-  const end = Object.keys(all).sort().pop() || VIEW_DATE;
+  const end = VIEW_DATE;
   const from = addDaysISO(end, -6);
   const range = { from, to: end };
   const vol = LedgerCore.weeklyVolumeByMuscle(sessions, cat, range);
@@ -1258,7 +1297,7 @@ function renderSiteProgress(){
   }
   const all = allWorkouts(), cat = exerciseCatalog();
   const sessions = Object.keys(all).map(d=>all[d]);
-  const end = Object.keys(all).sort().pop() || VIEW_DATE;
+  const end = VIEW_DATE;
   const vol = sessions.length ? LedgerCore.weeklyVolumeByMuscle(sessions, cat, { from: addDaysISO(end,-6), to: end }) : {};
   const prog = sessions.length ? LedgerCore.muscleProgress(liftTrends(all, weightSeries()), cat) : {};
   const rows = LedgerCore.siteProgress(series, vol, prog);
@@ -1302,7 +1341,7 @@ function renderSiteProgress(){
     + body
     + (hasWaist ? '' : '<div class="mv-untagged">⚠ Log your waist alongside these. Without it a centimetre is just a centimetre — the ratio to the waist is what separates tissue from a general surplus.</div>')
     + (rows.length && !rows.some(r=>r.reliable)
-        ? `<div class="mv-untagged">⚠ No site has a long enough baseline yet. A tape carries about half a centimetre of placement noise and real tissue moves a quarter-centimetre a month, so a slope fitted across a few days is noise, not growth. Keep measuring — about ${LedgerCore.MEASURE_MIN_SPAN} days apart, same conditions — and the rates appear on their own.</div>` : '')
+        ? `<div class="mv-untagged">⚠ No site has a long enough baseline yet. A tape carries about half a centimetre of placement noise and real tissue moves slowly, so a slope fitted across a few days is noise, not growth. Measure weekly in the same conditions; rates appear after about ${LedgerCore.MEASURE_MIN_SPAN} days of total baseline.</div>` : '')
     + `<div class="mv-foot ink-dim">In a surplus everything grows, so the raw centimetre is not the signal — <b>vs waist</b> is. A site gaining on the waist is tissue; a site flat while the waist climbs is not. Strength is the second opinion: a tape that moves while the lifts do too is the one reading you can trust.</div>`;
 }
 

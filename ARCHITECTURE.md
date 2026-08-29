@@ -27,13 +27,14 @@ understand what the app does and how it's put together, without reading all
   Google Fonts; it never caches API traffic.
 - **Hosting**: static files served from GitHub Pages off the `main` branch under
   the `/macros-tracker/` path. "Deploy" = merge to `main`.
-- **Cache versioning**: `sw.js` has a `const CACHE = 'ledger-vNN'`. **Every code
+- **Cache versioning**: `sw.js` has a `const CACHE = 'eatify-vNN'`. **Every code
   change must bump this number** or installed clients keep serving old files.
   On version bump the SW drops old caches and re-fetches the shell with
   `cache: 'reload'` (this bypasses GitHub Pages' 10-min HTTP cache, which
   otherwise silently reinstalls stale bytes).
-- **Storage**: browser `localStorage` only (no server DB). Optional end-to-end
-  encrypted sync to Supabase for multi-device use.
+- **Storage**: `localStorage` is the synchronous working set, mirrored into
+  IndexedDB as a recovery copy. Optional end-to-end encrypted sync to Supabase
+  handles multiple devices.
 - **Timezone**: hard-coded to Pakistan Standard Time (UTC+5, no DST) so the
   day rolls at local midnight. See `TZ_OFFSET_MIN` in `state.js`.
 
@@ -47,6 +48,7 @@ shares one global scope — there are no ES modules.
 | File | Role |
 |------|------|
 | **`core.js`** | The deterministic engine. **No DOM, no globals, no side effects** — every function takes inputs explicitly. Exposes `window.LedgerCore` and is `require()`-able under Node so the test suite exercises the exact code the app runs. All the real math lives here. |
+| `js/storage.js` | Schema migrations, stable record IDs/timestamps, deletion tombstones, and the IndexedDB durability mirror. It loads before all stateful app modules. |
 | `js/state.js` | App-wide state & constants: the protocol defaults, live targets, the built-in food DB, API-key storage, and the **logical-day machinery** (view date / active date / close-day). |
 | `js/compute.js` | Thin, DOM-free glue over `core.js`: per-entry math (`computeEntry`), day/history aggregates (`totals`, `allDays`, `closedDays`), the `solveFridge` solver, and `escapeHtml`. |
 | `js/ui.js` | Shared UI primitives: status lines, spinners, toasts + undo, and the in-app bottom sheets that replace `alert`/`confirm`/`prompt`. Also `haptic()` and screen-reader `announce()`. |
@@ -59,19 +61,25 @@ shares one global scope — there are no ES modules.
 | `js/sync.js` | End-to-end-encrypted multi-device sync over Supabase + WebCrypto. Server only ever stores ciphertext. |
 | `js/app.js` | Boot, wiring, tab control, Settings, import/export, service-worker registration. |
 
-`tests.html` is a standalone in-browser test runner that locks `core.js`'s
-deterministic functions.
+`tests.html` is the in-browser core test runner; `scripts/run-core-tests.mjs`
+runs the same assertions under Node in CI. `scripts/check-cache-version.mjs`
+checks that every shell file exists and cached changes bump the service worker.
 
 ---
 
 ## 3. Data model & storage
 
-Everything is `localStorage`, keyed by day where it makes sense. The unifying
-idea: **each day is its own record**, so two devices editing different days
-merge cleanly (per-day last-write-wins), and one day's edit can never clobber
-another.
+State is keyed by day where it makes sense. Food entries, exercises, and sets
+carry stable `_id`, `loggedAt`, and `updatedAt` fields; deletions carry
+tombstones. Concurrent changes to the same day therefore merge by record rather
+than replacing the whole day. Scalar maps remain per-day last-write-wins.
 
 Key families:
+
+Food entries, exercises, and sets have stable IDs plus log/update timestamps.
+Workout days also carry automatic session start/end times. Deletion tombstones
+(`ledger_entry_tombstones`, `ledger_day_clears`) prevent another device from
+resurrecting deleted records.
 
 - `ledger_YYYY-MM-DD` — the food entries for that day (an array of entry objects).
 - `ledger_workout_YYYY-MM-DD` — that day's training session `{date, split, exercises:[{id,name,sets:[{kg,reps,bw}],rir}]}`.
@@ -120,8 +128,11 @@ This is the heart of the app and the reason it exists. It's a pure library
   (the progression verdict engine), `liftVsWeight` (the recomp cross-reference),
   exercise name normalization/matching, and `parseWorkout` (the free-text set
   grammar).
-- **Sync**: `mergeSyncStates` (per-day LWW merge).
+- **Sync**: record/tombstone merging for food and workout sets;
+  `mergeSyncStates` remains the per-day LWW merge for scalar maps.
 - **Ternary geometry**: barycentric math for the meal-engineer widget.
+- **Derived insights**: robust weight trends, coverage-aware adaptive TDEE,
+  expected-vs-actual lift performance, and rolling personal training frequency.
 - Shared stats helpers: `linearTrend`, `median`, robust JSON repair for AI output.
 
 Everything else in the app is UI and storage glue around these functions.
@@ -212,7 +223,7 @@ weight/TDEE/goal picture, an adaptive fat-change estimate, and a **recomp card**
 that cross-references strength against bodyweight (and waist, when available) —
 the reading a pure lifting app can't produce because it doesn't know what you ate.
 Plus two data-driven panels:
-  - **Data quality** — intake coefficient-of-variation, the earned confidence tier
+  - **Data quality** — matched-day coverage, weigh-in density and trend uncertainty, the earned confidence tier
     of the adaptive TDEE, the disagreement between the weight-trend and formula
     estimates, and a per-signal "how much to trust the reads" checklist. Input
     quality is made visible rather than hidden behind a single number.
@@ -263,8 +274,8 @@ Optional, end-to-end encrypted, off by default:
 - **The server only ever stores ciphertext.** The Supabase anon key and row ids
   give no access to plaintext; the passphrase is the only secret and never
   leaves the device.
-- Every sync is **pull → merge → push**, using `mergeSyncStates` for per-day
-  last-write-wins, so a push can never clobber a day it hasn't seen.
+- Every sync is **pull → merge → push**. Food entries and workout sets merge by
+  stable record ID with deletion tombstones; scalar day maps use last-write-wins.
 - All failures degrade gracefully to offline-only.
 
 ---

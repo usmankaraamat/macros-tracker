@@ -1,0 +1,22 @@
+name: test
+on:
+  push:
+  pull_request:
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax
+        run: |
+          node --check core.js
+          for f in js/*.js; do node --check "$f"; done
+      - name: Core regression suite
+        run: node scripts/run-core-tests.mjs
+      - name: Service-worker cache contract
+        run: node scripts/check-cache-version.mjs

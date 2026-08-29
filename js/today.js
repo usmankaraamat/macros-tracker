@@ -304,23 +304,28 @@ function renderLedgerTable(){
     <button type="button" class="edit" data-edit="${i}" aria-label="Edit grams for ${escapeAttr(e.name)}" title="Edit grams">${uiIcon('edit', 17)}</button>
     <button type="button" class="del" data-del="${i}" aria-label="Remove ${escapeAttr(e.name)}" title="Remove">${uiIcon('trash', 17)}</button>
   </div>`;
-  const macrosFor = e => `<div class="meal-macros">
-    <span><b>${e.p.toFixed(1)}g</b> protein</span>
-    <span><b>${e.f.toFixed(1)}g</b> fat</span>
-    <span><b>${(e.c||0).toFixed(1)}g</b> carbs</span>
+  const macrosFor = e => `<div class="meal-macros" aria-label="Macronutrients">
+    <span><small>P</small><b>${e.p.toFixed(1)}g</b></span>
+    <span><small>C</small><b>${(e.c||0).toFixed(1)}g</b></span>
+    <span><small>F</small><b>${e.f.toFixed(1)}g</b></span>
   </div>`;
+  const timeFor = e => {
+    const at=e.eatenAt||e.at||e.loggedAt; if(!at)return '';
+    const d=new Date(at); if(isNaN(d.getTime()))return '';
+    return ` · ${d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+  };
   const row = (e,i)=>{
     const badge = (e.source && e.source !== 'DB')
       ? `<span class="badge ${e.source === 'USDA' ? 'usda' : 'est'}">${escapeHtml(e.source)}</span>` : '';
     const flags = e.flags && e.flags.length
       ? `<div class="flags">${escapeHtml(e.flags.join(' · '))}</div>` : '';
-    return `<details class="meal-entry">
-      <summary>
-        <span class="meal-name">${badge}${escapeHtml(e.name)}<small>${Math.round(e.grams)}g</small></span>
+    return `<article class="meal-entry">
+      <div class="meal-head">
+        <span class="meal-name">${badge}${escapeHtml(e.name)}<small>${Math.round(e.grams)}g${timeFor(e)}</small></span>
         <span class="meal-kcal">${Math.round(e.kcal)} <small>kcal</small></span>
-      </summary>
-      <div class="meal-detail">${macrosFor(e)}${flags}${actionsFor(e, i)}</div>
-    </details>`;
+      </div>
+      <div class="meal-foot">${macrosFor(e)}${actionsFor(e, i)}</div>${flags}
+    </article>`;
   };
   // A decomposed dish is one meal, so it reads as one block with its own total. The
   // components stay individually editable — the grouping is presentational, which is
@@ -334,20 +339,18 @@ function renderLedgerTable(){
     const part = ledger.slice(i, j);
     const sum = part.reduce((s,e)=>({ kcal:s.kcal+e.kcal, p:s.p+e.p, f:s.f+e.f, c:s.c+(e.c||0) }),
                             {kcal:0,p:0,f:0,c:0});
-    html.push(`<details class="meal-entry dish-entry">
-      <summary>
+    html.push(`<section class="meal-entry dish-entry">
+      <div class="meal-head">
         <span class="meal-name">${escapeHtml(dish)}<small>${part.length} ingredient${part.length>1?'s':''} · ${Math.round(part.reduce((s,e)=>s+(+e.grams||0),0))}g</small></span>
         <span class="meal-kcal">${Math.round(sum.kcal)} <small>kcal</small></span>
-      </summary>
-      <div class="meal-detail">
-        ${macrosFor(sum)}
+      </div>
+      <div class="meal-foot dish-total">${macrosFor(sum)}</div>
         <div class="meal-components">${part.map((e,k)=>`<div class="meal-component">
-          <span class="component-name">${badgeFor(e)}${escapeHtml(e.name)}<small>${Math.round(e.grams)}g · ${Math.round(e.kcal)} kcal</small></span>
-          <span class="component-macros">P ${e.p.toFixed(1)} · F ${e.f.toFixed(1)} · C ${(e.c||0).toFixed(1)}</span>
+          <span class="component-name">${badgeFor(e)}${escapeHtml(e.name)}<small>${Math.round(e.grams)}g · ${Math.round(e.kcal)} kcal${timeFor(e)}</small></span>
+          <span class="component-macros">P ${e.p.toFixed(1)}g · C ${(e.c||0).toFixed(1)}g · F ${e.f.toFixed(1)}g</span>
           ${actionsFor(e, i + k)}
         </div>`).join('')}</div>
-      </div>
-    </details>`);
+    </section>`);
     i = j - 1;
   }
   body.innerHTML = html.join('');
@@ -375,9 +378,10 @@ function escapeAttr(s){ return escapeHtml(String(s == null ? '' : s)).replace(/"
 function removeEntry(i){
   const e = ledger[i];
   if (!e) return;
+  tombstoneEntry(VIEW_DATE,e._id);
   ledger.splice(i, 1);
   save(); render();
-  toast(`Removed ${e.name}`, { undo: ()=>{ ledger.splice(i, 0, e); save(); render(); } });
+  toast(`Removed ${e.name}`, { undo: ()=>{ untombstoneEntry(VIEW_DATE,e._id); ledger.splice(i, 0, e); save(); render(); } });
 }
 
 async function editEntryGrams(i){
@@ -404,7 +408,8 @@ async function editEntryGrams(i){
   }
   const prev = ledger[i];
   const next = computeEntry(e.name, g, e.weighed, base, e.source, e.partOf);
-  next.at = e.at;
+  next._id=e._id; next.at=e.at; next.eatenAt=e.eatenAt; next.loggedAt=e.loggedAt;
+  next.updatedAt=new Date().toISOString();
   ledger[i] = next;
   save(); render();
   toast(`${e.name} set to ${g}g`, { undo: ()=>{ ledger[i] = prev; save(); render(); } });
@@ -657,7 +662,7 @@ function microDaysSeries(){
     const m = totalsOf(d.ledger);
     const sm = LedgerCore.sumSuppMicros(sp, sl[d.date] || []);
     for (const k in sm) m[k] = (m[k]||0) + sm[k];
-    return { date: d.date, micros: m };
+    return { date: d.date, micros: m, coverage: microCoverageOf(d.ledger) };
   });
 }
 
@@ -677,6 +682,7 @@ function renderMicros(t){
   const suppToday = LedgerCore.sumSuppMicros(supps(), suppLog()[VIEW_DATE] || []);
   const todayVal = mi => (t[mi.key]||0) + (suppToday[mi.key]||0);
   const todayHas = LedgerCore.MICRO_REF.some(mi => todayVal(mi) > 0);
+  const todayCoverage = microCoverageOf(ledger);
 
   const series = avgMode ? microDaysSeries() : [];
   const stats  = avgMode ? LedgerCore.microAverages(series, VIEW_DATE, win.days, LedgerCore.MICRO_KEYS) : null;
@@ -703,7 +709,16 @@ function renderMicros(t){
     const ref = LedgerCore.MICRO_REF.filter(mi => mi.core || valOf(mi) > 0);
     const rows = ref.map(mi=>{
       const val = valOf(mi), target = mi[sex];
-      const status = LedgerCore.microStatus(val, target, mi.limit);
+      const covObj = avgMode ? (stats.byKey[mi.key]||{}) : (todayCoverage[mi.key]||{});
+      const coverage = avgMode ? covObj.coverage
+        : (covObj.totalKcal>0 ? covObj.knownKcal/covObj.totalKcal : null);
+      const covered = coverage == null || coverage >= .7;
+      const rawStatus=LedgerCore.microStatus(val,target,mi.limit);
+      // Partial data can prove a floor was reached or a limit was approached/exceeded;
+      // it cannot prove that a floor was missed or that a limit was safely stayed under.
+      const status=covered?rawStatus:(mi.limit
+        ? (rawStatus==='near'||rawStatus==='over'?rawStatus:'na')
+        : (rawStatus==='ok'?'ok':'na'));
       if (status==='low'||status==='verylow') low++;
       if (status==='over') over++;
       const w = Math.min(100, target>0 ? val/target*100 : 0);
@@ -720,7 +735,9 @@ function renderMicros(t){
         const n = stats.byKey[mi.key] ? stats.byKey[mi.key].n : 0;
         if (n>0 && n < stats.loggedDays) tag = ` <span class="micro-supp" title="Supplied on ${n} of ${stats.loggedDays} logged days">${n}/${stats.loggedDays}d</span>`;
       }
-      const flag = badge[status] ? ` · ${badge[status]}` : '';
+      if (coverage != null && coverage < .999)
+        tag += ` <span class="micro-supp" title="Nutrition sources cover ${Math.round(coverage*100)}% of logged calories for this nutrient">${Math.round(coverage*100)}% covered</span>`;
+      const flag = (badge[status] ? ` · ${badge[status]}` : '') + (!covered?' · partial data':'');
       const cls = tone[status] === 'over' ? 'over' : (tone[status] === 'warn' ? 'warn' : '');
       return `<div class="micro-row">
         <span class="micro-name">${mi.name}${tag}</span>
@@ -737,8 +754,8 @@ function renderMicros(t){
       ? `<div class="tactical" style="margin-top:10px">⚡ ${escapeHtml(splitForDate(VIEW_DATE))} day — potassium, magnesium, sodium &amp; vitamin C support recovery; keep these topped up.</div>`
       : '';
     const caption = avgMode
-      ? `${win.label} rolling average over ${stats.loggedDays} logged day${stats.loggedDays===1?'':'s'} of the last ${win.days}. A bar under target here means the nutrient is <i>consistently</i> short, not a one-off; counted from USDA-matched foods plus any supplements logged each day. AI estimates and older entries add nothing, so a low reading can mean under-<i>tracked</i> rather than under-eaten.`
-      : `${fromSupp ? 'Counted from USDA-matched foods plus the supplements you logged today (shown with ＋supp, in elemental amounts).' : 'Counted from USDA-matched foods only'} — AI estimates and older entries add nothing, so a low reading can mean under-<i>tracked</i> rather than under-eaten.`;
+      ? `${win.label} rolling average over ${stats.loggedDays} logged day${stats.loggedDays===1?'':'s'} of the last ${win.days}. Each nutrient reports how much of logged food its source data actually covers; below 70%, an apparent shortfall or safe limit is marked partial rather than treated as fact. Supplements are included.`
+      : `${fromSupp ? 'Food-source coverage plus logged supplements (shown with ＋supp, in elemental amounts).' : 'Food-source coverage is shown per nutrient.'} Below 70%, apparent shortfalls are marked partial, so missing source data is not mistaken for a dietary deficiency.`;
     body = `${rows}${recNote}
       <div class="tactical" style="margin-top:12px">${caption} Sodium and both sugars are limits. <b>Free sugar</b> is the added/juice/syrup share worth cutting — the natural sugar in whole fruit, vegetables and milk isn't counted; <b>total sugar</b> is everything. General references, not medical advice.</div>`;
   }

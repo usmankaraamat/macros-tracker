@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.nal.usda.gov https://generativelanguage.googleapis.com https://openrouter.ai https://*.supabase.co; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Eatify</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -389,6 +390,7 @@
   <section class="panel">
     <span class="panel-title">Body measurements · <span id="mDate">today</span> <span class="sr-sub">(cm)</span></span>
     <div class="tactical" style="margin-bottom:6px">Waist and neck (plus hips, for women) drive the body-fat estimate above. The rest are optional — log the ones you care about and the app tracks each one over time.</div>
+    <div class="tactical" id="measureCadence" style="margin-bottom:8px"></div>
     <div id="measureForm" class="measure-grid"></div>
     <div class="footer-actions" style="grid-template-columns:1fr auto;margin-top:12px">
       <button type="button" id="mSaveBtn">Save measurements</button>
@@ -655,6 +657,11 @@
     <div id="dataTrust"><div class="empty">Log intake and weigh-ins and the trust readout appears here.</div></div>
   </section>
 
+  <section class="panel">
+    <span class="panel-title">Training consistency &middot; your own baseline</span>
+    <div id="trainingConsistency"><div class="empty">Log a few sessions and your rolling frequency baseline appears here.</div></div>
+  </section>
+
   <!-- Weekly working-sets per muscle, frequency and gaps — the training the app tracked
        but never rolled up. -->
   <section class="panel">
@@ -746,6 +753,7 @@
 </div>
 
 <script src="core.js"></script>
+<script src="js/storage.js"></script>
 <script src="js/icons.js"></script>
 <script src="js/state.js"></script>
 <script src="js/compute.js"></script>

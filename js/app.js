@@ -655,9 +655,10 @@ document.getElementById('resetBtn').onclick = async ()=>{
   });
   if (!ok) return;
   const before = ledger.slice();
+  clearDayRecords(VIEW_DATE,before);
   ledger = []; save(); render();
   toast(`Cleared ${before.length} ${before.length === 1 ? 'entry' : 'entries'}`,
-    { tone:'warn', undo: ()=>{ ledger = before; save(); render(); } });
+    { tone:'warn', undo: ()=>{ restoreDayRecords(VIEW_DATE,before); ledger = before; save(); render(); } });
 };
 // Export EVERY logged day (plus targets) — this is the durable backup, so it must
 // carry the whole history, not just today.
@@ -665,12 +666,13 @@ document.getElementById('exportBtn').onclick = async ()=>{
   const days = {};
   allDays(true).forEach(d => { days[d.date] = d.ledger; });
   days[VIEW_DATE] = ledger;                       // the on-screen day's live state wins
-  const payload = { exported: dateStr(), version: 2,
+  const payload = { exported: dateStr(), version: 3, schema:DATA_SCHEMA_VERSION,
     targets: {floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,trendStart:TREND_START,goalTargets:GOAL_TARGETS,goalTargetDate:GOAL_TARGET_DATE,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN},
     pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100)},
     weights: weightsMap(), measures: measureMap(), mMeta: measureMeta(), templates: templates(),
     supps: supps(), suppLog: suppLog(),
     workouts: allWorkouts(), wkMeta: workoutMeta(), exercises: exerciseCatalog(),
+    tombstones:entryTombstones(), clears:dayClears(),
     days, date: ACTIVE_DATE, ledger, totals: totals() };   // date/ledger kept for v1 compat
   // Bind the backup to this sync account when one is set, so a shared/leaked export can
   // only be re-imported on the owning passphrase (import refuses a mismatched owner).
@@ -705,11 +707,12 @@ document.getElementById('importFile').onchange = (ev)=>{
         }
       }
       // Recompute from stored raw fields + carried base so imported entries stay consistent.
-      const rebuild = l => l.map(e => {
+      const rebuild = (l,date) => l.map((e,i) => {
         const base = e.base || DB[e.name];
-        return (e.name && base && 'weighed' in e)
-          ? computeEntry(e.name, e.grams, e.weighed, base, e.source, e.partOf)
-          : e;
+        if (!(e.name && base && 'weighed' in e)) return ensureEntryMeta(e,date||VIEW_DATE,i);
+        const next=computeEntry(e.name,e.grams,e.weighed,base,e.source,e.partOf);
+        next._id=e._id;next.at=e.at;next.eatenAt=e.eatenAt;next.loggedAt=e.loggedAt;next.updatedAt=e.updatedAt;
+        return ensureEntryMeta(next,date||VIEW_DATE,i);
       });
       if (data.days && typeof data.days === 'object') {
         // v2 backup: restore every day + targets.
@@ -722,11 +725,13 @@ document.getElementById('importFile').onchange = (ev)=>{
         });
         if (!go) return;
         dates.forEach(d=>{
-          const l = rebuild(data.days[d]);
+          const l = rebuild(data.days[d],d);
           try { localStorage.setItem('ledger_'+d, JSON.stringify(l)); } catch(e){}
           stampSyncMeta(d);                    // imported now = edited now, for sync LWW
           if (d === VIEW_DATE) ledger = l;
         });
+        if(data.tombstones&&typeof data.tombstones==='object')localStorage.setItem(TOMBSTONE_KEY,JSON.stringify(data.tombstones));
+        if(data.clears&&typeof data.clears==='object')localStorage.setItem(CLEAR_KEY,JSON.stringify(data.clears));
         if (data.targets){
           FLOOR=+data.targets.floor||FLOOR; CEIL=+data.targets.ceil||CEIL;
           if (data.targets.pCfg) P_CFG={mode:data.targets.pCfg.mode==='pct'?'pct':'g', val:+data.targets.pCfg.val||PROTOCOL.p};
@@ -798,7 +803,7 @@ document.getElementById('importFile').onchange = (ev)=>{
           });
           if (!go) return;
         }
-        ledger = rebuild(data.ledger);
+        ledger = rebuild(data.ledger,VIEW_DATE);
       } else throw new Error('no ledger array');
       save(); render();
       toast('Backup restored');
@@ -892,6 +897,9 @@ function requestPersistence(){
   }
 }
 
+async function bootApp(){
+await durableRestore();
+migrateLocalData();
 document.getElementById('closeDayBtn').onclick = closeDay;
 document.getElementById('backToTodayBtn').onclick = ()=> viewDay(ACTIVE_DATE, true);
 updateDayLabel();
@@ -905,4 +913,7 @@ showTab(_liftOnBoot ? 'lift' : 'today');   // also renders
 if (_liftOnBoot) toast(`${splitForDate(ACTIVE_DATE)} · ${TRAIN.start}–${TRAIN.end} — opened on Lift.`,
   { undo: ()=> showTab('today'), undoLabel: 'Today' });
 maybeShowBrief();   // one-line plan for the day, once per day
+durableMirrorSoon();
 if (syncConfigured()) syncNow(); else setSyncDot('off');   // boot pull+push (no-op when unconfigured)
+}
+bootApp();

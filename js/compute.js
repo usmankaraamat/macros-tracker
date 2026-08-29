@@ -22,7 +22,31 @@ function escapeHtml(s){
 // Log an entry, stamping the real wall-clock time it was added so meal-timing features
 // can learn from it later. Only the live day gets a timestamp — a back-filled past day
 // would carry a misleading "now", so those stay unstamped.
-function pushEntry(e){ if (VIEW_DATE === ACTIVE_DATE) e.at = new Date().toISOString(); ledger.push(e); return e; }
+function pushEntry(e){
+  const now=new Date().toISOString();
+  e._id=e._id||newRecordId('food'); e.loggedAt=now; e.updatedAt=now;
+  if(VIEW_DATE===ACTIVE_DATE){e.at=now;e.eatenAt=now;}
+  ledger.push(e); return e;
+}
+
+// Per-nutrient source coverage, calorie weighted. New USDA records carry an exact
+// `_known` mask; legacy USDA is treated as covered, built-in foods only cover fields
+// they explicitly contain, and AI estimates are unknown beyond their macros.
+function microCoverageOf(l){
+  const out={}; LedgerCore.MICRO_KEYS.forEach(k=>out[k]={knownKcal:0,totalKcal:0});
+  (l||[]).forEach(e=>{
+    const kcal=+e.kcal||0, legacyUSDA=e.source==='USDA';
+    LedgerCore.MICRO_KEYS.forEach(k=>{
+      out[k].totalKcal+=kcal;
+      const base=e.base||{};
+      const builtInKnown=(e.source==='DB'||!e.source) &&
+        (Object.prototype.hasOwnProperty.call(base,k)||(k==='fsug'&&Object.prototype.hasOwnProperty.call(base,'sug')));
+      const known=base._known ? !!base._known[k] : (legacyUSDA||builtInKnown);
+      if(known)out[k].knownKcal+=kcal;
+    });
+  });
+  return out;
+}
 function totalsOf(l) {
   return l.reduce((t,e)=>({
     kcal:t.kcal+e.kcal, p:t.p+e.p, f:t.f+e.f, c:t.c+(e.c||0), ca:t.ca+e.ca, ph:t.ph+e.ph,
