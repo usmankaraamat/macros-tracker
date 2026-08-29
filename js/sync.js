@@ -18,7 +18,7 @@ function syncConfigured(){ return !!(supaUrl() && supaAnonKey() && getKey(LS.pas
 function setSyncDot(state, tip){
   const el = document.getElementById('syncDot');
   el.className = 'sync-dot ' + state;
-  el.title = tip || {off:'Sync off — configure in ⚙ Settings', ok:'Synced', pending:'Syncing…', err:'Sync error'}[state];
+  el.title = tip || {off:'Sync off — configure in Settings', ok:'Synced', pending:'Syncing…', err:'Sync error'}[state];
 }
 function syncMeta(){ try{ return JSON.parse(localStorage.getItem(SYNC_META_KEY)||'{}'); }catch(e){ return {}; } }
 function stampSyncMeta(date){

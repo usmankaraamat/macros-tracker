@@ -1,11 +1,132 @@
 // app.js -- Boot, wiring, tab control, settings, import/export, service worker.
 
+function asDisclosure(panel) {
+  if (!panel || panel.tagName === 'DETAILS') return panel;
+  const title = panel.querySelector(':scope > .panel-title');
+  if (!title) return panel;
+  const details = document.createElement('details');
+  details.className = panel.className;
+  if (panel.id) details.id = panel.id;
+  const summary = document.createElement('summary');
+  title.style.margin = '0';
+  summary.appendChild(title);
+  details.appendChild(summary);
+  while (panel.firstChild) details.appendChild(panel.firstChild);
+  panel.replaceWith(details);
+  return details;
+}
+
+function organiseSettingsPanel(){
+  const panel = document.getElementById('settingsPanel');
+  if (!panel || panel.dataset.organised) return;
+  panel.dataset.organised = 'true';
+  panel.classList.add('settings-shell');
+
+  const children = [...panel.children];
+  const marker = prefix => children.findIndex(el =>
+    el.classList.contains('panel-title') && el.textContent.trim().startsWith(prefix));
+  const apiI = marker('API keys'), syncI = marker('Sync'), bodyI = marker('Body profile');
+  const goalI = marker('Goal'), targetI = marker('Targets');
+  if ([apiI, syncI, bodyI, goalI, targetI].some(i => i < 0)) return;
+
+  const api = children.slice(apiI, syncI);
+  const sync = children.slice(syncI, bodyI);
+  const body = children.slice(bodyI, goalI);
+  const tail = children.slice(goalI);
+  const detailBy = prefix => tail.find(el => el.tagName === 'DETAILS' &&
+    el.querySelector(':scope > summary')?.textContent.trim().startsWith(prefix));
+  const training = detailBy('Training schedule');
+  const penalties = detailBy('Unweighed penalties');
+  const keyHelp = detailBy('Where to get the keys');
+  const elsewhere = new Set([training, penalties, keyHelp].filter(Boolean));
+  const goal = tail.filter(el => !elsewhere.has(el));
+  const backup = document.querySelector('#todayOnly > details');
+
+  const summary = document.createElement('div');
+  summary.className = 'settings-effective';
+  summary.id = 'settingsEffective';
+
+  const group = (title, note, nodes, open) => {
+    const details = document.createElement('details');
+    details.className = 'settings-section';
+    details.open = !!open;
+    details.innerHTML = `<summary><span><b>${title}</b><small>${note}</small></span></summary>`;
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'settings-section-body';
+    nodes.filter(Boolean).forEach(node => bodyEl.appendChild(node));
+    details.appendChild(bodyEl);
+    return details;
+  };
+
+  panel.replaceChildren(
+    summary,
+    group('Goal & corridor', 'Your effective targets and meal pacing.', goal, true),
+    group('Body profile', 'Inputs for adaptive maintenance.', body, false),
+    group('Training', 'Schedule, split, and day-type behavior.', [training], false),
+    group('Parsing & API', 'Local keys, model choices, and estimate penalties.', [...api, penalties, keyHelp], false),
+    group('Sync', 'Encrypted cross-device storage.', sync, false),
+    group('Data', 'Backup, import, and day-level reset.', [backup], false)
+  );
+}
+
+function organiseLogs(){
+  const panels = [...document.querySelectorAll('#tabLogs > .panel')];
+  panels.forEach(panel => {
+    const title = panel.querySelector(':scope > .panel-title')?.textContent.trim() || '';
+    if (title.startsWith('Body measurements') || title.startsWith('Supplements')) asDisclosure(panel);
+  });
+}
+
+function organisePlan(){
+  const tab = document.getElementById('tabPlan');
+  const panels = [...tab.querySelectorAll(':scope > .panel')];
+  const titled = prefix => panels.find(panel =>
+    panel.querySelector(':scope > .panel-title')?.textContent.trim().startsWith(prefix));
+  const closeGap = titled('Close the gap');
+  if (closeGap) tab.prepend(closeGap);
+  asDisclosure(titled('Supplement protocols'));
+  asDisclosure(titled('Meal engineer'));
+}
+
+function organiseTrends(){
+  const tab = document.getElementById('tabTrends');
+  const panels = [...tab.querySelectorAll(':scope > .panel')];
+  const titleOf = panel => panel.querySelector(':scope > .panel-title, :scope > summary > .panel-title')?.textContent.trim() || '';
+  const find = prefix => panels.find(panel => titleOf(panel).startsWith(prefix));
+  const groups = [
+    ['Outcome', 'Weight, energy balance, goals, and recomposition.', [find('Weight and intake'), find('Goal projection'), find('Recomp check')]],
+    ['Adherence', 'Corridor consistency and the foods shaping it.', [find('Rolling averages'), find('Compliance'), find('Weekly report card'), find('Most logged foods')]],
+    ['Training response', 'Volume, strength, and site measurements together.', [find('Volume per muscle'), find('Tissue vs training')]],
+    ['Data trust', 'Sample depth, disagreement, and inspectable history.', [find('Data quality'), find('History')]],
+  ];
+  const collapse = new Set(['Goal projection', 'Recomp check', 'Weekly report card', 'Tissue vs training']);
+  tab.replaceChildren();
+  for (const [title, note, items] of groups) {
+    const group = document.createElement('section');
+    group.className = 'trend-group';
+    group.innerHTML = `<div class="trend-group-head"><span>${title}</span><p>${note}</p></div>`;
+    items.filter(Boolean).forEach(panel => {
+      const key = titleOf(panel).split(' · ')[0];
+      group.appendChild(collapse.has(key) ? asDisclosure(panel) : panel);
+    });
+    tab.appendChild(group);
+  }
+}
+
+organiseSettingsPanel();
+organiseLogs();
+organisePlan();
+organiseTrends();
+hydrateIcons();
+
 const gearBtn = document.getElementById('gear');
 gearBtn.onclick = ()=>{
   const p = document.getElementById('settingsPanel');
   const open = p.hidden;
   p.hidden = !open;
   gearBtn.setAttribute('aria-expanded', String(open));
+  document.body.classList.toggle('settings-open', open);
+  document.getElementById('sectionLabel').textContent = open ? 'Settings' : TAB_LABELS[ACTIVE_TAB];
   if (open) p.scrollIntoView({ block:'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
 };
 
@@ -20,10 +141,10 @@ function refreshKeyUI(){
   // A dead send button with no explanation is a dead end — say why it is off.
   const send = document.getElementById('parseBtn');
   send.disabled = !hasAI();
-  send.title = hasAI() ? 'Parse meal (Enter)' : 'Add a Gemini or OpenRouter key in ⚙ Settings to parse meals';
+  send.title = hasAI() ? 'Parse meal (Enter)' : 'Add a Gemini or OpenRouter key in Settings to parse meals';
   document.getElementById('nlInput').placeholder = hasAI()
     ? 'Describe a meal…'
-    : 'No AI key — use ⌃ to search USDA';
+    : 'No AI key — use More logging options to search USDA';
 }
 document.getElementById('saveKeys').onclick = ()=>{
   setKey(LS.usda,  document.getElementById('usdaKey').value.trim());
@@ -135,9 +256,14 @@ navBackdropEl.onclick = ()=> navClose(true);
 // the visible tab is rendered, so a keystroke on Today no longer rebuilds the
 // heatmap, the ternary plot and every lift trend.
 const TABS = { today:'tabToday', logs:'tabLogs', plan:'tabPlan', lift:'tabLift', trends:'tabTrends' };
+const TAB_LABELS = { today:'Today', logs:'Logs', plan:'Plan', lift:'Lift', trends:'Trends' };
 function showTab(name){
   if (!TABS[name]) name = 'today';
   ACTIVE_TAB = name;
+  document.getElementById('settingsPanel').hidden = true;
+  gearBtn.setAttribute('aria-expanded', 'false');
+  document.body.classList.remove('settings-open');
+  document.getElementById('sectionLabel').textContent = TAB_LABELS[name];
   Object.keys(TABS).forEach(t=>{
     const view = document.getElementById(TABS[t]);
     if (view) view.hidden = (t !== name);

@@ -255,7 +255,7 @@ function prevDayStr(ds){ const [y,m,d]=ds.split('-').map(Number); const dt=new D
 function showDigest(g){
   const el = document.getElementById('digestCard');
   el.hidden = false;
-  el.className = 'notice ' + (g.ok ? 'good' : 'warn');
+  el.className = 'read-item ' + (g.ok ? 'good' : 'warn');
   el.querySelector('.dg-main').innerHTML =
     `<b>${g.date} closed</b> — ${g.kcal} kcal, ${escapeHtml(g.kcalV)} · ${escapeHtml(g.pV)}` +
     (g.streak > 1 ? ` · <b>${g.streak}-day streak</b>` : g.ok ? ' · streak starts here' : '');

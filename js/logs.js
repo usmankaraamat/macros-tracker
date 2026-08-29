@@ -105,7 +105,7 @@ function renderBodyFat(){
   if (bf == null){
     // Say precisely what is missing rather than a generic prompt.
     const need = [];
-    if (!(+PROFILE.height > 0)) need.push('your height in ⚙ Settings');
+    if (!(+PROFILE.height > 0)) need.push('your height in Settings');
     const m = latest ? latest.m : {};
     if (!(+((m||{}).waist) > 0)) need.push('a waist measurement');
     if (!(+((m||{}).neck) > 0)) need.push('a neck measurement');

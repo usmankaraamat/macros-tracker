@@ -500,7 +500,7 @@ function renderFatEstimate(){
     maintTxt = maintLow===maintHigh ? `${maintLow}` : `${maintLow}–${maintHigh}`;
   } else {
     const td=computeTDEE();
-    if (!(td.blended>0)){ out.className='tactical'; out.innerHTML='Fill in your <b>body profile</b> in ⚙ Settings (or a maintenance range above) to estimate fat change.'; return; }
+    if (!(td.blended>0)){ out.className='tactical'; out.innerHTML='Fill in your <b>body profile</b> in Settings (or a maintenance range above) to estimate fat change.'; return; }
     const m=Math.round(150 - 75*td.w);            // ±150 early, tightening to ±75 fully calibrated
     maintLow=td.blended-m; maintHigh=td.blended+m;
     maintTxt = `adaptive TDEE ${td.blended.toLocaleString()} ±${m}`;
@@ -662,7 +662,7 @@ function renderTDEE(){
   if (!hasProfile && td.dataTDEE==null){
     const msg='Enter age &amp; height for a formula estimate — or log ~7 days of weigh-ins and it derives maintenance from your data.';
     out.className='tactical'; out.innerHTML=msg;
-    echo('tactical', 'Add your age and height in <b>⚙ Settings</b> to get an adaptive TDEE.');
+    echo('tactical', 'Add your age and height in <b>Settings</b> to get an adaptive TDEE.');
     return;
   }
   const bits=[];
@@ -674,7 +674,7 @@ function renderTDEE(){
   if (TREND_START) bits.push(`weigh-ins before ${TREND_START} excluded`);
   out.className='tactical good';
   out.innerHTML = `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${bits.join(' · ')}.`;
-  echo('tactical good', `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${bits.join(' · ')}. Edit your profile in ⚙ Settings.`);
+  echo('tactical good', `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${bits.join(' · ')}. Edit your profile in Settings.`);
 }
 // Goal readout: the corridor the goal will impose + suggested protein for the phase.
 function renderGoal(){
@@ -751,7 +751,7 @@ function maybeShowBrief(){
     else if (dr.verdict==='under') msg += ` Heads up: ${dr.under}/${dr.n} recent days under the floor — the corridor may need lowering.`;
     const card=document.getElementById('briefCard');
     document.getElementById('briefText').innerHTML=msg;
-    card.className='digest-card '+(yMark.includes('✓')?'good':(yt.kcal>yb.ceil?'bad':'meh'));
+    card.className='read-item '+(yMark.includes('✓')?'good':(yt.kcal>yb.ceil?'bad':'meh'));
     card.hidden = false;
     setKey('ledger_brief_seen', ACTIVE_DATE);                 // once per day, even across reloads
   }catch(e){}

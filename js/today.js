@@ -293,27 +293,34 @@ function macroRow(o){
 function renderLedgerTable(){
   const body = document.getElementById('ledgerBody');
   if (!ledger.length){
-    body.innerHTML = `<tr><td colspan="5" style="padding:0">${emptyLedgerCell()}</td></tr>`;
+    body.innerHTML = emptyLedgerCell();
     wireEmptyLedgerChips();
     _prevLedgerLen = 0;
     return;
   }
+  const badgeFor = e => (e.source && e.source !== 'DB')
+    ? `<span class="badge ${e.source === 'USDA' ? 'usda' : 'est'}">${escapeHtml(e.source)}</span>` : '';
+  const actionsFor = (e, i) => `<div class="meal-actions">
+    <button type="button" class="edit" data-edit="${i}" aria-label="Edit grams for ${escapeAttr(e.name)}" title="Edit grams">${uiIcon('edit', 17)}</button>
+    <button type="button" class="del" data-del="${i}" aria-label="Remove ${escapeAttr(e.name)}" title="Remove">${uiIcon('trash', 17)}</button>
+  </div>`;
+  const macrosFor = e => `<div class="meal-macros">
+    <span><b>${e.p.toFixed(1)}g</b> protein</span>
+    <span><b>${e.f.toFixed(1)}g</b> fat</span>
+    <span><b>${(e.c||0).toFixed(1)}g</b> carbs</span>
+  </div>`;
   const row = (e,i)=>{
     const badge = (e.source && e.source !== 'DB')
       ? `<span class="badge ${e.source === 'USDA' ? 'usda' : 'est'}">${escapeHtml(e.source)}</span>` : '';
     const flags = e.flags && e.flags.length
-      ? `<span class="flags">${escapeHtml(e.flags.join(' · '))}</span>` : '';
-    // Row actions are real buttons with accessible names — the old ✕/✎ spans
-    // were unreachable by keyboard and far too small to hit reliably.
-    return `<tr${e.partOf ? ' class="of-dish"' : ''}>
-      <td>
-        ${badge}<span class="ename">${escapeHtml(e.name)}</span><span class="egrams">${e.grams}g</span><span class="row-actions">
-          <button type="button" class="edit" data-edit="${i}" aria-label="Edit grams for ${escapeAttr(e.name)}" title="Edit grams">✎</button>
-          <button type="button" class="del" data-del="${i}" aria-label="Remove ${escapeAttr(e.name)}" title="Remove">✕</button>
-        </span>${flags}
-      </td>
-      <td>${Math.round(e.kcal)}</td><td>${e.p.toFixed(1)}</td><td>${e.f.toFixed(1)}</td><td>${(e.c||0).toFixed(1)}</td>
-    </tr>`;
+      ? `<div class="flags">${escapeHtml(e.flags.join(' · '))}</div>` : '';
+    return `<details class="meal-entry">
+      <summary>
+        <span class="meal-name">${badge}${escapeHtml(e.name)}<small>${Math.round(e.grams)}g</small></span>
+        <span class="meal-kcal">${Math.round(e.kcal)} <small>kcal</small></span>
+      </summary>
+      <div class="meal-detail">${macrosFor(e)}${flags}${actionsFor(e, i)}</div>
+    </details>`;
   };
   // A decomposed dish is one meal, so it reads as one block with its own total. The
   // components stay individually editable — the grouping is presentational, which is
@@ -327,12 +334,20 @@ function renderLedgerTable(){
     const part = ledger.slice(i, j);
     const sum = part.reduce((s,e)=>({ kcal:s.kcal+e.kcal, p:s.p+e.p, f:s.f+e.f, c:s.c+(e.c||0) }),
                             {kcal:0,p:0,f:0,c:0});
-    html.push(`<tr class="dish-head">
-      <td><span class="dish-name">🍽️ ${escapeHtml(dish)}</span>
-          <span class="dish-meta">${part.length} ingredient${part.length>1?'s':''} · ${Math.round(part.reduce((s,e)=>s+(+e.grams||0),0))}g</span></td>
-      <td>${Math.round(sum.kcal)}</td><td>${sum.p.toFixed(1)}</td><td>${sum.f.toFixed(1)}</td><td>${sum.c.toFixed(1)}</td>
-    </tr>`);
-    part.forEach((e,k)=> html.push(row(e, i + k)));
+    html.push(`<details class="meal-entry dish-entry">
+      <summary>
+        <span class="meal-name">${escapeHtml(dish)}<small>${part.length} ingredient${part.length>1?'s':''} · ${Math.round(part.reduce((s,e)=>s+(+e.grams||0),0))}g</small></span>
+        <span class="meal-kcal">${Math.round(sum.kcal)} <small>kcal</small></span>
+      </summary>
+      <div class="meal-detail">
+        ${macrosFor(sum)}
+        <div class="meal-components">${part.map((e,k)=>`<div class="meal-component">
+          <span class="component-name">${badgeFor(e)}${escapeHtml(e.name)}<small>${Math.round(e.grams)}g · ${Math.round(e.kcal)} kcal</small></span>
+          <span class="component-macros">P ${e.p.toFixed(1)} · F ${e.f.toFixed(1)} · C ${(e.c||0).toFixed(1)}</span>
+          ${actionsFor(e, i + k)}
+        </div>`).join('')}</div>
+      </div>
+    </details>`);
     i = j - 1;
   }
   body.innerHTML = html.join('');
@@ -343,8 +358,8 @@ function renderLedgerTable(){
   if (ledger.length > _prevLedgerLen && !prefersReducedMotion()){
     for (let i = _prevLedgerLen; i < ledger.length; i++){
       const btn = body.querySelector(`[data-edit="${i}"]`);
-      const tr = btn && btn.closest('tr');
-      if (tr) tr.classList.add('rowNew');
+      const entry = btn && btn.closest('.meal-entry');
+      if (entry) entry.classList.add('rowNew');
     }
   }
   _prevLedgerLen = ledger.length;
@@ -404,6 +419,8 @@ function render(){
   applyAdaptiveCorridor();   // set the effective corridor before anything reads FLOOR/CEIL
   computePTarget();          // resolve % protein against the current floor
   refreshTargetLabels();
+  const settingsEffective = document.getElementById('settingsEffective');
+  if (settingsEffective) settingsEffective.innerHTML = `<span>Effective corridor</span><b>${FLOOR.toLocaleString()}–${CEIL.toLocaleString()} kcal</b><small>Protein floor ${Math.round(P_TARGET)}g · ${GOAL.mode === 'off' ? 'manual target' : `${GOAL.mode} goal`}</small>`;
   updateSuppBadge();         // the nav badge is visible from every tab
   // Body profile and goal live in Settings now, which is reachable from every
   // tab — so their readouts are refreshed here rather than by the Trends view.
@@ -436,7 +453,7 @@ function renderToday(){
 function repeatUnits(n){ return LedgerCore.mineRepeats(allDays(true), {limit: n}); }
 function repeatChipHTML(u, attr, i){
   const label = u.kind === 'dish'
-    ? `🍽️ ${escapeHtml(u.name)} <small>${u.items.length} items</small>`
+    ? `${uiIcon('repeat', 14)} ${escapeHtml(u.name)} <small>${u.items.length} items</small>`
     : `${escapeHtml(u.name)} <small>${Math.round(u.items[0].grams)}g</small>`;
   return `<button type="button" class="chip${u.kind === 'dish' ? ' dish' : ''}" ${attr}="${i}">${label}</button>`;
 }
@@ -586,7 +603,7 @@ function renderTemplates(){
     const kcal = Math.round(t.items.reduce((s,e)=> s + (e.base ? computeEntry(e.name,e.grams,e.weighed,e.base,e.source,e.partOf).kcal : 0), 0));
     return `<span class="chip">
       <button type="button" class="chip-main" data-tpl="${i}" style="all:unset;cursor:pointer">★ ${escapeHtml(t.name)} <small>${t.items.length} items · ${kcal} kcal</small></button>
-      <button type="button" class="icon-btn" data-tpldel="${i}" aria-label="Delete usual ${escapeAttr(t.name)}" title="Delete usual">✕</button>
+      <button type="button" class="icon-btn" data-tpldel="${i}" aria-label="Delete usual ${escapeAttr(t.name)}" title="Delete usual">${uiIcon('trash', 15)}</button>
     </span>`;
   }).join('');
   wrap.querySelectorAll('[data-tpldel]').forEach(x=>{

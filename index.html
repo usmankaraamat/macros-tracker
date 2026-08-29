@@ -19,21 +19,22 @@
 <!-- Every status message the app shows visually is also announced here. -->
 <div id="srLive" class="sr-only" role="status" aria-live="polite"></div>
 
-<header>
-  <button type="button" id="navToggle" aria-label="Open navigation"
-          aria-expanded="false" aria-controls="sidebar" title="Sections">&#9776;</button>
-  <h1>Eatify</h1>
-  <div class="head-right">
+<header class="app-header">
+  <div class="head-start">
+    <button type="button" id="navToggle" aria-label="Open navigation"
+            aria-expanded="false" aria-controls="sidebar" title="Sections"><span data-ui-icon="menu"></span></button>
+    <div class="head-name"><span class="head-section" id="sectionLabel">Today</span><h1>Eatify</h1></div>
+  </div>
+  <div class="daynav">
+    <button type="button" id="dayPrev" aria-label="Previous day" title="Previous day"><span data-ui-icon="previous"></span></button>
+    <span class="date" id="dayLabel" aria-live="polite"></span>
+    <button type="button" id="dayNext" aria-label="Next day" title="Next day"><span data-ui-icon="next"></span></button>
+  </div>
+  <div class="head-end">
     <span id="syncDot" class="sync-dot off" role="img" aria-label="Sync off"
           title="Sync off — configure in Settings"></span>
-    <!-- The date is a control: ‹ and › step the day you are looking at. -->
-    <div class="daynav">
-      <button type="button" id="dayPrev" aria-label="Previous day" title="Previous day">‹</button>
-      <span class="date" id="dayLabel" aria-live="polite"></span>
-      <button type="button" id="dayNext" aria-label="Next day" title="Next day">›</button>
-    </div>
     <button type="button" id="gear" aria-label="Settings" aria-expanded="false"
-            aria-controls="settingsPanel" title="Settings">&#9881;</button>
+            aria-controls="settingsPanel" title="Settings"><span data-ui-icon="settings"></span></button>
   </div>
 </header>
 
@@ -44,28 +45,16 @@
 <nav class="sidebar" id="sidebar" hidden>
   <div class="sidebar-head">
     <span class="sidebar-title">Sections</span>
-    <button type="button" class="icon-btn" id="navClose" aria-label="Close navigation">✕</button>
+    <button type="button" class="icon-btn" id="navClose" aria-label="Close navigation"><span data-ui-icon="close"></span></button>
   </div>
   <div class="sidebar-tabs" role="tablist" aria-orientation="vertical" aria-label="Sections">
-    <button type="button" role="tab" id="tabbtn-today" data-tab="today" aria-selected="true" aria-controls="tabToday"><span class="ico">▤</span>Today</button>
-    <button type="button" role="tab" id="tabbtn-logs" data-tab="logs" aria-selected="false" aria-controls="tabLogs"><span class="ico">✎<span class="nav-badge" id="suppBadge" hidden></span></span>Logs</button>
-    <button type="button" role="tab" id="tabbtn-plan" data-tab="plan" aria-selected="false" aria-controls="tabPlan"><span class="ico">◈</span>Plan</button>
-    <button type="button" role="tab" id="tabbtn-lift" data-tab="lift" aria-selected="false" aria-controls="tabLift"><span class="ico">▦</span>Lift</button>
-    <button type="button" role="tab" id="tabbtn-trends" data-tab="trends" aria-selected="false" aria-controls="tabTrends"><span class="ico">◧</span>Trends</button>
+    <button type="button" role="tab" id="tabbtn-today" data-tab="today" aria-selected="true" aria-controls="tabToday"><span class="ico"><span data-ui-icon="today"></span></span>Today</button>
+    <button type="button" role="tab" id="tabbtn-logs" data-tab="logs" aria-selected="false" aria-controls="tabLogs"><span class="ico"><span data-ui-icon="logs"></span><span class="nav-badge" id="suppBadge" hidden></span></span>Logs</button>
+    <button type="button" role="tab" id="tabbtn-plan" data-tab="plan" aria-selected="false" aria-controls="tabPlan"><span class="ico"><span data-ui-icon="plan"></span></span>Plan</button>
+    <button type="button" role="tab" id="tabbtn-lift" data-tab="lift" aria-selected="false" aria-controls="tabLift"><span class="ico"><span data-ui-icon="lift"></span></span>Lift</button>
+    <button type="button" role="tab" id="tabbtn-trends" data-tab="trends" aria-selected="false" aria-controls="tabTrends"><span class="ico"><span data-ui-icon="trends"></span></span>Trends</button>
   </div>
 </nav>
-
-<!-- End-of-day verdict, shown once after Close day. -->
-<div class="notice" id="digestCard" hidden>
-  <span class="dg-main grow"></span>
-  <button type="button" class="icon-btn" id="digestClose" aria-label="Dismiss">✕</button>
-</div>
-
-<!-- Morning brief, shown once per day on open. -->
-<div class="notice" id="briefCard" hidden>
-  <span id="briefText" class="grow"></span>
-  <button type="button" class="icon-btn" id="briefClose" aria-label="Dismiss">✕</button>
-</div>
 
 <!-- Shown while a past day is on screen — every add/edit lands on that day, not today. -->
 <div class="notice warn" id="pastBanner" hidden>
@@ -258,6 +247,18 @@
 <!-- ================================ TODAY ================================ -->
 <main id="tabToday" class="tabview" role="tabpanel" aria-labelledby="tabbtn-today">
 
+  <section class="today-read" id="todayRead" aria-label="Today's read">
+    <span class="today-read-title">Today's read</span>
+    <div class="read-item" id="digestCard" hidden>
+      <span class="dg-main grow"></span>
+      <button type="button" class="icon-btn" id="digestClose" aria-label="Dismiss"><span data-ui-icon="close"></span></button>
+    </div>
+    <div class="read-item" id="briefCard" hidden>
+      <span id="briefText" class="grow"></span>
+      <button type="button" class="icon-btn" id="briefClose" aria-label="Dismiss"><span data-ui-icon="close"></span></button>
+    </div>
+  </section>
+
   <!-- THE CORRIDOR — a single value against a limit, which is a METER, not a dial.
        The radial gauge spent ~40% of the first screen encoding one ratio and pushed
        the macros below the fold; a horizontal track says the same thing in a fifth
@@ -336,11 +337,7 @@
       <span>Today's entries</span>
       <button type="button" class="sm ghost" id="saveTplBtn">Save as usual</button>
     </span>
-    <table>
-      <caption class="sr-only">Foods logged for the day on screen</caption>
-      <thead><tr><th scope="col">Item</th><th scope="col">kcal</th><th scope="col">P</th><th scope="col">F</th><th scope="col">C</th></tr></thead>
-      <tbody id="ledgerBody"></tbody>
-    </table>
+    <div id="ledgerBody" class="meal-ledger" aria-label="Foods logged for the day on screen"></div>
   </section>
 
   <!-- Day maintenance. Close day is the routine action; the destructive ones sit
@@ -384,7 +381,7 @@
   <!-- BODY-FAT ESTIMATE -->
   <section class="panel">
     <span class="panel-title">Body-fat estimate · U.S. Navy tape method</span>
-    <div id="bfReadout"><div class="empty">Enter your height in ⚙ Settings and log a waist and neck below to estimate body fat.</div></div>
+    <div id="bfReadout"><div class="empty">Enter your height in Settings and log a waist and neck below to estimate body fat.</div></div>
     <div class="tactical" id="bfTrend" hidden style="margin-top:10px"></div>
   </section>
 
@@ -460,14 +457,14 @@
             <label for="suppLabelText" class="sr-only">Supplement label text</label>
             <textarea id="suppLabelText" rows="2" placeholder="Paste the label — e.g. Calcium 250mg, Vitamin D3 1000 IU, Vitamin K2 100mcg" style="margin-top:8px"></textarea>
             <div class="footer-actions" style="grid-template-columns:1fr 1fr 1.2fr;margin-top:6px">
-              <button type="button" class="ghost" id="suppPhotoBtn">📷 Photo</button>
-              <button type="button" class="ghost" id="suppGalleryBtn">🖼️ Choose</button>
+              <button type="button" class="ghost icon-label" id="suppPhotoBtn"><span data-ui-icon="camera"></span>Photo</button>
+              <button type="button" class="ghost icon-label" id="suppGalleryBtn"><span data-ui-icon="image"></span>Choose</button>
               <button type="button" id="suppReadBtn">Read label</button>
             </div>
             <div id="suppPhotoChip" class="photo-chip" hidden>
               <img id="suppPhotoThumb" alt="attached label photo">
               <span id="suppPhotoName">label photo</span>
-              <button type="button" id="suppPhotoClear" aria-label="Remove photo">✕</button>
+              <button type="button" id="suppPhotoClear" aria-label="Remove photo"><span data-ui-icon="close"></span></button>
             </div>
             <div class="tactical" id="suppNutriMsg" hidden></div>
             <div id="suppMicroList" style="margin-top:10px"></div>
@@ -505,9 +502,9 @@
   <section class="panel">
     <span class="panel-title">Meal engineer · balance three foods to a calorie target</span>
     <div class="tern-foods">
-      <div><label for="ternA">Food A</label><div class="tern-pick"><select id="ternA"></select><button type="button" class="tern-find" data-slot="0" aria-label="Search a food for slot A">🔍</button></div></div>
-      <div><label for="ternB">Food B</label><div class="tern-pick"><select id="ternB"></select><button type="button" class="tern-find" data-slot="1" aria-label="Search a food for slot B">🔍</button></div></div>
-      <div><label for="ternC">Food C</label><div class="tern-pick"><select id="ternC"></select><button type="button" class="tern-find" data-slot="2" aria-label="Search a food for slot C">🔍</button></div></div>
+      <div><label for="ternA">Food A</label><div class="tern-pick"><select id="ternA"></select><button type="button" class="tern-find" data-slot="0" aria-label="Search a food for slot A"><span data-ui-icon="search"></span></button></div></div>
+      <div><label for="ternB">Food B</label><div class="tern-pick"><select id="ternB"></select><button type="button" class="tern-find" data-slot="1" aria-label="Search a food for slot B"><span data-ui-icon="search"></span></button></div></div>
+      <div><label for="ternC">Food C</label><div class="tern-pick"><select id="ternC"></select><button type="button" class="tern-find" data-slot="2" aria-label="Search a food for slot C"><span data-ui-icon="search"></span></button></div></div>
     </div>
     <!-- Shared USDA search: the 🔍 on a slot opens this and fills that slot with any food. -->
     <div id="ternSearch" class="tern-search" hidden>
@@ -723,21 +720,21 @@
      Enter sends; the ⌃ opens the other ways in (camera, gallery, USDA). -->
 <div class="composer" id="composer">
   <div class="composer-menu" id="composerMenu" hidden>
-    <button type="button" class="cm-item" id="photoBtn"><span class="cm-ico">📷</span>Take a photo</button>
-    <button type="button" class="cm-item" id="galleryBtn"><span class="cm-ico">🖼️</span>Choose a photo</button>
-    <button type="button" class="cm-item" id="manualToggle" aria-expanded="false" aria-controls="manualBlock"><span class="cm-ico">🔍</span>Search USDA manually</button>
+    <button type="button" class="cm-item" id="photoBtn"><span class="cm-ico" data-ui-icon="camera"></span>Take a photo</button>
+    <button type="button" class="cm-item" id="galleryBtn"><span class="cm-ico" data-ui-icon="image"></span>Choose a photo</button>
+    <button type="button" class="cm-item" id="manualToggle" aria-expanded="false" aria-controls="manualBlock"><span class="cm-ico" data-ui-icon="search"></span>Search USDA manually</button>
   </div>
   <div id="photoChip" class="photo-chip" hidden>
     <img id="photoThumb" alt="">
     <span id="photoName" class="grow"></span>
-    <button type="button" class="icon-btn" id="photoClear" aria-label="Remove photo">✕</button>
+    <button type="button" class="icon-btn" id="photoClear" aria-label="Remove photo"><span data-ui-icon="close"></span></button>
   </div>
   <div class="composer-bar">
     <label for="nlInput" class="sr-only">Describe a meal</label>
     <textarea id="nlInput" rows="1" placeholder="Describe a meal…"></textarea>
-    <button type="button" id="parseBtn" class="composer-send" title="Parse meal (Enter)" aria-label="Parse meal">↵</button>
+    <button type="button" id="parseBtn" class="composer-send" title="Parse meal (Enter)" aria-label="Parse meal"><span data-ui-icon="send"></span></button>
     <button type="button" id="composerMore" class="composer-more" aria-expanded="false"
-            aria-controls="composerMenu" aria-label="More ways to log" title="Photo, gallery, USDA search">⌃</button>
+            aria-controls="composerMenu" aria-label="More ways to log" title="Photo, gallery, USDA search"><span data-ui-icon="more"></span></button>
   </div>
   <!-- What the AI came back with. It grows downward from the bar, so the bar
        rises and the items you now have to check land under your thumb — no
@@ -749,6 +746,7 @@
 </div>
 
 <script src="core.js"></script>
+<script src="js/icons.js"></script>
 <script src="js/state.js"></script>
 <script src="js/compute.js"></script>
 <script src="js/ui.js"></script>

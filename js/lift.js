@@ -456,15 +456,17 @@ function renderLiftSession(all, W){
     if (i === liftEditIdx) return renderLiftExEditor(ex, i);
     const m = LedgerCore.sessionMetrics(ex.sets, {bodyweightKg: bwKg, rir: ex.rir});
     const warmN = (ex.sets||[]).filter(s=>s.warmup).length;
-    return `<div class="lift-ex">
-      <div class="lift-ex-head">
-        <span class="lift-ex-name">${escapeHtml(ex.name)}</span>
-        <span class="lift-ex-btns">
-          <button type="button" class="lift-edit" data-le="${i}" aria-label="Edit ${escapeAttr(ex.name)}" title="Edit">✎</button>
-          <button type="button" class="lift-del" data-lx="${i}" aria-label="Remove ${escapeAttr(ex.name)} from this session" title="Remove">✕</button>
-        </span>
-      </div>
-      <div class="lift-sets">${(ex.sets||[]).map((s,si)=>
+    return `<details class="lift-ex session-exercise">
+      <summary class="lift-ex-head">
+        <span class="lift-ex-name">${escapeHtml(ex.name)}<small>${m.sets} set${m.sets===1?'':'s'} · ${Math.round(m.volume).toLocaleString()} kg</small></span>
+        <span class="lift-ex-progress">${m.bestE1RM ? `${m.bestE1RM.toFixed(1)} <small>e1RM</small>` : `${(ex.sets||[]).length} <small>sets</small>`}</span>
+      </summary>
+      <div class="lift-ex-body">
+        <div class="lift-ex-btns">
+          <button type="button" class="lift-edit" data-le="${i}" aria-label="Edit ${escapeAttr(ex.name)}" title="Edit">${uiIcon('edit', 17)}</button>
+          <button type="button" class="lift-del" data-lx="${i}" aria-label="Remove ${escapeAttr(ex.name)} from this session" title="Remove">${uiIcon('trash', 17)}</button>
+        </div>
+        <div class="lift-sets">${(ex.sets||[]).map((s,si)=>
         `<button type="button" class="set-chip${s.warmup?' warm':''}" data-set="${i}.${si}" title="Tap to toggle warm-up">${SET_TXT(s)}${s.warmup?' <span class="wu">wu</span>':''}</button>`
         ).join(' ')}</div>
       <div class="lift-sub">${m.sets} set${m.sets===1?'':'s'} · ${Math.round(m.volume).toLocaleString()} kg volume`
@@ -472,10 +474,11 @@ function renderLiftSession(all, W){
       + (warmN ? ` · ${warmN} warm-up${warmN===1?'':'s'} excluded` : '')
       + (m.incomplete ? ` · <span style="color:var(--brass)">log a weight to score this</span>` : '') + `</div>`
       + fatigueLine(ex) + `
-      <div class="lift-rir"><label for="slr${i}" title="How many more reps you had in you on your hardest set. Guess it — only the change over time is ever read, so a consistent personal bias cancels out.">Reps left in the tank on your hardest set</label>
+        <div class="lift-rir"><label for="slr${i}" title="How many more reps you had in you on your hardest set. Guess it — only the change over time is ever read, so a consistent personal bias cancels out.">Reps left in the tank on your hardest set</label>
         <input type="number" id="slr${i}" data-lr="${i}" min="0" max="10" step="1"
                value="${ex.rir==null?'':ex.rir}" placeholder="–"></div>
-    </div>`;
+      </div>
+    </details>`;
   }).join('');
   el.querySelectorAll('[data-le]').forEach(s=>{
     s.onclick = ()=>{ liftEditIdx = +s.dataset.le; renderLiftSession(allWorkouts(), weightSeries()); };
@@ -560,7 +563,7 @@ function bindLiftEditor(w){
     const msg = document.getElementById('leMsg'+i);
     const fail = t => { msg.hidden = false; msg.textContent = t; };
     if (!nameV) return fail('Give the exercise a name.');
-    if (!setsV) return fail('Enter at least one set — or use ✕ to remove the exercise.');
+    if (!setsV) return fail('Enter at least one set, or remove the exercise.');
     // Reuse the logger's grammar: one line of "name sets" parses to the same shape we store.
     const parsed = LedgerCore.parseWorkout(nameV + ' ' + setsV, exerciseCatalog());
     const p = parsed.exercises[0];
@@ -602,7 +605,7 @@ function renderLiftPicker(all){
   const todays = ids.filter(id=>seen[id].inSplit).sort(recent);
   const others = ids.filter(id=>!seen[id].inSplit).sort(recent);
   sel.hidden = false;
-  let html = '<option value="">＋ Insert an exercise name…</option>';
+  let html = '<option value="">Insert an exercise name…</option>';
   if (todays.length) html += `<optgroup label="${escapeHtml(todaySplit)} · your exercises">` + mkOpts(todays) + '</optgroup>';
   if (others.length) html += '<optgroup label="Other logged exercises">' + mkOpts(others) + '</optgroup>';
   sel.innerHTML = html;
@@ -627,7 +630,7 @@ function renderLiftChips(all){
   const d = past.filter(x => (all[x].split||'') === sp).pop();
   if (!d){ el.hidden = true; el.innerHTML=''; return; }
   el.hidden = false;
-  el.innerHTML = `<span class="chip" id="liftRepeat">↻ Repeat ${escapeHtml(all[d].split || sp)} <small>${d}</small></span>`;
+  el.innerHTML = `<span class="chip" id="liftRepeat">${uiIcon('repeat', 14)} Repeat ${escapeHtml(all[d].split || sp)} <small>${d}</small></span>`;
   document.getElementById('liftRepeat').onclick = ()=>{
     // Pre-fill last time's loads so logging is mostly confirming numbers, not typing them.
     document.getElementById('liftInput').value = (all[d].exercises||[]).map(ex=>
@@ -746,7 +749,7 @@ function renderLiftCatalog(){
         + ((c.aliases||[]).length?`<br><span class="ink-dim" style="font-size:10px">${escapeHtml(c.aliases.join(', '))}</span>`:'')
         + muscleMapHTML(meta)
         + `</td><td>${muscleSel(c, meta)}</td><td>${patSel(c, meta)}</td>`
-        + `<td><button type="button" class="lift-del" data-cd="${escapeAttr(c.id)}" aria-label="Remove ${escapeAttr(c.name)} from the catalogue" title="Remove">✕</button></td></tr>`;
+        + `<td><button type="button" class="lift-del" data-cd="${escapeAttr(c.id)}" aria-label="Remove ${escapeAttr(c.name)} from the catalogue" title="Remove">${uiIcon('trash', 16)}</button></td></tr>`;
     }).join('')
     + `</tbody></table>`;
   // Tagging writes a primary-muscle override (weight 1.0) onto the catalogue record. The seed

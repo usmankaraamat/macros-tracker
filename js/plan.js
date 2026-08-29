@@ -234,7 +234,7 @@ function renderSuppMicroList(){
   // Registry order, so the chips read top-to-bottom like the panel does.
   el.innerHTML = LedgerCore.MICRO_KEYS.filter(k=>keys.indexOf(k)>=0).map(k=>{
     const r = LedgerCore.microRef(k);
-    return `<span class="chip on" data-micdel="${k}" role="button" tabindex="0" title="Remove">${escapeHtml(r?r.name:k)} ${SUPP_MICROS[k]}${r?r.unit:''} ✕</span>`;
+    return `<span class="chip on" data-micdel="${k}" role="button" tabindex="0" title="Remove">${escapeHtml(r?r.name:k)} ${SUPP_MICROS[k]}${r?r.unit:''} ${uiIcon('close', 12)}</span>`;
   }).join(' ');
   el.querySelectorAll('[data-micdel]').forEach(c=>{
     c.onclick = ()=>{ delete SUPP_MICROS[c.dataset.micdel]; renderSuppMicroList(); };

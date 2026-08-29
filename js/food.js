@@ -27,7 +27,7 @@ function nutrientsFrom(food){ return LedgerCore.nutrientsFrom(food); }
 // estimate so keyword cousins with absurd energy density ("cooking oil" → plantain oil
 // at 100 kcal/100g) sink below the real thing.
 async function usdaSearch(query, estKcal){
-  if (!hasUSDA()) throw new Error('No USDA key — add one in ⚙ Settings.');
+  if (!hasUSDA()) throw new Error('No USDA key — add one in Settings.');
   const q = (query||'').trim();
   if (!q) return [];
   const pin = LedgerCore.foodPin(q);
@@ -85,7 +85,7 @@ async function usdaFetchRanked(apiQuery, rankQuery, estKcal){
 // Model names available to a key vary by account/region, so we can list them and
 // auto-pick a working one rather than hardcoding a name that may be rejected.
 async function listGeminiModels(){
-  if (!hasGemini()) throw new Error('No Gemini key — add one in ⚙ Settings.');
+  if (!hasGemini()) throw new Error('No Gemini key — add one in Settings.');
   const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key='
     + encodeURIComponent(getKey(LS.gem)));
   if (!r.ok) throw new Error('Model list failed: Gemini API ' + r.status);
@@ -164,7 +164,7 @@ let AI_VIA = '';                               // which provider/model handled t
 // replacement model once if the configured one has gone), OpenRouter as the fallback.
 // Returns raw text; every caller does its own parsing and its own validation.
 async function aiComplete(prompt, imageB64){
-  if (!hasAI()) throw new Error('No AI key — add a Gemini or OpenRouter key in ⚙ Settings.');
+  if (!hasAI()) throw new Error('No AI key — add a Gemini or OpenRouter key in Settings.');
   let txt = '', gemErr = null;
   if (hasGemini()){
     try {
@@ -195,7 +195,7 @@ async function aiComplete(prompt, imageB64){
   return txt;
 }
 async function aiParse(text, imageB64){
-  if (!hasAI()) throw new Error('No AI key — add a Gemini or OpenRouter key in ⚙ Settings.');
+  if (!hasAI()) throw new Error('No AI key — add a Gemini or OpenRouter key in Settings.');
   const photoClause = imageB64
     ? `A photo of the meal is attached. Identify every food visible in it and estimate each portion's grams from visual cues (plate size, utensils, typical serving volumes). The text below adds context or corrections — when it states an amount or names a food, the text wins over your visual guess. If the text is empty, work from the photo alone.\n`
     : '';
@@ -249,7 +249,7 @@ function suppMicroTable(){
   return LedgerCore.MICRO_REF.map(m => `"${m.key}" = ${m.name} (${m.unit})`).join(', ');
 }
 async function aiParseSupplement(text, imageB64){
-  if (!hasAI()) throw new Error('No AI key — add a Gemini or OpenRouter key in ⚙ Settings.');
+  if (!hasAI()) throw new Error('No AI key — add a Gemini or OpenRouter key in Settings.');
   const photoClause = imageB64
     ? `A photo of the supplement label / Supplement Facts panel is attached. Read the nutrients and amounts from it. The text below adds context or corrections and wins over the image where they disagree.\n`
     : '';
