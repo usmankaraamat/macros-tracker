@@ -1955,32 +1955,18 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
 }
 .meal-kcal strong { color:var(--chalk); font-size:18px; font-weight:720; line-height:1; letter-spacing:-.035em; }
 .meal-kcal small { margin-top:4px; color:var(--faint); font-size:8px; font-weight:700; letter-spacing:.13em; text-transform:uppercase; }
-.meal-foot { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:stretch; gap:8px; margin-top:11px; }
+.meal-foot { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; margin-top:11px; }
 .meal-macros {
-  display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:5px 10px;
   min-width:0;
-  overflow:hidden;
-  background:rgba(8,12,11,.54);
-  border:1px solid var(--rule);
-  border-radius:11px;
+  padding:2px 1px;
+  background:transparent;
+  border:0;
+  border-radius:0;
 }
-.meal-macro {
-  position:relative;
-  display:grid;
-  align-content:center;
-  min-width:0;
-  min-height:42px;
-  padding:6px 9px 6px 11px;
-}
-.meal-macro + .meal-macro { border-left:1px solid var(--rule); }
-.meal-macro::before { content:''; position:absolute; left:0; top:9px; bottom:9px; width:2px; border-radius:2px; opacity:.9; }
-.meal-macro.protein::before { background:var(--m-protein); }
-.meal-macro.carbs::before { background:var(--m-carbs); }
-.meal-macro.fat::before { background:var(--m-fat); }
-.meal-macro small { color:var(--faint); font-size:8px; font-weight:700; line-height:1; letter-spacing:.045em; text-transform:uppercase; }
-.meal-macro b { margin-top:4px; color:var(--chalk); font-family:var(--data); font-size:12px; font-weight:680; line-height:1; font-variant-numeric:tabular-nums; }
-.meal-macro b em { margin-left:1px; color:var(--faint); font-size:8px; font-style:normal; font-weight:600; }
 .meal-actions { display:grid; grid-template-columns:repeat(2,34px); align-content:center; flex:0 0 auto; gap:4px; }
 .meal-actions button {
   display:grid;
@@ -2031,18 +2017,17 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
 .component-name { grid-area:name; min-width:0; color:var(--graphite); font-size:11.5px; font-weight:620; line-height:1.35; overflow-wrap:anywhere; }
 .component-name small { display:block; margin-top:3px; color:var(--faint); font-size:9px; font-weight:500; }
 .component-macros { grid-area:macros; display:flex; flex-wrap:wrap; gap:5px 10px; color:var(--graphite); font-family:var(--data); font-size:9px; font-variant-numeric:tabular-nums; }
-.component-macros span { white-space:nowrap; }
-.component-macros small { margin-right:3px; font-size:7.5px; font-weight:800; text-transform:uppercase; }
-.component-macros .protein small { color:var(--m-protein); }
-.component-macros .carbs small { color:var(--m-carbs); }
-.component-macros .fat small { color:var(--m-fat); }
+.meal-macros span, .component-macros span { white-space:nowrap; }
+.meal-macros small, .component-macros small { margin-right:3px; font-size:7.5px; font-weight:800; text-transform:uppercase; }
+.meal-macros .protein small, .component-macros .protein small { color:var(--m-protein); }
+.meal-macros .carbs small, .component-macros .carbs small { color:var(--m-carbs); }
+.meal-macros .fat small, .component-macros .fat small { color:var(--m-fat); }
 .meal-component .meal-actions { grid-area:actions; }
 .meal-component .meal-actions button { width:32px; min-height:36px; }
 @media (max-width:380px) {
   .meal-ledger-panel { padding:13px; }
   .meal-entry { padding:11px; }
-  .meal-macro { padding-left:8px; padding-right:6px; }
-  .meal-macro small { font-size:7px; }
+  .meal-macros { gap:4px 7px; }
   .meal-actions { grid-template-columns:30px 30px; }
   .meal-actions button { width:30px; }
 }

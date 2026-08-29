@@ -307,11 +307,11 @@ function renderLedgerTable(){
     <button type="button" class="edit" data-edit="${i}" aria-label="Edit grams for ${escapeAttr(e.name)}" title="Edit grams">${uiIcon('edit', 17)}</button>
     <button type="button" class="del" data-del="${i}" aria-label="Remove ${escapeAttr(e.name)}" title="Remove">${uiIcon('trash', 17)}</button>
   </div>`;
-  const macrosFor = e => `<div class="meal-macros" aria-label="Macronutrients">
-    <span class="meal-macro protein"><small>Protein</small><b>${e.p.toFixed(1)}<em>g</em></b></span>
-    <span class="meal-macro carbs"><small>Carbs</small><b>${(e.c||0).toFixed(1)}<em>g</em></b></span>
-    <span class="meal-macro fat"><small>Fat</small><b>${e.f.toFixed(1)}<em>g</em></b></span>
-  </div>`;
+  const macroText=e=>`
+    <span class="protein"><small>Protein</small>${e.p.toFixed(1)}g</span>
+    <span class="carbs"><small>Carbs</small>${(e.c||0).toFixed(1)}g</span>
+    <span class="fat"><small>Fat</small>${e.f.toFixed(1)}g</span>`;
+  const macrosFor = e => `<span class="meal-macros" aria-label="Macronutrients">${macroText(e)}</span>`;
   const timeFor = e => {
     const at=e.eatenAt||e.at||e.loggedAt; if(!at)return '';
     const d=new Date(at); if(isNaN(d.getTime()))return '';
@@ -319,11 +319,7 @@ function renderLedgerTable(){
   };
   const metaFor=e=>`<span class="meal-meta"><span>${Math.round(e.grams)} g</span>${timeFor(e)?`<span>${escapeHtml(timeFor(e))}</span>`:''}</span>`;
   const energyFor=e=>`<span class="meal-kcal"><strong>${Math.round(e.kcal)}</strong><small>kcal</small></span>`;
-  const componentMacros=e=>`<span class="component-macros">
-    <span class="protein"><small>Protein</small>${e.p.toFixed(1)}g</span>
-    <span class="carbs"><small>Carbs</small>${(e.c||0).toFixed(1)}g</span>
-    <span class="fat"><small>Fat</small>${e.f.toFixed(1)}g</span>
-  </span>`;
+  const componentMacros=e=>`<span class="component-macros">${macroText(e)}</span>`;
   const row = (e,i)=>{
     const badge = (e.source && e.source !== 'DB')
       ? `<span class="badge ${e.source === 'USDA' ? 'usda' : 'est'}">${escapeHtml(e.source)}</span>` : '';
