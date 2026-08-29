@@ -1890,7 +1890,10 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
 .read-item .grow { flex: 1; min-width: 0; }
 
 /* Full-row meal disclosures replace the five-column phone table. */
-.meal-ledger { display: grid; }
+/* minmax(0,1fr), not the implicit `auto`: an auto column sizes to its widest content,
+   and a nowrap kcal figure beside a long food name then pushes the whole ledger past
+   the viewport (measured 522px inside a 405px screen). */
+.meal-ledger { display: grid; grid-template-columns: minmax(0, 1fr); }
 .meal-entry {
   border-top: 1px solid var(--rule);
   transition: background .16s ease, border-color .16s ease;

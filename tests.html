@@ -1689,6 +1689,53 @@ group('siteProgress — pooled confidence cannot exceed its parts');
   check('one muscle keeps its own tier', one.strengthConfidence==='high', one.strengthConfidence);
 })();
 
+
+// ---- swUpdateAction: when is it safe to take a new build? ----
+group('swUpdateAction — service-worker update policy');
+(function(){
+  const A = (o) => C.swUpdateAction(Object.assign({hadController:true}, o));
+  // The first-ever install controls nothing, so there is no old page to replace.
+  check('first install does nothing', C.swUpdateAction({hadController:false, trigger:'activated', visible:true})==='none');
+  check('and does nothing on reopen either', C.swUpdateAction({hadController:false, trigger:'reopened', visible:true, pending:true})==='none');
+
+  // A worker activating while you are looking at the app must never yank the page away.
+  check('activated while visible only offers', A({trigger:'activated', visible:true})==='offer');
+  check('offering twice is suppressed', A({trigger:'activated', visible:true, offered:true})==='none');
+  // Activating while backgrounded is the case the whole change exists for.
+  check('activated while hidden waits', A({trigger:'activated', visible:false})==='wait');
+  check('a hidden activation never reloads behind your back', A({trigger:'activated', visible:false})!=='reload');
+
+  // Reopening an idle app is the one moment a swap costs nothing.
+  check('reopening with an update pending reloads', A({trigger:'reopened', visible:true, pending:true})==='reload');
+  check('reopening with nothing pending just polls', A({trigger:'reopened', visible:true})==='check');
+  // A reload discards whatever is only in the DOM, so work in progress blocks it outright.
+  check('work in progress downgrades to an offer',
+        A({trigger:'reopened', visible:true, pending:true, busy:true})==='offer');
+  check('and never reloads', A({trigger:'reopened', visible:true, pending:true, busy:true})!=='reload');
+  check('busy plus already-offered stays quiet',
+        A({trigger:'reopened', visible:true, pending:true, busy:true, offered:true})==='none');
+  // A previously-ignored toast still gets applied on the next clean reopen.
+  check('an ignored toast is applied on the next idle reopen',
+        A({trigger:'reopened', visible:true, pending:true, offered:true})==='reload');
+
+  // Guards that prevent a reload loop or a reload nobody can see.
+  check('once reloading, everything is inert',
+        A({trigger:'reopened', visible:true, pending:true, reloading:true})==='none'
+        && A({trigger:'activated', visible:true, reloading:true})==='none');
+  check('a reopen event while still hidden does nothing',
+        A({trigger:'reopened', visible:false, pending:true})==='none');
+  check('missing options never throw', C.swUpdateAction()==='none' && C.swUpdateAction({})==='none');
+  // Only these five verbs are ever returned — the caller switches on them exhaustively.
+  const verbs = ['none','offer','wait','reload','check'];
+  let ok = true;
+  [true,false].forEach(v => [true,false].forEach(p => [true,false].forEach(b => [true,false].forEach(o => {
+    ['activated','reopened'].forEach(tr => {
+      if (verbs.indexOf(A({trigger:tr, visible:v, pending:p, busy:b, offered:o})) < 0) ok = false;
+    });
+  }))));
+  check('every input combination returns a known verb', ok);
+})();
+
 // ---- summary ----
 const sum = document.getElementById('summary');
 sum.className = failed === 0 ? 'allpass' : 'anyfail';

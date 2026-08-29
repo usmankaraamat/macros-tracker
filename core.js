@@ -2067,6 +2067,36 @@
     return { deload: med <= 1 - drop, ratio: +med.toFixed(3), n: ratios.length };
   }
 
+  // ---- Service-worker update policy ------------------------------------------
+  // When a new worker takes control, the page in front of the user is still running the
+  // OLD script and stylesheet — only a reload swaps it. Deciding WHEN to reload is a
+  // policy with real consequences (a reload discards anything typed but not committed),
+  // so it lives here as a pure function rather than as branches tangled into a listener.
+  //
+  //   trigger 'activated' — a new worker just claimed the page.
+  //   trigger 'reopened'  — the app became visible again.
+  //
+  //   'reload' — take the update now; nothing is in flight.
+  //   'offer'  — show the toast and let the user pick the moment.
+  //   'wait'   — a new worker is ready but the app is not on screen; act on return.
+  //   'check'  — nothing pending; poll the server for a new worker.
+  //   'none'   — do nothing.
+  //
+  // The rule that matters: never reload while the app is being looked at (that yanks the
+  // page away mid-thought) and never reload while work is in progress (that destroys it).
+  // Reopening an idle app is the one moment where a swap costs the user nothing.
+  function swUpdateAction(o) {
+    o = o || {};
+    if (!o.hadController || o.reloading) return 'none';   // first install controls nothing yet
+    if (o.trigger === 'activated')
+      return !o.visible ? 'wait' : (o.offered ? 'none' : 'offer');
+    // 'reopened'
+    if (!o.pending) return 'check';
+    if (!o.visible) return 'none';
+    if (o.busy) return o.offered ? 'none' : 'offer';
+    return 'reload';
+  }
+
   // ---- Sync merge: last-write-wins per DAY ----------------------------------
   // A sync state is {days:{'YYYY-MM-DD':[entries]}, meta:{'YYYY-MM-DD':isoStamp}}.
   // Per-day (not per-blob) LWW makes "phone logs lunch, PC logs dinner on another
@@ -2187,6 +2217,6 @@
     LIFT_REP_CAP, LIFT_MIN_SESSIONS, LIFT_FLAT_PCT, LIFT_RIR_DRIFT, LIFT_WINDOW_DAYS,
     LIFT_SE_HIGH, LIFT_SE_MED,
     liftWindowOpen, hhmmMinutes, isTrainingSplit, LIFT_OPEN_LEAD_MIN, LIFT_OPEN_TAIL_MIN,
-    KCAL_PER_KG_FAT, mergeSyncStates, ternary
+    KCAL_PER_KG_FAT, mergeSyncStates, ternary, swUpdateAction
   };
 });

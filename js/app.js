@@ -815,14 +815,45 @@ document.getElementById('importFile').onchange = (ev)=>{
 // offer a one-tap reload so the fresh shell actually loads.
 if ('serviceWorker' in navigator) {
   const hadController = !!navigator.serviceWorker.controller;
-  let offered = false;
-  const showToast = ()=>{
-    if (!hadController || offered) return;
+  let updateReady = false, offered = false, reloading = false;
+
+  // A reload throws away whatever is only in the DOM, so it is safe ONLY when there is
+  // nothing half-entered to lose: no draft in the composer, no parsed items still under
+  // review, no open sheet, no focused field holding text. When any of those are true the
+  // update waits and asks instead.
+  const workInProgress = ()=>{
+    const nl = document.getElementById('nlInput');
+    if (nl && nl.value.trim()) return true;
+    const pend = document.getElementById('pending');
+    if (pend && pend.children.length) return true;
+    if (document.querySelector('.sheet, .sheet-backdrop')) return true;
+    const a = document.activeElement;
+    if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && String(a.value || '').trim()) return true;
+    return false;
+  };
+
+  const offerReload = ()=>{
+    if (offered || reloading) return;
     offered = true;
     toast('A new version is ready.', { undoLabel:'Reload', ms: 20000, undo: ()=> location.reload() });
   };
-  // controllerchange fires when the fresh SW (skipWaiting + clients.claim) takes over.
-  navigator.serviceWorker.addEventListener('controllerchange', showToast);
+
+  // The policy is LedgerCore.swUpdateAction; this only carries it out. Reopening the app
+  // is the one moment a swap costs nothing — without it the new worker controls the page
+  // while the old JS and CSS stay on screen until someone catches a 20-second toast,
+  // which is how a shipped deploy can sit invisible on a phone for days.
+  const apply = trigger => {
+    const act = LedgerCore.swUpdateAction({
+      trigger: trigger, hadController: hadController, reloading: reloading,
+      visible: document.visibilityState === 'visible',
+      pending: updateReady, offered: offered, busy: workInProgress() });
+    if (act === 'wait')   { updateReady = true; return; }
+    if (act === 'offer')  { updateReady = true; offerReload(); return; }
+    if (act === 'reload') { reloading = true; location.reload(); return; }
+    if (act === 'check')  navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(()=>{});
+  };
+
+  navigator.serviceWorker.addEventListener('controllerchange', ()=> apply('activated'));
   window.addEventListener('load', ()=>{
     // updateViaCache:'none' forces the browser to re-fetch sw.js bypassing the HTTP cache,
     // so a new version is detected even while GitHub Pages still serves a cached script.
@@ -830,14 +861,14 @@ if ('serviceWorker' in navigator) {
       reg.update();                                    // check for a new SW right away
       reg.addEventListener('updatefound', ()=>{        // and when one starts installing
         const nw = reg.installing; if (!nw) return;
-        nw.addEventListener('statechange', ()=>{ if (nw.state==='activated') showToast(); });
+        nw.addEventListener('statechange', ()=>{ if (nw.state==='activated') apply('activated'); });
       });
     }).catch(err => console.warn('SW registration failed:', err));
   });
-  // Re-check whenever the app is reopened or refocused — catches updates without a manual reload.
+  // Re-check whenever the app is reopened or refocused — catches updates without a manual
+  // reload. An update that landed while the app was backgrounded is applied here.
   document.addEventListener('visibilitychange', ()=>{
-    if (document.visibilityState==='visible')
-      navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(()=>{});
+    if (document.visibilityState === 'visible') apply('reopened');
   });
 }
 
