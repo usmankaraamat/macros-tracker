@@ -1,7 +1,7 @@
 // storage.js -- schema migration, stable record identity, and an IndexedDB durability
 // mirror. localStorage remains the synchronous working set; IndexedDB is a second copy
 // that can restore missing records after partial eviction without changing app semantics.
-const DATA_SCHEMA_VERSION = 3;
+const DATA_SCHEMA_VERSION = 4;
 const DATA_SCHEMA_KEY = 'ledger_schema_version';
 const TOMBSTONE_KEY = 'ledger_entry_tombstones';
 const CLEAR_KEY = 'ledger_day_clears';
@@ -44,7 +44,7 @@ function ensureWorkoutMeta(w,date){
       s.updatedAt=s.updatedAt||s.loggedAt||ex.updatedAt;
     });
   });
-  return w;
+  return LedgerCore.normalizeWorkoutDay(w);
 }
 function entryTombstones(){try{return JSON.parse(localStorage.getItem(TOMBSTONE_KEY)||'{}');}catch(e){return {};}}
 function dayClears(){try{return JSON.parse(localStorage.getItem(CLEAR_KEY)||'{}');}catch(e){return {};}}

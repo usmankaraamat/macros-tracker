@@ -1770,6 +1770,26 @@ group('new durability and zero-friction insights');
         wd={date,exercises:[{_id:'sameEx',id:'squat',updatedAt:'t2',sets:[{_id:'rightSet',kg:102,reps:5,updatedAt:'t2'}]}]};
   const setMerge=C.mergeWorkoutStates({days:{[date]:wc},meta:{[date]:'t1'}},{days:{[date]:wd},meta:{[date]:'t2'}});
   check('concurrent sets on one exercise both survive', setMerge.days[date].exercises[0].sets.length===2, JSON.stringify(setMerge.days[date]));
+  const copiedA={date,exercises:[{_id:'legacyA',id:'row',name:'Row',updatedAt:'t1',sets:[
+    {_id:'a1',kg:70,reps:10,updatedAt:'t1'},{_id:'a2',kg:70,reps:10,updatedAt:'t1'}]}]},
+        copiedB={date,exercises:[{_id:'legacyB',id:'row',name:'Row',updatedAt:'t2',sets:[
+    {_id:'b1',kg:70,reps:10,updatedAt:'t2'},{_id:'b2',kg:70,reps:10,updatedAt:'t2'}]}]};
+  const copyMerge=C.mergeWorkoutStates({days:{[date]:copiedA},meta:{[date]:'t1'}},{days:{[date]:copiedB},meta:{[date]:'t2'}});
+  check('same logical exercise with legacy ids collapses to one row', copyMerge.days[date].exercises.length===1, JSON.stringify(copyMerge.days[date]));
+  check('copied identical sets are not doubled', copyMerge.days[date].exercises[0].sets.length===2, JSON.stringify(copyMerge.days[date]));
+  const partial=C.normalizeWorkoutDay({date,exercises:[
+    {_id:'old1',id:'curl',sets:[{_id:'o1',kg:20,reps:10},{_id:'o2',kg:20,reps:10}]},
+    {_id:'old2',id:'curl',sets:[{_id:'n1',kg:20,reps:10},{_id:'n2',kg:20,reps:10},{_id:'n3',kg:20,reps:8}]}
+  ]});
+  check('migration keeps the larger repeated-set count plus different work', partial.exercises.length===1&&partial.exercises[0].sets.length===3, JSON.stringify(partial));
+  const pyramid=C.normalizeWorkoutDay({date,exercises:[
+    {_id:'pyramidOld',id:'press',updatedAt:'t1',sets:[
+      {_id:'pa',kg:100,reps:5},{_id:'pb',kg:110,reps:3},{_id:'pc',kg:100,reps:5}]},
+    {_id:'pyramidNew',id:'press',updatedAt:'t2',sets:[
+      {_id:'qa',kg:100,reps:5},{_id:'qb',kg:110,reps:3},{_id:'qc',kg:100,reps:5}]}
+  ]});
+  check('duplicate cleanup preserves pyramid set order',
+    pyramid.exercises[0].sets.map(s=>s.kg+'x'+s.reps).join(',')==='100x5,110x3,100x5', JSON.stringify(pyramid));
 
   const sessions=[];
   ['2026-07-01','2026-07-08','2026-07-15','2026-07-22'].forEach((d,i)=>sessions.push({date:d,exercises:[

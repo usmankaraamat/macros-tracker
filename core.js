@@ -2269,6 +2269,47 @@
     return {days,meta,tombstones,clears};
   }
 
+  const workoutExerciseKey = ex => {
+    const id=String((ex&&(ex.id||ex.name))||'').trim().toLowerCase();
+    const equipment=String((ex&&ex.equipment)||'').trim().toLowerCase();
+    return id+(equipment?'@'+equipment:'');
+  };
+  const workoutSetShape = s => JSON.stringify({
+    kg:+(s&&s.kg)||0,reps:+(s&&s.reps)||0,bw:!!(s&&s.bw),
+    added:+(s&&s.added)||0,warmup:!!(s&&s.warmup)
+  });
+  // Merge set records by stable id first. When two legacy exercise copies have different
+  // ids, their sets also have different ids; cap each identical set shape at the larger
+  // multiplicity on either side. That collapses a copied 3-set block to 3 sets while still
+  // preserving genuine repeated sets and any extra/different work logged on one device.
+  function mergeWorkoutSets(xs,ys,tm,preferY) {
+    const a=(xs||[]).map((s,i)=>({s,id:s&&s._id||`anon:a:${i}:${workoutSetShape(s)}`}));
+    const b=(ys||[]).map((s,i)=>({s,id:s&&s._id||`anon:b:${i}:${workoutSetShape(s)}`}));
+    const by={};
+    a.concat(b).forEach(x=>{
+      if(!x.s)return;const old=by[x.id];
+      if(!old||recordStamp(x.s)>recordStamp(old.s))by[x.id]=x;
+    });
+    const live=x=>x&&x.s&&!(x.s._id&&tm[x.s._id]&&tm[x.s._id]>=recordStamp(x.s));
+    const count=arr=>{const out={};arr.forEach(x=>{
+      if(!live(x))return;const winner=by[x.id];
+      // An edited stable-id set only counts in its winning shape.
+      if(winner&&winner.s!==x.s)return;
+      const k=workoutSetShape(x.s);out[k]=(out[k]||0)+1;
+    });return out;};
+    const ca=count(a),cb=count(b),target={};
+    Object.keys(Object.assign({},ca,cb)).forEach(k=>target[k]=Math.max(ca[k]||0,cb[k]||0));
+    const order=(preferY?b.concat(a):a.concat(b)).concat(Object.keys(by).map(id=>by[id]));
+    const used={},emitted={},out=[];
+    order.forEach(x=>{
+      const winner=by[x.id];if(!live(winner)||used[x.id])return;
+      const k=workoutSetShape(winner.s);
+      if((emitted[k]||0)>=(target[k]||0))return;
+      used[x.id]=true;emitted[k]=(emitted[k]||0)+1;out.push(winner.s);
+    });
+    return out;
+  }
+
   function mergeWorkoutDay(a,b,aStamp,bStamp) {
     if(!a)return b; if(!b)return a;
     const newer=bStamp>aStamp?b:a, older=newer===a?b:a;
@@ -2276,29 +2317,32 @@
     Object.keys(older._tombstones||{}).forEach(id=>{
       if(String(older._tombstones[id])>String(tm[id]||''))tm[id]=older._tombstones[id];
     });
-    const mergeList=(xs,ys)=>{
-      const by={};
-      [].concat(xs||[],ys||[]).forEach(x=>{
-        if(!x)return; const id=x._id||x.id;
-        if(!id)return;
-        const old=by[id]; if(!old||recordStamp(x)>recordStamp(old))by[id]=x;
-      });
-      return Object.keys(by).filter(id=>!(tm[id]&&tm[id]>=recordStamp(by[id]))).map(id=>by[id]);
-    };
     const exBy={};
     [].concat(a.exercises||[],b.exercises||[]).forEach(ex=>{
-      if(!ex)return; const id=ex._id||ex.id;
-      const old=exBy[id];
-      if(!old)exBy[id]=Object.assign({},ex,{sets:(ex.sets||[]).slice()});
+      if(!ex)return;
+      const recordId=ex._id||ex.id;
+      if(recordId&&tm[recordId]&&tm[recordId]>=recordStamp(ex))return;
+      const key=workoutExerciseKey(ex)||String(recordId||'');
+      const old=exBy[key];
+      if(!old)exBy[key]=Object.assign({},ex,{sets:mergeWorkoutSets(ex.sets,[],tm,false)});
       else {
-        const win=recordStamp(ex)>recordStamp(old)?ex:old;
-        exBy[id]=Object.assign({},old,ex,win,{sets:mergeList(old.sets,ex.sets)});
+        const es=recordStamp(ex),os=recordStamp(old);
+        const win=es>os?ex:es<os?old:String(ex._id||'')<String(old._id||'')?ex:old;
+        exBy[key]=Object.assign({},old,ex,win,{sets:mergeWorkoutSets(old.sets,ex.sets,tm,win===ex)});
       }
     });
-    out.exercises=Object.keys(exBy).filter(id=>!(tm[id]&&tm[id]>=recordStamp(exBy[id])))
-      .map(id=>exBy[id]);
+    out.exercises=Object.keys(exBy).map(id=>exBy[id]);
     out._tombstones=tm;
     return out;
+  }
+
+  // Repair one stored session using the same semantic merge as sync. This is deliberately
+  // idempotent and runs during migration, so sessions already doubled by an older client are
+  // fixed locally and the cleaned shape is what the next sync uploads.
+  function normalizeWorkoutDay(w) {
+    if(!w||typeof w!=='object')return w;
+    const empty={date:w.date,exercises:[],_tombstones:w._tombstones||{}};
+    return mergeWorkoutDay(w,empty,w.updatedAt||'',w.updatedAt||'');
   }
 
   function mergeWorkoutStates(local,remote){
@@ -2430,6 +2474,6 @@
     LIFT_REP_CAP, LIFT_MIN_SESSIONS, LIFT_FLAT_PCT, LIFT_RIR_DRIFT, LIFT_WINDOW_DAYS,
     LIFT_SE_HIGH, LIFT_SE_MED,
     liftWindowOpen, hhmmMinutes, isTrainingSplit, LIFT_OPEN_LEAD_MIN, LIFT_OPEN_TAIL_MIN,
-    KCAL_PER_KG_FAT, mergeSyncStates, mergeRecordStates, mergeWorkoutStates, ternary, swUpdateAction
+    KCAL_PER_KG_FAT, mergeSyncStates, mergeRecordStates, mergeWorkoutStates, normalizeWorkoutDay, ternary, swUpdateAction
   };
 });
