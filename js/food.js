@@ -236,7 +236,7 @@ Meal: """${text}"""`;
       || (/\bwater\b/.test(n) && (!estK || estK < 5));   // "rose water" etc. with ~0 kcal
     return !zeroLiquid;
   });
-  return cleaned.length ? cleaned : items;
+  return LedgerCore.normalizeDishComponents(cleaned.length ? cleaned : items);
 }
 
 // ---- Supplement label parse: photo or text → per-dose elemental micronutrients ----

@@ -1,7 +1,7 @@
 // storage.js -- schema migration, stable record identity, and an IndexedDB durability
 // mirror. localStorage remains the synchronous working set; IndexedDB is a second copy
 // that can restore missing records after partial eviction without changing app semantics.
-const DATA_SCHEMA_VERSION = 4;
+const DATA_SCHEMA_VERSION = 5;
 const DATA_SCHEMA_KEY = 'ledger_schema_version';
 const TOMBSTONE_KEY = 'ledger_entry_tombstones';
 const CLEAR_KEY = 'ledger_day_clears';
@@ -29,7 +29,35 @@ function ensureEntryMeta(e,date,index){
   return e;
 }
 function ensureLedgerDay(list,date){
-  return Array.isArray(list)?list.map((e,i)=>ensureEntryMeta(e,date,i)):[];
+  const out=Array.isArray(list)?list.map((e,i)=>ensureEntryMeta(e,date,i)):[];
+  // One parser commit stamps every component within milliseconds. That natural batch
+  // boundary lets us repair old split dishes and assign a stable id to each serving,
+  // without merging two servings of the same dish logged later in the day.
+  let start=0;
+  while(start<out.length){
+    const firstAt=Date.parse(out[start]&&(out[start].loggedAt||out[start].at||out[start].eatenAt)||'');
+    let end=start+1,prevAt=firstAt;
+    if(Number.isFinite(firstAt))while(end<out.length){
+      const at=Date.parse(out[end]&&(out[end].loggedAt||out[end].at||out[end].eatenAt)||'');
+      if(!Number.isFinite(at)||Math.abs(at-prevAt)>10000)break;
+      prevAt=at;end++;
+    } else {
+      const dish=String(out[start]&&out[start].partOf||'').trim().toLowerCase();
+      while(dish&&end<out.length&&!Date.parse(out[end]&&(out[end].loggedAt||out[end].at||out[end].eatenAt)||'')&&
+        String(out[end]&&out[end].partOf||'').trim().toLowerCase()===dish)end++;
+    }
+    const fixed=LedgerCore.normalizeDishComponents(out.slice(start,end));
+    fixed.forEach((e,j)=>out[start+j]=e);
+    const ids={};
+    fixed.forEach(e=>{const d=String(e&&e.partOf||'').trim().toLowerCase();if(d&&e.dishId&&!ids[d])ids[d]=e.dishId;});
+    fixed.forEach((e,j)=>{
+      const d=String(e&&e.partOf||'').trim().toLowerCase();if(!d)return;
+      ids[d]=ids[d]||`dish_${hashId(`${date}|${Number.isFinite(firstAt)?new Date(firstAt).toISOString():start}|${d}`)}`;
+      if(!e.dishId)e.dishId=ids[d];out[start+j]=e;
+    });
+    start=end;
+  }
+  return out;
 }
 function ensureWorkoutMeta(w,date){
   if(!w||typeof w!=='object')w={date,exercises:[]};

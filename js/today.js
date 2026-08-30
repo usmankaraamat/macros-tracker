@@ -294,7 +294,10 @@ function renderLedgerTable(){
   const body = document.getElementById('ledgerBody');
   const title=document.getElementById('ledgerTitle'), count=document.getElementById('ledgerCount');
   if(title)title.textContent=VIEW_DATE===ACTIVE_DATE?"Today's entries":`${prettyDate(VIEW_DATE)} entries`;
-  if(count)count.textContent=ledger.length?`${ledger.length} item${ledger.length===1?'':'s'}`:'No items yet';
+  if(count){
+    const units=new Set(ledger.map((e,i)=>(e.partOf&&e.dishId)?`dish:${e.dishId}`:`item:${i}`));
+    count.textContent=units.size?`${units.size} entr${units.size===1?'y':'ies'}`:'No entries yet';
+  }
   if (!ledger.length){
     body.innerHTML = emptyLedgerCell();
     wireEmptyLedgerChips();
@@ -336,13 +339,17 @@ function renderLedgerTable(){
   // A decomposed dish is one meal, so it reads as one block with its own total. The
   // components stay individually editable — the grouping is presentational, which is
   // what keeps a wrong gram estimate on the rice fixable without unpicking the biryani.
-  const html = [];
-  for (let i = 0; i < ledger.length; i++){
-    const dish = (ledger[i].partOf || '').trim();
-    if (!dish){ html.push(row(ledger[i], i)); continue; }
-    let j = i;
-    while (j < ledger.length && (ledger[j].partOf || '').trim() === dish) j++;
-    const part = ledger.slice(i, j);
+  const html = [], blocks = [], dishBlocks = {};
+  ledger.forEach((e,i)=>{
+    const dish=(e.partOf||'').trim();
+    if(!dish){blocks.push({dish:'',items:[{e,i}]});return;}
+    const key=e.dishId||`legacy:${i}:${dish.toLowerCase()}`;
+    if(dishBlocks[key]==null){dishBlocks[key]=blocks.length;blocks.push({dish,items:[]});}
+    blocks[dishBlocks[key]].items.push({e,i});
+  });
+  blocks.forEach(block=>{
+    if(!block.dish){const x=block.items[0];html.push(row(x.e,x.i));return;}
+    const part=block.items.map(x=>x.e),dish=block.dish;
     const sum = part.reduce((s,e)=>({ kcal:s.kcal+e.kcal, p:s.p+e.p, f:s.f+e.f, c:s.c+(e.c||0) }),
                             {kcal:0,p:0,f:0,c:0});
     html.push(`<section class="meal-entry dish-entry">
@@ -351,14 +358,13 @@ function renderLedgerTable(){
         ${energyFor(sum)}
       </div>
       <div class="meal-foot dish-total">${macrosFor(sum)}</div>
-        <div class="meal-components">${part.map((e,k)=>`<div class="meal-component">
+        <div class="meal-components">${block.items.map(({e,i})=>`<div class="meal-component">
           <span class="component-name">${badgeFor(e)}${escapeHtml(e.name)}<small>${Math.round(e.grams)} g · ${Math.round(e.kcal)} kcal${timeFor(e)?` · ${escapeHtml(timeFor(e))}`:''}</small></span>
           ${componentMacros(e)}
-          ${actionsFor(e, i + k)}
+          ${actionsFor(e, i)}
         </div>`).join('')}</div>
     </section>`);
-    i = j - 1;
-  }
+  });
   body.innerHTML = html.join('');
 
   // Settle only the row(s) added since the last render — a quiet "logged" confirmation.

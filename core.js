@@ -140,6 +140,27 @@
     return e;
   }
 
+  // Models occasionally describe one component as its own dish (for example the
+  // chicken inside "pulao rice" arrives with partOf:"chicken"). If the same parse
+  // also contains one clear composite dish, fold singleton self-labels into it.
+  function normalizeDishComponents(items) {
+    const out=(items||[]).map(x=>x&&typeof x==='object'?Object.assign({},x):x);
+    const norm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+    const groups={};
+    out.forEach((x,i)=>{const d=norm(x&&x.partOf);if(d)(groups[d]=groups[d]||{label:String(x.partOf).trim(),idx:[]}).idx.push(i);});
+    const keys=Object.keys(groups);if(keys.length<2)return out;
+    const self=k=>groups[k].idx.every(i=>{
+      const n=norm(out[i]&&out[i].name),dt=k.split(' ').filter(Boolean),nt=n.split(' ');
+      return n===k||(dt.length&&dt.every(t=>nt.includes(t)));
+    });
+    const nonSelf=keys.filter(k=>!self(k));
+    const repeated=nonSelf.filter(k=>groups[k].idx.length>1).sort((a,b)=>groups[b].idx.length-groups[a].idx.length);
+    const target=repeated[0]||(nonSelf.length===1?nonSelf[0]:'');
+    if(!target)return out;
+    keys.forEach(k=>{if(k!==target&&groups[k].idx.length===1&&self(k))out[groups[k].idx[0]].partOf=groups[target].label;});
+    return out;
+  }
+
   // ---- Repeat units: what "I ate this before" actually means ----------------
   // The parser decomposes a dish into ingredients, which is right for accuracy and
   // ruinous for repeats — what recurs in a ledger mined by food name is "Sugar, NFS",
@@ -2474,6 +2495,7 @@
     LIFT_REP_CAP, LIFT_MIN_SESSIONS, LIFT_FLAT_PCT, LIFT_RIR_DRIFT, LIFT_WINDOW_DAYS,
     LIFT_SE_HIGH, LIFT_SE_MED,
     liftWindowOpen, hhmmMinutes, isTrainingSplit, LIFT_OPEN_LEAD_MIN, LIFT_OPEN_TAIL_MIN,
-    KCAL_PER_KG_FAT, mergeSyncStates, mergeRecordStates, mergeWorkoutStates, normalizeWorkoutDay, ternary, swUpdateAction
+    KCAL_PER_KG_FAT, mergeSyncStates, mergeRecordStates, mergeWorkoutStates, normalizeWorkoutDay,
+    normalizeDishComponents, ternary, swUpdateAction
   };
 });

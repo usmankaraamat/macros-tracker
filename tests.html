@@ -165,6 +165,21 @@ const chk = {kcal:165, p:31, f:3.6, c:0};
 })();
 
 // ---- solveFridge ----
+group('normalizeDishComponents — one dish remains one card');
+{
+  const fixed=C.normalizeDishComponents([
+    {name:'Rice, cooked, NFS',partOf:'pulao rice'},
+    {name:'Chicken, broilers or fryers, breast, cooked',partOf:'chicken'},
+    {name:'Vegetable oil, NFS',partOf:'pulao rice'}
+  ]);
+  check('a self-labelled ingredient joins the composite dish',fixed.every(x=>x.partOf==='pulao rice'),JSON.stringify(fixed));
+  const separate=C.normalizeDishComponents([
+    {name:'rice',partOf:'chicken biryani'},{name:'chicken',partOf:'chicken biryani'},
+    {name:'yogurt',partOf:'raita'},{name:'cucumber',partOf:'raita'}
+  ]);
+  check('two real composite dishes remain separate',separate[2].partOf==='raita'&&separate[3].partOf==='raita',JSON.stringify(separate));
+}
+
 group('solveFridge — rice + chicken to floor');
 const RICE = {kcal:130, p:2.7}, CHKf = {kcal:165, p:31};
 const cfg = t => ({floor:1700, ceil:1900, pTarget:120, rice:RICE, chk:CHKf});
