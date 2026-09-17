@@ -65,7 +65,11 @@
 
 <!-- ============================== SETTINGS ============================== -->
 <div class="panel" id="settingsPanel" hidden>
-  <span class="panel-title">API keys · stored in this browser only, never uploaded</span>
+  <span class="panel-title">Hosted AI · 15 meal analyses and 40 food searches each day</span>
+  <div class="tactical" id="hostedStatus">Sign in under Sync to use the included allowance. Manual logging always works.</div>
+  <details>
+    <summary>Advanced providers · use your own keys after the hosted allowance</summary>
+    <div style="margin-top:10px">
   <div class="field">
     <label for="usdaKey">USDA FoodData Central key</label>
     <input type="password" id="usdaKey" placeholder="required for food search" autocomplete="off">
@@ -87,16 +91,19 @@
     <button type="button" class="ghost" id="loadModelsBtn">Load models</button>
     <button type="button" id="saveKeys">Save keys</button>
   </div>
-  <div class="tactical" id="keyStatus">Add your free USDA and Gemini keys to enable search and AI parsing.</div>
+  <div class="tactical" id="keyStatus">Personal keys stay saved in this browser. When needed, the matching key is sent transiently to the backend or provider; it is never synced or exported.</div>
+    </div>
+  </details>
 
-  <span class="panel-title">Sync · the same passphrase on any device is the same account</span>
+  <span class="panel-title">Sync · the same email account on every device</span>
   <div class="field">
-    <label for="syncPass">Sync passphrase</label>
-    <input type="password" id="syncPass" placeholder="any phrase you'll remember — it IS the account" autocomplete="off">
+    <label for="accountEmail">Email</label>
+    <input type="email" id="accountEmail" placeholder="you@example.com" autocomplete="email">
   </div>
   <div class="footer-actions">
     <button type="button" class="ghost" id="syncNowBtn">Sync now</button>
-    <button type="button" id="saveSync">Save sync</button>
+    <button type="button" id="signOutBtn" hidden>Sign out</button>
+    <button type="button" id="signInBtn">Email me a sign-in link</button>
   </div>
   <details>
     <summary>Use your own Supabase backend</summary>
@@ -112,7 +119,7 @@
       <div class="tactical">See SYNC_SETUP.md in the repo for the one-time project setup.</div>
     </div>
   </details>
-  <div class="tactical" id="syncStatus">Set a passphrase to sync across devices. Logs and targets sync encrypted — the server never sees readable data. API keys never sync.</div>
+  <div class="tactical" id="syncStatus">Sign in to sync logs, targets, workouts, measurements, and settings across devices. Personal API keys never sync.</div>
 
   <!-- Body profile lives here, not on Trends: it is configuration you set once,
        not a reading you check. Trends shows what it produces. -->
@@ -240,7 +247,7 @@
       <b>USDA:</b> <a href="https://fdc.nal.usda.gov/api-key-signup.html" target="_blank" rel="noopener">fdc.nal.usda.gov/api-key-signup.html</a> — instant, free.<br>
       <b>Gemini:</b> <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> — the free tier is generous.<br>
       <b>OpenRouter (optional):</b> <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a> — fallback when Gemini fails.<br>
-      Keys live in localStorage on this device. Export and sync never include them.
+      Keys are saved only in localStorage on this device. When needed, the matching key is sent transiently to the backend or provider. Export and sync never include them.
     </div>
   </details>
 </div>
@@ -759,6 +766,7 @@
 <script src="js/storage.js"></script>
 <script src="js/icons.js"></script>
 <script src="js/state.js"></script>
+<script src="js/hosted.js"></script>
 <script src="js/compute.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/food.js"></script>

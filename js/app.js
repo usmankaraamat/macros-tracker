@@ -25,7 +25,7 @@ function organiseSettingsPanel(){
   const children = [...panel.children];
   const marker = prefix => children.findIndex(el =>
     el.classList.contains('panel-title') && el.textContent.trim().startsWith(prefix));
-  const apiI = marker('API keys'), syncI = marker('Sync'), bodyI = marker('Body profile');
+  const apiI = marker('Hosted AI'), syncI = marker('Sync'), bodyI = marker('Body profile');
   const goalI = marker('Goal'), targetI = marker('Targets');
   if ([apiI, syncI, bodyI, goalI, targetI].some(i => i < 0)) return;
 
@@ -63,8 +63,8 @@ function organiseSettingsPanel(){
     group('Goal & corridor', 'Your effective targets and meal pacing.', goal, true),
     group('Body profile', 'Inputs for adaptive maintenance.', body, false),
     group('Training', 'Schedule, split, and day-type behavior.', [training], false),
-    group('Parsing & API', 'Local keys, model choices, and estimate penalties.', [...api, penalties, keyHelp], false),
-    group('Sync', 'Encrypted cross-device storage.', sync, false),
+    group('Parsing & API', 'Included daily allowance, optional personal keys, and estimate penalties.', [...api, penalties, keyHelp], false),
+    group('Account & sync', 'Email sign-in and cross-device storage.', sync, false),
     group('Data', 'Backup, import, and day-level reset.', [backup], false)
   );
 }
@@ -133,18 +133,15 @@ gearBtn.onclick = ()=>{
 function refreshKeyUI(){
   const st = document.getElementById('keyStatus');
   const bits = [];
-  bits.push(hasUSDA() ? 'USDA ✓ (your key)' : 'USDA — not set');
-  bits.push(hasGemini() ? 'Gemini ✓' : 'Gemini — not set');
+  bits.push(hasPersonalUSDA() ? 'Personal USDA ✓' : 'Personal USDA — not set');
+  bits.push(hasGemini() ? 'Personal Gemini ✓' : 'Personal Gemini — not set');
   if (hasOR()) bits.push('OpenRouter ✓');
-  st.textContent = bits.join('  ·  ') + (hasUSDA()&&hasAI() ? '  · all systems go.' : '  · AI parse disabled until a Gemini or OpenRouter key is set.');
-  document.getElementById('usdaBtn').disabled = !hasUSDA();
-  // A dead send button with no explanation is a dead end — say why it is off.
+  st.textContent = bits.join('  ·  ') + '  · optional fallback only.';
+  document.getElementById('usdaBtn').disabled = false;
   const send = document.getElementById('parseBtn');
-  send.disabled = !hasAI();
-  send.title = hasAI() ? 'Parse meal (Enter)' : 'Add a Gemini or OpenRouter key in Settings to parse meals';
-  document.getElementById('nlInput').placeholder = hasAI()
-    ? 'Describe a meal…'
-    : 'No AI key — use More logging options to search USDA';
+  send.disabled = false;
+  send.title = 'Parse meal (Enter)';
+  document.getElementById('nlInput').placeholder = 'Describe a meal…';
 }
 document.getElementById('saveKeys').onclick = ()=>{
   setKey(LS.usda,  document.getElementById('usdaKey').value.trim());
@@ -153,22 +150,42 @@ document.getElementById('saveKeys').onclick = ()=>{
   setKey(LS.or,    document.getElementById('orKey').value.trim());
   refreshKeyUI();
   setStatus(document.getElementById('keyStatus'),
-    'Saved. ' + (hasUSDA()&&hasAI() ? 'All systems go.' : 'Some keys still missing.'),
-    (hasUSDA()&&hasAI()) ? 'good' : null);
+    hasPersonalUSDA()||hasPersonalAI() ? 'Personal fallback saved on this device.' : 'Personal fallback cleared.',
+    'good');
 };
 
-document.getElementById('saveSync').onclick = ()=>{
+async function refreshAccountUI(){
+  const user = await hostedUser().catch(()=>null);
+  const st = document.getElementById('syncStatus');
+  document.getElementById('signInBtn').hidden = !!user;
+  document.getElementById('signOutBtn').hidden = !user;
+  document.getElementById('accountEmail').disabled = !!user;
+  if (user){
+    document.getElementById('accountEmail').value = user.email||'';
+    setStatus(st, `Signed in as ${user.email||'your account'} — syncing across devices.`, 'good');
+    setStatus(document.getElementById('hostedStatus'),'Included today: 15 AI analyses and 40 food searches.','good');
+  } else {
+    setStatus(st, 'Sign in to use hosted AI and sync across devices. Manual logging works without an account.');
+    setStatus(document.getElementById('hostedStatus'),'Sign in under Account & sync to use the included allowance. Manual logging always works.');
+  }
+}
+document.getElementById('signInBtn').onclick = async ()=>{
   setKey(LS.supaUrl, document.getElementById('supaUrl').value.trim());
   setKey(LS.supaKey, document.getElementById('supaKey').value.trim());
-  setKey(LS.pass,    document.getElementById('syncPass').value);
-  syncCreds = null;                            // passphrase may have changed — re-derive
-  const st = document.getElementById('syncStatus');
-  if (syncConfigured()){ setStatus(st, 'Saved — syncing…', 'good'); syncNow(); }
-  else { setSyncDot('off'); setStatus(st, 'Sync off — set a passphrase to enable it.'); }
+  const email=document.getElementById('accountEmail').value.trim();
+  const st=document.getElementById('syncStatus');
+  if(!email){ document.getElementById('accountEmail').focus(); return; }
+  setStatus(st,'Sending sign-in link…');
+  try { await sendMagicLink(email); setStatus(st,`Check ${email} for your sign-in link.`, 'good'); }
+  catch(e){ setStatus(st,e.message,'bad'); }
 };
+document.getElementById('signOutBtn').onclick = async ()=>{
+  await signOutHosted(); setSyncDot('off'); await refreshAccountUI();
+};
+window.addEventListener('eatify:auth', ()=>{ refreshAccountUI(); if(syncConfigured()) syncNow(); });
 document.getElementById('syncNowBtn').onclick = ()=>{
   const st = document.getElementById('syncStatus');
-  if (!syncConfigured()){ setStatus(st, 'Set a passphrase and Save sync first.', 'bad'); return; }
+  if (!syncConfigured()){ setStatus(st, 'Sign in first, then sync.', 'bad'); return; }
   setStatus(st, 'Syncing…'); syncNow();
 };
 
@@ -674,10 +691,9 @@ document.getElementById('exportBtn').onclick = async ()=>{
     workouts: allWorkouts(), wkMeta: workoutMeta(), exercises: exerciseCatalog(),
     tombstones:entryTombstones(), clears:dayClears(),
     days, date: ACTIVE_DATE, ledger, totals: totals() };   // date/ledger kept for v1 compat
-  // Bind the backup to this sync account when one is set, so a shared/leaked export can
-  // only be re-imported on the owning passphrase (import refuses a mismatched owner).
-  const pass = getKey(LS.pass);
-  if (pass) payload.owner = await sha256hex(pass);
+  // Bind the backup to the signed-in account when available.
+  const owner = await hostedUser().catch(()=>null);
+  if (owner) payload.owner = 'user:' + owner.id;
   const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
   const url = URL.createObjectURL(blob); const a=document.createElement('a');
   a.href=url; a.download=`ledger_${ACTIVE_DATE}.json`; a.click(); URL.revokeObjectURL(url);
@@ -691,18 +707,17 @@ document.getElementById('importFile').onchange = (ev)=>{
   reader.onload = async ()=>{
     try {
       const data = JSON.parse(reader.result);
-      // Account-bound backup: if it carries an owner hash, only the sync account whose
-      // passphrase hashes to it may import (gates a personal backup to its owner).
+      // Account-bound backup: new exports carry their Supabase user id. Legacy
+      // passphrase-bound exports remain importable on devices that still hold that key.
       if (data.owner) {
-        const pass = getKey(LS.pass);
-        if (!pass) {
+        const owner = await hostedUser().catch(()=>null);
+        const legacyPass = getKey('ledger_sync_pass');
+        const matches = data.owner.startsWith('user:')
+          ? !!owner && data.owner === 'user:'+owner.id
+          : !!legacyPass && await sha256hex(legacyPass) === data.owner;
+        if (!matches) {
           await alertSheet({ title:'Backup is account-bound',
-            body:'This backup belongs to a sync account. Set that account’s passphrase in Settings, then import it again.' });
-          ev.target.value=''; return;
-        }
-        if (await sha256hex(pass) !== data.owner) {
-          await alertSheet({ title:'Wrong account',
-            body:'This backup belongs to a different sync account. It can only be imported on the account that created it.' });
+            body:'This backup belongs to a different account. Sign in with the account that created it, then import it again.' });
           ev.target.value=''; return;
         }
       }
@@ -885,8 +900,8 @@ function loadKeys(){
   document.getElementById('orKey').value     = getKey(LS.or);
   document.getElementById('supaUrl').value   = getKey(LS.supaUrl);
   document.getElementById('supaKey').value   = getKey(LS.supaKey);
-  document.getElementById('syncPass').value  = getKey(LS.pass);
   refreshKeyUI();
+  refreshAccountUI();
 }
 
 // Ask the browser to keep our localStorage from being evicted under storage pressure.
@@ -914,6 +929,6 @@ if (_liftOnBoot) toast(`${splitForDate(ACTIVE_DATE)} · ${TRAIN.start}–${TRAIN
   { undo: ()=> showTab('today'), undoLabel: 'Today' });
 maybeShowBrief();   // one-line plan for the day, once per day
 durableMirrorSoon();
-if (syncConfigured()) syncNow(); else setSyncDot('off');   // boot pull+push (no-op when unconfigured)
+if (syncConfigured()) syncNow(); else setSyncDot('off');
 }
 bootApp();

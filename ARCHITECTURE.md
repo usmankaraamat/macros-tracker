@@ -90,7 +90,8 @@ resurrecting deleted records.
 - `ledger_targets` — the full settings bundle: corridor, protein/carb/fat targets, goal, meal plan, training schedule, body profile, maintenance band.
 - `*_meta` / `*_updated` keys — per-record timestamps that drive last-write-wins during sync.
 - `ledger_active_date` — which logical day is "live".
-- API keys & sync passphrase (`ledger_usda_key`, `ledger_gemini_key`, `ledger_openrouter_key`, `ledger_sync_pass`, …) — **never exported, never synced.**
+- Optional personal provider keys (`ledger_usda_key`, `ledger_gemini_key`, `ledger_openrouter_key`) — **never exported, never synced.**
+- `eatify_account_session` — the Supabase email session used for hosted allowances and account sync.
 
 ### The logical day (important, non-obvious)
 
@@ -148,7 +149,7 @@ Everything else in the app is UI and storage glue around these functions.
   handlers. No virtual DOM, no reactivity. State changes call `render()`.
 - **All user/AI/USDA/import text is passed through `escapeHtml` before it
   touches `innerHTML`** — food names are the one attacker-shapeable field and
-  `localStorage` holds the sync passphrase + API keys, so an unescaped name
+  `localStorage` may hold personal fallback API keys, so an unescaped name
   would be a credential-theft XSS. This is a load-bearing invariant.
 - Tabs live in a slide-out drawer (not a bottom bar — the bottom edge belongs to
   the meal composer). Tabs: **Today, Logs, Plan, Lift, Trends**, plus Settings.
@@ -253,27 +254,27 @@ and each requires the user to paste their own key in Settings:
 - **USDA FoodData Central** — food nutrient lookup. Free personal key
   (data.gov deactivates any key committed to a public repo, so no shared default
   is embedded).
-- **AI parsing (Gemini, with OpenRouter as fallback)** — used *only* to resolve
+- **AI parsing (hosted Gemini, with personal Gemini/OpenRouter as fallback)** — used *only* to resolve
   things the deterministic path can't: reading a free-text meal into structured
   foods, reading a photo of a meal, or reading a workout line the grammar
   rejected. **The AI never computes calories or verdicts** — every number it
   returns is shown for confirmation before it's committed, and it's told to
   transcribe only, never to total or invent.
-- **Supabase** — the sync backend (see below). A publishable anon key is built
-  in; it's public by design.
+- **Supabase** — email magic-link auth, the sync backend, quota counters, USDA
+  cache, and Edge Functions that keep shared provider keys off the client. A
+  publishable anon key is built in; it's public by design.
 
 ---
 
 ## 8. Sync
 
-Optional, end-to-end encrypted, off by default:
+Optional and off by default:
 
-- Identity is **a passphrase**. PBKDF2 derives 512 bits: half becomes an
-  unguessable row id, half an AES-GCM key. Same passphrase anywhere = same
-  account. No login, no email.
-- **The server only ever stores ciphertext.** The Supabase anon key and row ids
-  give no access to plaintext; the passphrase is the only secret and never
-  leaves the device.
+- Identity is an **email magic-link account**, matching Hisaab. The same account
+  on another device pulls the same logs, targets, workouts, measurements,
+  supplements, and settings.
+- Supabase stores the merged sync document behind row-level security scoped to
+  `auth.uid()`. Provider keys are never part of that document.
 - Every sync is **pull → merge → push**. Food entries and workout sets merge by
   stable record ID with deletion tombstones; scalar day maps use last-write-wins.
 - All failures degrade gracefully to offline-only.

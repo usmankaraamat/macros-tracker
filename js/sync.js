@@ -1,20 +1,16 @@
-// sync.js -- End-to-end-encrypted multi-device sync over Supabase + WebCrypto.
-// The server only ever stores ciphertext.
+// sync.js -- Email-account multi-device sync over Supabase.
 
-// ---- SYNC · Supabase + WebCrypto -------------------------------------------
-// Identity is a passphrase: PBKDF2 derives 512 bits — half becomes the row id
-// (unguessable), half an AES-GCM key. Same passphrase anywhere = same account.
-// The server only ever stores ciphertext. Merge is per-day last-write-wins
+// ---- SYNC · Supabase --------------------------------------------------------
+// Identity is the same email magic-link account used by hosted AI. RLS scopes
+// the single sync document to auth.uid(). Merge is per-day last-write-wins
 // (LedgerCore.mergeSyncStates); every sync is pull→merge→push so a push can
 // never clobber a day it hasn't seen. All failures degrade to offline-only.
 const SYNC_META_KEY = 'ledger_sync_meta';
-let syncCreds = null;                          // cached {id, key} for the current passphrase
 let syncBusy = false, syncQueued = false, syncTimer = null;
 
 function supaUrl(){ return getKey(LS.supaUrl) || SUPA_DEFAULT_URL; }
 function supaAnonKey(){ return getKey(LS.supaKey) || SUPA_DEFAULT_KEY; }
-// The backend is built in, so the passphrase alone turns sync on.
-function syncConfigured(){ return !!(supaUrl() && supaAnonKey() && getKey(LS.pass)); }
+function syncConfigured(){ return !!(supaUrl() && supaAnonKey() && hostedAccountConfigured()); }
 function setSyncDot(state, tip){
   const el = document.getElementById('syncDot');
   el.className = 'sync-dot ' + state;
@@ -27,44 +23,10 @@ function stampSyncMeta(date){
 function targetsStamp(){ return getKey('ledger_targets_updated'); }
 function stampTargets(){ setKey('ledger_targets_updated', new Date().toISOString()); }
 
-async function syncKeys(){
-  if (syncCreds) return syncCreds;
-  const enc = new TextEncoder();
-  const mat = await crypto.subtle.importKey('raw', enc.encode(getKey(LS.pass)), 'PBKDF2', false, ['deriveBits']);
-  const bits = new Uint8Array(await crypto.subtle.deriveBits(
-    {name:'PBKDF2', salt: enc.encode('ledger-sync-v1'), iterations: 200000, hash:'SHA-256'}, mat, 512));
-  const id = Array.from(bits.slice(0,32)).map(b=>b.toString(16).padStart(2,'0')).join('');
-  const key = await crypto.subtle.importKey('raw', bits.slice(32), 'AES-GCM', false, ['encrypt','decrypt']);
-  return (syncCreds = {id, key});
-}
-// Hex SHA-256 of a string — used to bind a backup to a sync account (owner gate).
+// Kept only so backups created by the retired passphrase flow remain importable.
 async function sha256hex(str){
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-}
-// btoa via chunks — String.fromCharCode(...bigArray) overflows the stack on large blobs.
-function bufToB64(buf){
-  const u = new Uint8Array(buf); let s = '';
-  for (let i=0; i<u.length; i+=0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i+0x8000));
-  return btoa(s);
-}
-function b64ToBuf(s){
-  const bin = atob(s); const u = new Uint8Array(bin.length);
-  for (let i=0; i<bin.length; i++) u[i] = bin.charCodeAt(i);
-  return u;
-}
-async function syncEncrypt(obj){
-  const {key} = await syncKeys();
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, new TextEncoder().encode(JSON.stringify(obj))));
-  const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12);
-  return bufToB64(out.buffer);
-}
-async function syncDecrypt(b64s){
-  const {key} = await syncKeys();
-  const u = b64ToBuf(b64s);
-  const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv: u.slice(0,12)}, key, u.slice(12));
-  return JSON.parse(new TextDecoder().decode(pt));
 }
 // Every stored day, INCLUDING empty ones — a cleared day is data and must propagate.
 function collectDays(){
@@ -80,13 +42,12 @@ function collectDays(){
   days[VIEW_DATE] = ledger;                    // on-screen state wins over its stored copy
   return days;
 }
-function supaFetch(path, opts){
+async function supaFetch(path, opts){
   const url = supaUrl().replace(/\/+$/,'') + path;
   const k = supaAnonKey();
-  // New-format publishable keys (sb_…) go in apikey only; legacy anon keys are JWTs
-  // and PostgREST wants them in Authorization too.
-  const h = {apikey:k, 'Content-Type':'application/json'};
-  if (!k.startsWith('sb_')) h.Authorization = 'Bearer '+k;
+  const session = await hostedSession();
+  if (!session) throw new Error('sign in required');
+  const h = {apikey:k, Authorization:'Bearer '+session.access_token, 'Content-Type':'application/json'};
   return fetch(url, Object.assign({}, opts, {
     headers: Object.assign(h, (opts&&opts.headers)||{})
   }));
@@ -97,18 +58,9 @@ async function syncNow(){
   if (syncBusy){ syncQueued = true; return; }
   syncBusy = true; setSyncDot('pending');
   try {
-    const {id} = await syncKeys();
-    // Reads/writes go through SECURITY DEFINER RPCs (sync_get/sync_put) — anon has no
-    // direct table access, so an attacker can't enumerate every row's ciphertext; you
-    // can only fetch/write a row whose (unguessable) id you already hold.
-    const r = await supaFetch('/rest/v1/rpc/sync_get', {method:'POST', body: JSON.stringify({p_id:id})});
+    const r = await supaFetch('/rest/v1/rpc/account_sync_get', {method:'POST', body:'{}'});
     if (!r.ok) throw new Error('pull '+r.status);
-    const remoteBlob = await r.json();            // scalar text: the stored blob, or null
-    let remote = null;
-    if (remoteBlob){
-      try { remote = await syncDecrypt(remoteBlob); }
-      catch(e){ throw new Error('cannot decrypt — passphrase collision or corrupt blob'); }
-    }
+    const remote = await r.json();
     const merged = LedgerCore.mergeRecordStates(
       {days:collectDays(),meta:syncMeta(),tombstones:entryTombstones(),clears:dayClears()},
       remote || {days:{},meta:{},tombstones:{},clears:{}});
@@ -185,9 +137,8 @@ async function syncNow(){
       tombstones:merged.tombstones||{}, clears:merged.clears||{}, schema:DATA_SCHEMA_VERSION,
       weights: wm.days, wMeta: wm.meta,
       measures: mm.days, mMeta: mm.meta };
-    const blob = await syncEncrypt(state);
-    const p = await supaFetch('/rest/v1/rpc/sync_put', {
-      method:'POST', body: JSON.stringify({p_id: id, p_blob: blob})   // upsert; server stamps updated_at
+    const p = await supaFetch('/rest/v1/rpc/account_sync_put', {
+      method:'POST', body: JSON.stringify({p_blob: state})
     });
     if (!p.ok) throw new Error('push '+p.status);
     setSyncDot('ok');

@@ -1,0 +1,7 @@
+project_id = "rekcgerktrykotwzppkz"
+
+[functions.eatify-ai]
+verify_jwt = true
+
+[functions.eatify-usda]
+verify_jwt = true

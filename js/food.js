@@ -27,7 +27,6 @@ function nutrientsFrom(food){ return LedgerCore.nutrientsFrom(food); }
 // estimate so keyword cousins with absurd energy density ("cooking oil" → plantain oil
 // at 100 kcal/100g) sink below the real thing.
 async function usdaSearch(query, estKcal){
-  if (!hasUSDA()) throw new Error('No USDA key — add one in Settings.');
   const q = (query||'').trim();
   if (!q) return [];
   const pin = LedgerCore.foodPin(q);
@@ -47,8 +46,6 @@ async function usdaSearch(query, estKcal){
 async function usdaFetchRanked(apiQuery, rankQuery, estKcal){
   // POST with a JSON body — the documented form. Passing dataType as an array here
   // avoids the URL-encoding quirks that make the GET query 400 on spaces/parens.
-  const url = 'https://api.nal.usda.gov/fdc/v1/foods/search?api_key='
-    + encodeURIComponent(usdaKey());
   const body = JSON.stringify({
     query: apiQuery,
     dataType: ['Foundation','SR Legacy','Survey (FNDDS)'],
@@ -59,24 +56,28 @@ async function usdaFetchRanked(apiQuery, rankQuery, estKcal){
   // drop surfaces as a bare "Failed to fetch" and (inside the AI-parse loop) silently
   // collapses that item to an AI estimate. So: abort a hung request and retry a
   // network-level failure once before giving up.
-  let r, netErr;
-  for (let attempt = 0; attempt < 2; attempt++){
-    const ctrl = new AbortController();
-    const timer = setTimeout(()=>ctrl.abort(), 12000);
-    try {
-      r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body, signal: ctrl.signal });
-      netErr = null; break;
-    } catch(e){
-      netErr = e;                                 // TypeError (Failed to fetch) or AbortError (timeout)
-      if (attempt === 0) await new Promise(res => setTimeout(res, 600));
-    } finally { clearTimeout(timer); }
+  let d;
+  try {
+    d = await hostedUSDA(apiQuery,hasPersonalUSDA()?usdaKey():'');
+    showHostedQuota(d.quota,'food searches');
+  } catch(hostedErr) {
+    if (!hasPersonalUSDA()) throw hostedErr;
+    const url = 'https://api.nal.usda.gov/fdc/v1/foods/search?api_key=' + encodeURIComponent(usdaKey());
+    let r, netErr;
+    for (let attempt = 0; attempt < 2; attempt++){
+      const ctrl = new AbortController();
+      const timer = setTimeout(()=>ctrl.abort(), 12000);
+      try {
+        r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body, signal:ctrl.signal });
+        netErr = null; break;
+      } catch(e){ netErr=e; if(attempt===0) await new Promise(res=>setTimeout(res,600)); }
+      finally { clearTimeout(timer); }
+    }
+    if (netErr) throw new Error("Couldn't reach USDA — check your connection and try again.");
+    if (r.status===429) throw new Error('Your USDA key is rate-limited this hour; try later.');
+    if (!r.ok) throw new Error('USDA API '+r.status+(r.status===403?' — personal key rejected':''));
+    d = await r.json();
   }
-  if (netErr) throw new Error("Couldn't reach USDA — it may be slow or temporarily down. "
-    + "Check your connection and try again.");
-  if (r.status === 429) throw new Error('USDA API 429 — your key is rate-limited this hour, try later.');
-  if (!r.ok) throw new Error('USDA API ' + r.status
-    + (r.status===403 ? ' — key rejected' : r.status===400 ? ' — bad request' : ''));
-  const d = await r.json();
   const foods = (d.foods||[]).map(f => ({ id:f.fdcId, name:f.description, base:nutrientsFrom(f) }));
   return LedgerCore.rankFoods(foods, rankQuery, estKcal);
 }
@@ -164,7 +165,25 @@ let AI_VIA = '';                               // which provider/model handled t
 // replacement model once if the configured one has gone), OpenRouter as the fallback.
 // Returns raw text; every caller does its own parsing and its own validation.
 async function aiComplete(prompt, imageB64){
-  if (!hasAI()) throw new Error('No AI key — add a Gemini or OpenRouter key in Settings.');
+  if (!getKey('eatify_ai_disclosure_v1')) {
+    const ok = await confirmSheet({
+      title:'Use AI analysis?',
+      body:'Eatify sends the meal or workout text you enter, plus an attached photo if present, to Google Gemini to interpret it. Your saved history and account data are not included.',
+      confirmLabel:'Continue'
+    });
+    if (!ok) throw new Error('AI analysis cancelled. Manual logging is still available.');
+    setKey('eatify_ai_disclosure_v1','accepted');
+  }
+  let hostedErr = null;
+  try {
+    const hosted = await hostedAI(prompt,imageB64,hasGemini()?getKey(LS.gem):'');
+    AI_VIA = hosted.via || 'Hosted Gemini';
+    showHostedQuota(hosted.quota,'AI analyses');
+    return hosted.text;
+  } catch(e) {
+    hostedErr = e;
+    if (!hasPersonalAI()) throw e;
+  }
   let txt = '', gemErr = null;
   if (hasGemini()){
     try {
@@ -191,7 +210,7 @@ async function aiComplete(prompt, imageB64){
     const o = await openrouterGenerate(prompt, imageB64);   // throws if all models fail
     txt = o.txt; AI_VIA = o.via;
   }
-  if (!txt) throw gemErr || new Error('No AI provider available.');
+  if (!txt) throw gemErr || hostedErr || new Error('No AI provider available.');
   return txt;
 }
 async function aiParse(text, imageB64){

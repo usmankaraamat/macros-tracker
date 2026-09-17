@@ -157,22 +157,21 @@ let _prevLedgerLen = 0;                      // for flashing newly-added ledger 
 // ---- KEYS (localStorage; never exported) ----
 const LS = { usda:'ledger_usda_key', gem:'ledger_gemini_key', model:'ledger_gemini_model',
              or:'ledger_openrouter_key',
-             supaUrl:'ledger_supa_url', supaKey:'ledger_supa_key', pass:'ledger_sync_pass' };
-// USDA food search needs a personal key — free, unbilled, per-key throttled (1,000
-// req/hr). No shared default is embedded: data.gov deactivates any key committed to a
-// public repo, so each user pastes their own in Settings (fdc.nal.usda.gov/api-key-signup).
-// Built-in sync backend. The publishable key is public by design (anon role only);
-// rows are unguessable 256-bit ids holding client-side-encrypted blobs, so the only
-// per-user secret is the passphrase. Settings can override both for self-hosted forks.
+             supaUrl:'ledger_supa_url', supaKey:'ledger_supa_key' };
+// Hosted AI and USDA calls go through quota-controlled Edge Functions. Optional
+// personal provider keys remain device-local fallbacks and never sync. The built-in
+// Supabase publishable key is public by design; auth plus RLS scopes account data.
 const SUPA_DEFAULT_URL = 'https://rekcgerktrykotwzppkz.supabase.co';
 const SUPA_DEFAULT_KEY = 'sb_publishable_adWOcEpQyprhtOBpjSLS7A_sYW58wkX';
 function getKey(k){ try { return localStorage.getItem(k) || ''; } catch(e){ return ''; } }
 function setKey(k,v){ try { v ? localStorage.setItem(k,v) : localStorage.removeItem(k); } catch(e){} }
 function usdaKey(){ return getKey(LS.usda); }
-function hasUSDA(){ return !!usdaKey(); }
+function hasPersonalUSDA(){ return !!usdaKey(); }
+function hasUSDA(){ return true; }
 function hasGemini(){ return !!getKey(LS.gem); }
 function hasOR(){ return !!getKey(LS.or); }
-function hasAI(){ return hasGemini() || hasOR(); }
+function hasPersonalAI(){ return hasGemini() || hasOR(); }
+function hasAI(){ return true; }
 function geminiModel(){ return getKey(LS.model) || 'gemini-3.5-flash-lite'; }
 
 // Calendar date in Pakistan Standard Time (UTC+5, no DST) so the day rolls over at

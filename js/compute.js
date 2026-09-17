@@ -13,7 +13,7 @@ function computeEntry(name, grams, weighed, base, source, partOf) {
 
 // Escape untrusted text (food/template/dish names from AI, USDA, imports, sync) before
 // it goes into any innerHTML/SVG string. Names are the one field an attacker can shape,
-// and localStorage holds the sync passphrase + API keys, so an unescaped name is a
+// and localStorage may hold personal fallback API keys, so an unescaped name is a
 // credential-theft XSS. Works for both HTML and SVG text contexts.
 function escapeHtml(s){
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
