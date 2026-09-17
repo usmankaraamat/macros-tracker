@@ -257,6 +257,11 @@
 
   <section class="today-read" id="todayRead" aria-label="Today's read">
     <span class="today-read-title">Today's read</span>
+    <div class="read-item guide-invite" id="guideInvite" hidden>
+      <div class="grow"><b>New to food tracking?</b><span> Five calm screens explain what matters. No diet knowledge needed.</span></div>
+      <button type="button" class="sm ghost" id="guideStart">Show me</button>
+      <button type="button" class="icon-btn" id="guideDismiss" aria-label="Not now" title="Not now"><span data-ui-icon="close"></span></button>
+    </div>
     <div class="read-item" id="digestCard" hidden>
       <span class="dg-main grow"></span>
       <button type="button" class="icon-btn" id="digestClose" aria-label="Dismiss"><span data-ui-icon="close"></span></button>
@@ -783,6 +788,7 @@
 <script src="js/lift.js"></script>
 <script src="js/logs.js"></script>
 <script src="js/sync.js"></script>
+<script src="js/guide.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

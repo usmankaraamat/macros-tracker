@@ -45,6 +45,11 @@ function organiseSettingsPanel(){
   const summary = document.createElement('div');
   summary.className = 'settings-effective';
   summary.id = 'settingsEffective';
+  const guide = document.createElement('button');
+  guide.type = 'button';
+  guide.className = 'ghost settings-guide';
+  guide.textContent = 'How Eatify works · 2 minute walkthrough';
+  guide.onclick = ()=> startEatifyGuide();
 
   const group = (title, note, nodes, open) => {
     const details = document.createElement('details');
@@ -60,6 +65,7 @@ function organiseSettingsPanel(){
 
   panel.replaceChildren(
     summary,
+    guide,
     group('Goal & corridor', 'Your effective targets and meal pacing.', goal, true),
     group('Body profile', 'Inputs for adaptive maintenance.', body, false),
     group('Training', 'Schedule, split, and day-type behavior.', [training], false),
@@ -931,6 +937,7 @@ showTab(_liftOnBoot ? 'lift' : 'today');   // also renders
 if (_liftOnBoot) toast(`${splitForDate(ACTIVE_DATE)} · ${TRAIN.start}–${TRAIN.end} — opened on Lift.`,
   { undo: ()=> showTab('today'), undoLabel: 'Today' });
 maybeShowBrief();   // one-line plan for the day, once per day
+maybeOfferEatifyGuide();
 durableMirrorSoon();
 if (syncConfigured()) syncNow(); else setSyncDot('off');
 }

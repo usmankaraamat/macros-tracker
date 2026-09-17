@@ -174,6 +174,9 @@ existing templates field. After one successful account sync on a device, the
 history-derived library and its stored nutrition bases work without a network.
 The meal engineer's three preferred foods, including their nutrition bases, live
 inside the synced targets bundle so custom USDA choices also survive offline.
+First-run help uses a single dismissible item inside **Today's read**, never an
+automatic modal. Its five-screen plain-language walkthrough is device-local and
+can always be reopened from Settings.
 The micronutrient panel has an averaging-window selector — Today / Week /
 2 Wks / Month (weekly is the default) — so a nutrient that is *consistently*
 short reads apart from a single off day. `LedgerCore.microAverages` divides each

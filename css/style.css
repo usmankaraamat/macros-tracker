@@ -1910,6 +1910,18 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
 .read-item.warn, .read-item.meh { color: var(--brass); }
 .read-item.bad { color: var(--hot); }
 .read-item .grow { flex: 1; min-width: 0; }
+.guide-invite { flex-wrap:wrap; }
+.guide-invite .grow { min-width:220px; }
+.guide-invite .grow span { display:block; margin-top:2px; }
+.guide-invite > button { flex:none; }
+.settings-guide { width:100%; margin:0 0 12px; }
+.guide-progress { display:flex; gap:6px; margin:2px 0 18px; }
+.guide-progress span { width:22px; height:3px; border-radius:99px; background:var(--rule-lit); }
+.guide-progress span.on { background:var(--accent); }
+.guide-kicker { color:var(--accent); font-size:10px; font-weight:750; letter-spacing:.14em; text-transform:uppercase; }
+.guide-copy { margin:8px 0 18px; color:var(--graphite); font-size:14px; line-height:1.65; }
+.guide-copy strong { color:var(--chalk); }
+.guide-rule { padding:10px 12px; margin:0 0 18px; border-left:3px solid var(--accent); background:var(--accent-wash); color:var(--chalk); font-size:13px; line-height:1.55; }
 
 /* Logged food is a dense list, but it should not read like a database table. Each item is
    a quiet nested card with one stable visual grammar: identity -> energy -> macro strip. */
