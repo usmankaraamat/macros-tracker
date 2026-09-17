@@ -480,12 +480,25 @@ const TV = [[120,20],[26,188],[214,188]];              // triangle vertices: A a
 const TCOL = ['var(--chalk)','var(--graphite)','var(--rule-lit)'];
 const tState = { foods:[null,null,null], w:[1/3,1/3,1/3], kcalTouched:false };
 
+function applyTernDefaults(){
+  (TERN_DEFAULTS||[]).slice(0,3).forEach((d,i)=>{
+    if(!d||!d.name||!d.base)return;
+    if(!foodBase[d.name]) registerFood(d.name,d.base,d.source||'DB');
+    if(!tState.foods[i]) tState.foods[i]=d.name;
+  });
+}
+function resetTernToDefaults(){
+  tState.foods=(TERN_DEFAULTS||[]).slice(0,3).map(d=>d&&d.name||null);
+  while(tState.foods.length<3)tState.foods.push(null);
+}
+
 function ternFoodObjs(){ return tState.foods.map(n => getBase(n) || {kcal:0,p:0,f:0,c:0}); }
 function ternTargetKcal(){ const v = parseFloat(document.getElementById('ternKcal').value); return v>0 ? v : 0; }
 function ternProteinNeed(){ return Math.max(P_TARGET - totals().p, 0); }
 
 // Keep the three selects populated with every known food, preserving the picks.
 function syncTernSelects(){
+  applyTernDefaults();
   const keys = Object.keys(foodBase);
   ['ternA','ternB','ternC'].forEach((id,slot)=>{
     const sel = document.getElementById(id);
@@ -625,6 +638,16 @@ document.getElementById('ternKcal').addEventListener('input', ()=>{ tState.kcalT
 ['ternA','ternB','ternC'].forEach((id,slot)=>{
   document.getElementById(id).addEventListener('change', e=>{ tState.foods[slot] = e.target.value; renderTernary(); });
 });
+document.getElementById('ternSaveDefaults').onclick=()=>{
+  const records=tState.foods.map(name=>({name,base:getBase(name),source:foodSource[name]||'DB'}));
+  if(records.some(x=>!x.name||!x.base)){
+    document.getElementById('ternMsg').textContent='Choose three foods with nutrition data first.';
+    return;
+  }
+  TERN_DEFAULTS=records; saveTargets();
+  document.getElementById('ternMsg').textContent='These three foods are now your synced defaults.';
+  toast('Meal engineer defaults saved');
+};
 
 // ---- Ternary slot search: pick ANY food (USDA), not just the registered few ----
 // A 🔍 on a slot opens the shared search; a chosen result is registered into the food

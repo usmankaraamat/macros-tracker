@@ -807,6 +807,13 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 }
 .result .rname { font-size: 13px; color: var(--chalk); }
 .result .rmeta { font-size: 10.5px; color: var(--faint); margin-top: 2px; }
+.offline-library-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+.offline-library-bar .tactical { flex:1; min-width:190px; margin:0; }
+.offline-meal-search { margin-bottom:8px; }
+.offline-meal-summary { margin:0 0 8px; }
+.offline-meal-list { max-height:48dvh; overflow-y:auto; overscroll-behavior:contain; margin-bottom:12px; }
+.offline-meal-row .grow { min-width:0; }
+.offline-meal-row .rname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 /* ---- pending AI review ---- */
 .pend-item { padding: 10px 0; border-bottom: 1px solid var(--rule); }

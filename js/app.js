@@ -384,10 +384,10 @@ if (window.ResizeObserver) new ResizeObserver(measureComposer).observe(document.
 window.addEventListener('resize', measureComposer);
 measureComposer();
 
-// "Log a meal" holds only the chips and the manual USDA block now. With both
-// away it is a heading over nothing, so it steps out.
+// "Log a meal" always exposes the offline-history library. The remaining rows
+// still participate in the visibility check for older/embedded markup.
 function syncAddPanel(){
-  const empty = ['tplChips','freqChips','manualBlock']
+  const empty = ['offlineMealsBtn','tplChips','freqChips','manualBlock']
     .every(id => document.getElementById(id).hidden);
   document.getElementById('addPanel').hidden = empty;
 }
@@ -684,7 +684,7 @@ document.getElementById('exportBtn').onclick = async ()=>{
   allDays(true).forEach(d => { days[d.date] = d.ledger; });
   days[VIEW_DATE] = ledger;                       // the on-screen day's live state wins
   const payload = { exported: dateStr(), version: 3, schema:DATA_SCHEMA_VERSION,
-    targets: {floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,trendStart:TREND_START,goalTargets:GOAL_TARGETS,goalTargetDate:GOAL_TARGET_DATE,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN},
+    targets: {floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,trendStart:TREND_START,goalTargets:GOAL_TARGETS,goalTargetDate:GOAL_TARGET_DATE,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN,ternDefaults:TERN_DEFAULTS},
     pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100)},
     weights: weightsMap(), measures: measureMap(), mMeta: measureMeta(), templates: templates(),
     supps: supps(), suppLog: suppLog(),
@@ -755,7 +755,10 @@ document.getElementById('importFile').onchange = (ev)=>{
           else if (+data.targets.cMax) C_CAP={mode:'g', val:+data.targets.cMax};
           if (data.targets.fCap) F_CAP={mode:data.targets.fCap.mode==='pct'?'pct':'g', val:+data.targets.fCap.val||0};
           else if (+data.targets.fMax) F_CAP={mode:'g', val:+data.targets.fMax};
+          if (Array.isArray(data.targets.ternDefaults)) TERN_DEFAULTS=data.targets.ternDefaults.slice(0,3)
+            .filter(x=>x&&typeof x.name==='string'&&x.base&&typeof x.base==='object');
           saveTargets();
+          if(typeof resetTernToDefaults==='function')resetTernToDefaults();
         }
         if (data.pen){
           INFLATE = 1 + (+data.pen.k||0)/100; DEDUCT = 1 - (+data.pen.p||0)/100;

@@ -3,6 +3,18 @@
 
 // ---- FOOD PICKER ----
 function initFoods(){
+  // Logged foods, pinned usuals and meal-engineer defaults are a local offline
+  // catalogue. Hydrating the registry here makes every previously resolved food
+  // selectable after a reload without repeating a USDA lookup.
+  const remembered = [];
+  try { allDays(true).forEach(d=>(d.ledger||[]).forEach(e=>remembered.push(e))); } catch(e){}
+  try { templates().forEach(t=>(t.items||[]).forEach(e=>remembered.push(e))); } catch(e){}
+  try { (TERN_DEFAULTS||[]).forEach(e=>remembered.push(e)); } catch(e){}
+  remembered.forEach(e=>{
+    if (!e || !e.name || !e.base) return;
+    foodBase[e.name] = e.base;
+    if (e.source) foodSource[e.name] = e.source;
+  });
   const sel = document.getElementById('food');
   sel.innerHTML = Object.keys(foodBase).map(k=>`<option>${k}</option>`).join('');
 }

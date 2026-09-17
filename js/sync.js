@@ -75,7 +75,9 @@ async function syncNow(){
         localStorage.setItem('ledger_targets', JSON.stringify(remote.targets));
         if (remote.pen) localStorage.setItem('ledger_pen', JSON.stringify(remote.pen));
         setKey('ledger_targets_updated', remote.tUpdated);
-        loadTargets(); fillTargetInputs();
+        loadTargets(); initFoods();
+        if(typeof resetTernToDefaults==='function')resetTernToDefaults();
+        fillTargetInputs();
       } catch(e){}
     }
     if (remote && Array.isArray(remote.templates) && (remote.tplUpdated||'') > tplStamp()){
@@ -124,9 +126,9 @@ async function syncNow(){
         setKey('ledger_exercises_updated', remote.exUpdated);
       } catch(e){}
     }
-    migrateLocalData(); load(); updateDayLabel(); render();
+    migrateLocalData(); initFoods(); load(); updateDayLabel(); render();
     const state = { v:1, days: merged.days, meta: merged.meta,
-      targets: {floor:FLOOR_M, ceil:CEIL_M, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP, maint:MAINT, profile:PROFILE, trendStart:TREND_START, goalTargets:GOAL_TARGETS, goalTargetDate:GOAL_TARGET_DATE, goal:GOAL, mealPlan:MEAL_PLAN, train:TRAIN},
+      targets: {floor:FLOOR_M, ceil:CEIL_M, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP, maint:MAINT, profile:PROFILE, trendStart:TREND_START, goalTargets:GOAL_TARGETS, goalTargetDate:GOAL_TARGET_DATE, goal:GOAL, mealPlan:MEAL_PLAN, train:TRAIN, ternDefaults:TERN_DEFAULTS},
       pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100)},
       tUpdated: targetsStamp(),
       templates: templates(), tplUpdated: tplStamp(),

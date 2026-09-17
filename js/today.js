@@ -468,6 +468,69 @@ function renderToday(){
 // import rows, which otherwise take the top slot with a whole day's calories
 // wearing a food's name.
 function repeatUnits(n){ return LedgerCore.mineRepeats(allDays(true), {limit: n}); }
+
+// The offline library is an index over data Eatify already keeps. It stores no
+// duplicate meal payload: saved usuals lead as pinned entries, then every distinct
+// meal in local/synced history follows by frequency. A device only needs one online
+// sync to acquire the history; afterwards this entire list is local.
+function offlineMealUnits(){
+  const norm = s=>String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+  const pinned = templates().map(t=>({name:t.name,kind:'dish',items:t.items||[],pinned:true,count:0}));
+  const seen = new Set(pinned.map(t=>norm(t.name)));
+  const history = [];
+  LedgerCore.mineRepeats(allDays(true), {limit:Number.MAX_SAFE_INTEGER}).forEach(u=>{
+    const key=norm(u.name); if(!key||seen.has(key))return; seen.add(key); history.push(u);
+  });
+  return pinned.concat(history);
+}
+
+function cloneRepeatItems(items){
+  return (items||[]).map(e=>({name:e.name,grams:e.grams,weighed:e.weighed,
+    partOf:e.partOf,base:e.base||getBase(e.name),source:e.source})).filter(e=>e.name&&e.base);
+}
+
+function renderOfflineLibraryButton(){
+  const count = offlineMealUnits().length;
+  const label = document.getElementById('offlineMealsCount');
+  if (label) label.textContent = count ? `· ${count}` : '· empty';
+}
+
+function openOfflineMeals(){
+  return openSheet((sheet,close)=>{
+    sheetHead(sheet,'Offline meals','Saved usuals are pinned first. Everything else is rebuilt from meal history already on this device.');
+    const search = document.createElement('input');
+    search.type='search'; search.placeholder='Search previous meals'; search.setAttribute('aria-label','Search offline meals');
+    search.className='offline-meal-search'; sheet.appendChild(search);
+    const summary=document.createElement('div'); summary.className='tactical offline-meal-summary'; sheet.appendChild(summary);
+    const list=document.createElement('div'); list.className='offline-meal-list'; sheet.appendChild(list);
+    let units=offlineMealUnits();
+    const draw=()=>{
+      const q=search.value.trim().toLowerCase();
+      const shown=units.filter(u=>!q||u.name.toLowerCase().includes(q));
+      summary.textContent=`${shown.length} of ${units.length} offline meal${units.length===1?'':'s'}`;
+      if(!shown.length){ list.innerHTML='<div class="empty">No matching meals on this device yet.</div>'; return; }
+      list.innerHTML=shown.map((u,i)=>{
+        const kcal=Math.round((u.items||[]).reduce((s,e)=>s+(+e.kcal||(+e.base?.kcal||0)*(+e.grams||0)/100),0));
+        const meta=[u.pinned?'pinned':u.count?`logged ${u.count}×`:'saved',`${u.items.length} item${u.items.length===1?'':'s'}`,kcal?`${kcal} kcal`:null].filter(Boolean).join(' · ');
+        return `<div class="result offline-meal-row"><div class="grow"><div class="rname">${escapeHtml(u.name)}</div><div class="rmeta">${escapeHtml(meta)}</div></div><button type="button" class="icon-btn" data-pin="${i}" aria-label="${u.pinned?'Unpin':'Pin'} ${escapeAttr(u.name)}" title="${u.pinned?'Unpin':'Pin'}">${u.pinned?'★':'☆'}</button><button type="button" class="sm ghost" data-log="${i}">Log</button></div>`;
+      }).join('');
+      list.querySelectorAll('[data-log]').forEach(btn=>btn.onclick=()=>{const u=shown[+btn.dataset.log];close(null);logRepeat(u);});
+      list.querySelectorAll('[data-pin]').forEach(btn=>btn.onclick=()=>{
+        const u=shown[+btn.dataset.pin], key=u.name.toLowerCase();
+        if(u.pinned) saveTemplates(templates().filter(t=>t.name.toLowerCase()!==key));
+        else {
+          const items=cloneRepeatItems(u.items);
+          if(items.length) saveTemplates(templates().filter(t=>t.name.toLowerCase()!==key).concat({name:u.name,items}));
+        }
+        units=offlineMealUnits(); draw();
+      });
+    };
+    search.addEventListener('input',draw); draw();
+    const done=document.createElement('button'); done.type='button'; done.className='ghost'; done.textContent='Close'; done.onclick=()=>close(null); sheet.appendChild(done);
+    return search;
+  });
+}
+document.getElementById('offlineMealsBtn').onclick=openOfflineMeals;
 function repeatChipHTML(u, attr, i){
   const label = u.kind === 'dish'
     ? `${uiIcon('repeat', 14)} ${escapeHtml(u.name)} <small>${u.items.length} items</small>`
@@ -613,7 +676,7 @@ document.getElementById('saveTplBtn').onclick = async ()=>{
 function renderTemplates(){
   const wrap = document.getElementById('tplChips');
   const list = templates();
-  if (!list.length){ wrap.hidden = true; wrap.innerHTML=''; syncAddPanel(); return; }
+  if (!list.length){ wrap.hidden = true; wrap.innerHTML=''; renderOfflineLibraryButton(); syncAddPanel(); return; }
   wrap.hidden = false;
   syncAddPanel();
   wrap.innerHTML = list.map((t,i)=>{
@@ -642,6 +705,7 @@ function renderTemplates(){
       logRepeat({ name: t.name, kind: 'dish', items: t.items });
     };
   });
+  renderOfflineLibraryButton();
 }
 
 // ---- MICRONUTRIENTS: recovery-focused panel with under/over flags ----

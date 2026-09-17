@@ -167,6 +167,13 @@ marks where you should be by now. Macro rows (protein as a floor, optional carb/
 caps) read as percentage + grams over smooth, per-macro-tinted bars;
 micronutrients, the entry ledger, and one-tap "repeat" chips mined from past
 *meals* (not ingredients) sit below.
+The **Offline meals** sheet indexes every distinct meal already present in the
+local ledger history, sorted by frequency. It does not duplicate those meals in
+Supabase or localStorage. Saved usuals are the pinned subset and sync through the
+existing templates field. After one successful account sync on a device, the
+history-derived library and its stored nutrition bases work without a network.
+The meal engineer's three preferred foods, including their nutrition bases, live
+inside the synced targets bundle so custom USDA choices also survive offline.
 The micronutrient panel has an averaging-window selector — Today / Week /
 2 Wks / Month (weekly is the default) — so a nutrient that is *consistently*
 short reads apart from a single off day. `LedgerCore.microAverages` divides each

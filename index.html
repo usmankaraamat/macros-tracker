@@ -307,6 +307,10 @@
        The panel hides itself when it holds neither. -->
   <section class="panel" id="addPanel">
     <span class="panel-title">Log a meal</span>
+    <div class="offline-library-bar">
+      <button type="button" class="ghost" id="offlineMealsBtn">Offline meals <span id="offlineMealsCount"></span></button>
+      <span class="tactical">Every previously logged meal stays searchable without internet.</span>
+    </div>
     <div class="chips" id="tplChips" hidden></div>
     <div class="chips" id="freqChips" hidden></div>
 
@@ -539,7 +543,10 @@
       <div class="tern-plot" id="ternPlot"></div>
       <div class="tern-readout" id="ternReadout"></div>
     </div>
-    <button type="button" id="ternAdd" style="margin-top:16px">Add all three to ledger</button>
+    <div class="footer-actions" style="margin-top:16px">
+      <button type="button" class="ghost" id="ternSaveDefaults">Make these my defaults</button>
+      <button type="button" id="ternAdd">Add all three to ledger</button>
+    </div>
     <div class="tern-msg" id="ternMsg"></div>
   </section>
 </main>
