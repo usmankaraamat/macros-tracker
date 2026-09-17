@@ -437,7 +437,7 @@ function render(){
   computePTarget();          // resolve % protein against the current floor
   refreshTargetLabels();
   const settingsEffective = document.getElementById('settingsEffective');
-  if (settingsEffective) settingsEffective.innerHTML = `<span>Effective corridor</span><b>${FLOOR.toLocaleString()}–${CEIL.toLocaleString()} kcal</b><small>Protein floor ${Math.round(P_TARGET)}g · ${GOAL.mode === 'off' ? 'manual target' : `${GOAL.mode} goal`}</small>`;
+  if (settingsEffective) settingsEffective.innerHTML = `<span>Current daily targets</span><b>${FLOOR.toLocaleString()}–${CEIL.toLocaleString()} kcal</b><small>Protein target ${Math.round(P_TARGET)}g · ${GOAL.mode === 'off' ? 'your calorie range' : GOAL_LABEL[GOAL.mode]}</small>`;
   updateSuppBadge();         // the nav badge is visible from every tab
   // Body profile and goal live in Settings now, which is reachable from every
   // tab — so their readouts are refreshed here rather than by the Trends view.

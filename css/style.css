@@ -2159,6 +2159,14 @@ body.settings-open #pastBanner { display: none !important; }
 #settingsPanel .settings-section-body > .panel-title { margin: 18px 0 10px; padding: 14px 0 0; border-top: 1px solid var(--rule); }
 #settingsPanel .settings-section-body > .panel-title:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 .settings-section-body > details { margin-top: 12px; }
+.settings-help { margin:0 0 16px !important; padding:0; border:1px solid var(--rule); border-radius:12px; background:var(--slab-lit); }
+.settings-help > summary { padding:11px 12px; color:var(--chalk); font-size:12px; font-weight:650; cursor:pointer; }
+.settings-help[open] > summary { border-bottom:1px solid var(--rule); }
+.settings-help > p { margin:12px 12px 8px; color:var(--graphite); font-size:12px; line-height:1.55; }
+.settings-help-start { margin:8px 12px 12px; padding:10px 11px; border-left:3px solid var(--accent); background:var(--accent-wash); color:var(--chalk); font-size:11.5px; line-height:1.55; }
+.settings-help dl { margin:0; padding:0 12px 12px; }
+.settings-help dt { margin-top:11px; color:var(--chalk); font-size:11.5px; font-weight:700; }
+.settings-help dd { margin:3px 0 0; color:var(--graphite); font-size:11.5px; line-height:1.55; }
 
 /* Plan begins with the next nutritional decision; engineering stays optional. */
 #tabPlan > .panel:first-child { background: var(--accent-wash); border-color: rgba(84, 207, 134, .34); }

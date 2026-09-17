@@ -25,8 +25,8 @@ function organiseSettingsPanel(){
   const children = [...panel.children];
   const marker = prefix => children.findIndex(el =>
     el.classList.contains('panel-title') && el.textContent.trim().startsWith(prefix));
-  const apiI = marker('Hosted AI'), syncI = marker('Sync'), bodyI = marker('Body profile');
-  const goalI = marker('Goal'), targetI = marker('Targets');
+  const apiI = marker('Included food tools'), syncI = marker('Your account'), bodyI = marker('Body profile');
+  const goalI = marker('Goal'), targetI = marker('Daily targets');
   if ([apiI, syncI, bodyI, goalI, targetI].some(i => i < 0)) return;
 
   const api = children.slice(apiI, syncI);
@@ -36,8 +36,8 @@ function organiseSettingsPanel(){
   const detailBy = prefix => tail.find(el => el.tagName === 'DETAILS' &&
     el.querySelector(':scope > summary')?.textContent.trim().startsWith(prefix));
   const training = detailBy('Training schedule');
-  const penalties = detailBy('Unweighed penalties');
-  const keyHelp = detailBy('Where to get the keys');
+  const penalties = detailBy('How estimates are adjusted');
+  const keyHelp = detailBy('Where to get personal API keys');
   const elsewhere = new Set([training, penalties, keyHelp].filter(Boolean));
   const goal = tail.filter(el => !elsewhere.has(el));
   const backup = document.querySelector('#todayOnly > details');
@@ -48,7 +48,7 @@ function organiseSettingsPanel(){
   const guide = document.createElement('button');
   guide.type = 'button';
   guide.className = 'ghost settings-guide';
-  guide.textContent = 'How Eatify works · 2 minute walkthrough';
+  guide.textContent = 'Quick start guide';
   guide.onclick = ()=> startEatifyGuide();
 
   const group = (title, note, nodes, open) => {
@@ -58,6 +58,7 @@ function organiseSettingsPanel(){
     details.innerHTML = `<summary><span><b>${title}</b><small>${note}</small></span></summary>`;
     const bodyEl = document.createElement('div');
     bodyEl.className = 'settings-section-body';
+    bodyEl.appendChild(buildSettingsHelp(title));
     nodes.filter(Boolean).forEach(node => bodyEl.appendChild(node));
     details.appendChild(bodyEl);
     return details;
@@ -66,12 +67,12 @@ function organiseSettingsPanel(){
   panel.replaceChildren(
     summary,
     guide,
-    group('Goal & corridor', 'Your effective targets and meal pacing.', goal, true),
-    group('Body profile', 'Inputs for adaptive maintenance.', body, false),
-    group('Training', 'Schedule, split, and day-type behavior.', [training], false),
-    group('Parsing & API', 'Included daily allowance, optional personal keys, and estimate penalties.', [...api, penalties, keyHelp], false),
-    group('Account & sync', 'Email sign-in and cross-device storage.', sync, false),
-    group('Data', 'Backup, import, and day-level reset.', [backup], false)
+    group('Calories & goals', 'Choose a goal or set your own daily range.', goal, true),
+    group('Body profile', 'Helps estimate how many calories you burn.', body, false),
+    group('Training', 'Optional schedule for workout features.', [training], false),
+    group('Food logging & AI', 'Included searches, estimates, and optional API keys.', [...api, penalties, keyHelp], false),
+    group('Account & sync', 'Use the same data on your devices.', sync, false),
+    group('Backup & reset', 'Export, restore, or clear a day.', [backup], false)
   );
 }
 
@@ -142,7 +143,7 @@ function refreshKeyUI(){
   bits.push(hasPersonalUSDA() ? 'Personal USDA ✓' : 'Personal USDA — not set');
   bits.push(hasGemini() ? 'Personal Gemini ✓' : 'Personal Gemini — not set');
   if (hasOR()) bits.push('OpenRouter ✓');
-  st.textContent = bits.join('  ·  ') + '  · optional fallback only.';
+  st.textContent = bits.join('  ·  ') + '  · used only after the included allowance runs out.';
   document.getElementById('usdaBtn').disabled = false;
   const send = document.getElementById('parseBtn');
   send.disabled = false;
@@ -444,7 +445,7 @@ function updateProjection(){
 document.getElementById('grams').addEventListener('input', updateProjection);
 document.getElementById('food').addEventListener('change', updateProjection);
 
-// Targets: user-overridable, protocol defaults recoverable in one tap.
+// Targets are editable, with the shipped starting values recoverable in one tap.
 function fillTargetInputs(){
   document.getElementById('tFloor').value = FLOOR_M;
   document.getElementById('tCeil').value  = CEIL_M;
@@ -611,25 +612,25 @@ document.getElementById('saveTargets').onclick = ()=>{
   FLOOR=FLOOR_M=f; CEIL=CEIL_M=c; P_CFG={mode:pMode, val:p};
   C_CAP={mode:cMode, val:cm}; F_CAP={mode:fMode, val:fm};
   saveTargets(); render();
-  const note = GOAL.mode!=='off' ? ' Manual base saved — the goal still auto-drives the live corridor (turn Goal off to use these).' : '';
-  setStatus(st,'Targets saved. Corridor, solver and history all follow the new numbers.'+note,'good');
+  const note = GOAL.mode!=='off' ? ' Your selected goal is still setting the live calorie range. Choose “Use my calorie range” under Goal to use these numbers directly.' : '';
+  setStatus(st,'Daily targets saved.'+note,'good');
 };
 document.getElementById('resetTargets').onclick = ()=>{
   FLOOR=FLOOR_M=PROTOCOL.floor; CEIL=CEIL_M=PROTOCOL.ceil; P_CFG={mode:'g', val:PROTOCOL.p};
   C_CAP={mode:'g', val:0}; F_CAP={mode:'g', val:0};
   saveTargets(); fillTargetInputs(); render();
-  setStatus(document.getElementById('targetStatus'),'Protocol defaults restored (1700/1900 · 120g protein · caps off).','good');
+  setStatus(document.getElementById('targetStatus'),'Starting targets restored: 1,700–1,900 kcal, 120g protein, no carb or fat caps.','good');
 };
 document.getElementById('saveMealPlan').onclick = ()=>{
   const st = document.getElementById('mealPlanStatus');
   const plan = parseMealPlan(document.getElementById('mealPlanInput').value);
   if (!plan.length){ setStatus(st,'No valid lines. Format: "HH:MM kcal Name" (e.g. 07:30 800 Breakfast).','bad'); return; }
   MEAL_PLAN = plan; saveTargets(); fillMealPlan(); render();
-  setStatus(st, `Saved ${plan.length} meals · plan total ${plan.reduce((s,m)=>s+m.kcal,0)} kcal (scaled to your corridor).`, 'good');
+  setStatus(st, `Meal schedule saved with ${plan.length} meals. Eatify will scale the portions to your daily calorie range.`, 'good');
 };
 document.getElementById('clearMealPlan').onclick = ()=>{
   MEAL_PLAN = []; saveTargets(); fillMealPlan(); render();
-  setStatus(document.getElementById('mealPlanStatus'),'Meal plan cleared — pacing is now an even linear ramp.','good');
+  setStatus(document.getElementById('mealPlanStatus'),'Meal schedule cleared. Eatify will spread the daily target evenly across the day.','good');
 };
 document.getElementById('trainCycle').addEventListener('change', ()=>{
   document.getElementById('cycleOffsets').hidden = !document.getElementById('trainCycle').checked;
@@ -649,22 +650,22 @@ document.getElementById('saveTrain').onclick = ()=>{
   if (TRAIN.autoLift && nTrain>0) msg += ` Opens on Lift during the window.`;
   if (TRAIN.cycle && nTrain>0){
     const avg = Math.round((nTrain*TRAIN.trainOffset + (7-nTrain)*TRAIN.restOffset)/7);
-    msg += ` Corridor cycles: train ${TRAIN.trainOffset>=0?'+':''}${TRAIN.trainOffset}, rest ${TRAIN.restOffset>=0?'+':''}${TRAIN.restOffset} · weekly avg ${avg>=0?'+':''}${avg}.`;
+    msg += ` Daily calories change by ${TRAIN.trainOffset>=0?'+':''}${TRAIN.trainOffset} on training days and ${TRAIN.restOffset>=0?'+':''}${TRAIN.restOffset} on rest days. Weekly average: ${avg>=0?'+':''}${avg}.`;
   }
   setStatus(st, msg, 'good');
 };
 document.getElementById('savePens').onclick = ()=>{
-  const st = document.getElementById('targetStatus');
+  const st = document.getElementById('penStatus');
   const k = +document.getElementById('penK').value, p = +document.getElementById('penP').value;
-  if ([k,p].some(v=>isNaN(v)||v<0) || p>=100){ setStatus(st,'Penalties must be ≥0 (protein cut below 100).','bad'); return; }
+  if ([k,p].some(v=>isNaN(v)||v<0) || p>=100){ setStatus(st,'Both adjustments must be zero or higher, and the protein reduction must stay below 100%.','bad'); return; }
   INFLATE = 1 + k/100; DEDUCT = 1 - p/100;
   savePens(); render();
-  setStatus(st,`Penalties saved: +${k}% kcal / −${p}% P unweighed. Applies to new entries.`,'good');
+  setStatus(st,`Estimate adjustments saved: +${k}% calories and −${p}% protein. They apply to new unweighed entries.`,'good');
 };
 document.getElementById('resetPens').onclick = ()=>{
   INFLATE = 1 + PROTOCOL.penK/100; DEDUCT = 1 - PROTOCOL.penP/100;
   savePens(); fillTargetInputs(); render();
-  setStatus(document.getElementById('targetStatus'),'Protocol penalties restored (+10% kcal / −10% P).','good');
+  setStatus(document.getElementById('penStatus'),'Estimate adjustments reset to +10% calories and −10% protein.','good');
 };
 
 document.getElementById('resetBtn').onclick = async ()=>{

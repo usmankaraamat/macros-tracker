@@ -14,7 +14,7 @@ let FLOOR_M = PROTOCOL.floor, CEIL_M = PROTOCOL.ceil;
 // corridor = TDEE + offset ± band. Presets set offset; 'custom' uses the stored offset.
 let GOAL = { mode:'off', offset:0, band:100 };
 const GOAL_OFFSET = { cut:-500, maintain:0, bulk:300 };   // 'custom' uses GOAL.offset
-const GOAL_LABEL  = { cut:'cut', maintain:'maintain', bulk:'lean bulk', custom:'custom' };
+const GOAL_LABEL  = { cut:'lose weight', maintain:'maintain weight', bulk:'gain slowly', custom:'custom goal' };
 function goalOffset(){ return GOAL.mode==='custom' ? (+GOAL.offset||0) : (GOAL_OFFSET[GOAL.mode]||0); }
 // Suggested protein by goal (g per kg bodyweight): bulk leans lower, cut higher to spare muscle.
 const GOAL_PROTEIN_PER_KG = { cut:2.2, maintain:1.8, bulk:1.6, custom:1.8, off:1.8 };

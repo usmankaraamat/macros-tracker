@@ -663,31 +663,31 @@ function renderTDEE(){
   const td=computeTDEE();
   const hasProfile = +PROFILE.age>0 && +PROFILE.height>0;
   if (!td.kg){
-    out.className='tactical'; out.textContent='Log a weight on Trends to compute your BMR and TDEE.';
+    out.className='tactical'; out.textContent='Add a morning weight under Logs so Eatify can estimate your maintenance calories.';
     if (mini) mini.hidden = true;
     return;
   }
   if (!hasProfile && td.dataTDEE==null){
-    const msg='Enter age &amp; height for a formula estimate — or log ~7 days of weigh-ins and it derives maintenance from your data.';
+    const msg='Enter your age and height for a starting estimate, or log about a week of food and weigh-ins so Eatify can learn from your results.';
     out.className='tactical'; out.innerHTML=msg;
-    echo('tactical', 'Add your age and height in <b>Settings</b> to get an adaptive TDEE.');
+    echo('tactical', 'Add your age and height in <b>Settings</b> to estimate maintenance calories.');
     return;
   }
   const bits=[];
   const rd=LedgerCore.tdeeReadout({formula:td.formulaBase||0,avgIntake:td.avgIntake,
     ratePerWeek:td.ratePerWeek,rateSEPerWeek:td.rateSEPerWeek,sampleDays:td.sampleDays,
     intakes:td.intakes||[],nWeighIns:td.nWeighIns||0,coverage:td.coverage});
-  if (hasProfile) bits.push(`formula ${td.formula.toLocaleString()}`);
+  if (hasProfile) bits.push(`profile estimate ${td.formula.toLocaleString()}`);
   bits.push(td.dataTDEE!=null
-    ? `measured ${td.dataTDEE.toLocaleString()} (${Math.round(td.w*100)}% weighted over ${td.sampleDays}d)`
-    : `measured pending — needs ~7+ days of weigh-ins`);
+    ? `your logs suggest ${td.dataTDEE.toLocaleString()} over ${td.sampleDays} days`
+    : `personal estimate needs about 7 days of food and weigh-ins`);
   // Say so when weigh-ins are being excluded, or the number looks unexplained.
   if (TREND_START) bits.push(`weigh-ins before ${TREND_START} excluded`);
   out.className='tactical good';
-  const range=`model range ${rd.modelRange[0].toLocaleString()}–${rd.modelRange[1].toLocaleString()}`;
+  const range=`likely range ${rd.modelRange[0].toLocaleString()}–${rd.modelRange[1].toLocaleString()}`;
   const caveat=rd.warnings.length?` · ${rd.warnings.join(' · ')}`:'';
-  out.innerHTML = `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${range} · ${bits.join(' · ')}${caveat}.`;
-  echo('tactical good', `<b>Adaptive TDEE ≈ ${td.blended.toLocaleString()} kcal/day</b> · ${range} · ${Math.round((td.coverage||0)*100)}% matched-day coverage. Edit your profile in Settings.`);
+  out.innerHTML = `<b>Estimated maintenance: ${td.blended.toLocaleString()} kcal/day</b> · ${range} · ${bits.join(' · ')}${caveat}.`;
+  echo('tactical good', `<b>Estimated maintenance: ${td.blended.toLocaleString()} kcal/day</b> · ${range}. Edit your profile in Settings.`);
 }
 // Goal readout: the corridor the goal will impose + suggested protein for the phase.
 function renderGoal(){
@@ -700,15 +700,14 @@ function renderGoal(){
   if (GOAL.mode==='off'){ out.hidden = true; return; }
   out.hidden = false;
   const td=computeTDEE();
-  if (!(td.blended>0)){ out.className='tactical'; out.textContent='Fill in the body profile above and log a weight on Trends to activate the auto corridor.'; return; }
+  if (!(td.blended>0)){ out.className='tactical'; out.textContent='Complete your body profile and add a morning weight under Logs to calculate a calorie range for this goal.'; return; }
   const off=effectiveOffset();
   const c=LedgerCore.corridorFromTDEE(td.blended, off, GOAL.band||100);
   const kg=latestWeight(), perKg=GOAL_PROTEIN_PER_KG[GOAL.mode]||1.8;
   const pg = kg>0 ? ` · protein ${perKg} g/kg ≈ ${Math.round(perKg*kg)}g` : '';
-  const offTxt = off>0?`+${off}`:`${off}`;
   const dayTxt = TRAIN.cycle ? ` · ${isTrainingDay(ACTIVE_DATE)?splitForDate(ACTIVE_DATE)+' day':'rest day'}` : '';
   out.className='tactical good';
-  out.innerHTML = `<b>${GOAL_LABEL[GOAL.mode]}${dayTxt}</b> · corridor <b>${c.floor.toLocaleString()}–${c.ceil.toLocaleString()}</b>/day (TDEE ${td.blended.toLocaleString()} ${offTxt})${pg}. Recalibrates as your data grows.`;
+  out.innerHTML = `<b>${GOAL_LABEL[GOAL.mode]}${dayTxt}</b> · daily calorie range <b>${c.floor.toLocaleString()}–${c.ceil.toLocaleString()}</b>${pg}. Based on estimated maintenance of ${td.blended.toLocaleString()} calories and updated as you log more data.`;
   // Per-meal protein plan — distributed across the meal plan by calories (spread aids MPS).
   const meals=mealPlanHours(), mt=meals.reduce((s,m)=>s+m.kcal,0);
   if (meals.length && mt>0 && P_TARGET>0)

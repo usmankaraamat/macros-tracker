@@ -176,7 +176,9 @@ The meal engineer's three preferred foods, including their nutrition bases, live
 inside the synced targets bundle so custom USDA choices also survive offline.
 First-run help uses a single dismissible item inside **Today's read**, never an
 automatic modal. Its five-screen plain-language walkthrough is device-local and
-can always be reopened from Settings.
+can always be reopened from Settings. Every Settings section also begins with a
+collapsed **How to set this up** guide that explains each field and gives a safe
+beginner setup without adding permanent help text around every control.
 The micronutrient panel has an averaging-window selector — Today / Week /
 2 Wks / Month (weekly is the default) — so a nutrient that is *consistently*
 short reads apart from a single off day. `LedgerCore.microAverages` divides each
