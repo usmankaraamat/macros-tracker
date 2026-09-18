@@ -7,6 +7,7 @@
 // never clobber a day it hasn't seen. All failures degrade to offline-only.
 const SYNC_META_KEY = 'ledger_sync_meta';
 let syncBusy = false, syncQueued = false, syncTimer = null;
+let syncWaiters = [];
 
 function supaUrl(){ return getKey(LS.supaUrl) || SUPA_DEFAULT_URL; }
 function supaAnonKey(){ return getKey(LS.supaKey) || SUPA_DEFAULT_KEY; }
@@ -54,8 +55,11 @@ async function supaFetch(path, opts){
 }
 // One full cycle: pull remote → merge per-day → apply locally → push the merge back.
 async function syncNow(){
-  if (!syncConfigured()){ setSyncDot('off'); return; }
-  if (syncBusy){ syncQueued = true; return; }
+  if (!syncConfigured()){ setSyncDot('off'); return {ok:false, error:new Error('sign in required')}; }
+  if (syncBusy){
+    syncQueued = true;
+    return new Promise(resolve => syncWaiters.push(resolve));
+  }
   syncBusy = true; setSyncDot('pending');
   try {
     const r = await supaFetch('/rest/v1/rpc/account_sync_get', {method:'POST', body:'{}'});
@@ -144,11 +148,17 @@ async function syncNow(){
     });
     if (!p.ok) throw new Error('push '+p.status);
     setSyncDot('ok');
+    return {ok:true};
   } catch(e){
     setSyncDot('err', 'Sync error: ' + e.message);
+    return {ok:false, error:e};
   } finally {
     syncBusy = false;
-    if (syncQueued){ syncQueued = false; syncNow(); }
+    if (syncQueued){
+      syncQueued = false;
+      const waiters = syncWaiters.splice(0);
+      syncNow().then(result => waiters.forEach(resolve => resolve(result)));
+    }
   }
 }
 function scheduleSync(){

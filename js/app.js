@@ -67,7 +67,7 @@ function organiseSettingsPanel(){
   panel.replaceChildren(
     summary,
     guide,
-    group('Calories & goals', 'Choose a goal or set your own daily range.', goal, true),
+    group('Calories & goals', 'Choose a goal or set your own daily range.', goal, false),
     group('Body profile', 'Helps estimate how many calories you burn.', body, false),
     group('Training', 'Optional schedule for workout features.', [training], false),
     group('Food logging & AI', 'Included searches, estimates, and optional API keys.', [...api, penalties, keyHelp], false),
@@ -190,10 +190,16 @@ document.getElementById('signOutBtn').onclick = async ()=>{
   await signOutHosted(); setSyncDot('off'); await refreshAccountUI();
 };
 window.addEventListener('eatify:auth', ()=>{ refreshAccountUI(); if(syncConfigured()) syncNow(); });
-document.getElementById('syncNowBtn').onclick = ()=>{
+document.getElementById('syncNowBtn').onclick = async ()=>{
   const st = document.getElementById('syncStatus');
+  const btn = document.getElementById('syncNowBtn');
   if (!syncConfigured()){ setStatus(st, 'Sign in first, then sync.', 'bad'); return; }
-  setStatus(st, 'Syncing…'); syncNow();
+  btn.disabled = true;
+  setStatus(st, 'Syncing…');
+  const result = await syncNow();
+  btn.disabled = false;
+  if (result?.ok) setStatus(st, 'Sync complete — your devices are up to date.', 'good');
+  else setStatus(st, `Sync failed: ${result?.error?.message || 'please check your connection and try again.'}`, 'bad');
 };
 
 // Discover which models this key can actually use, and pick a valid one.
