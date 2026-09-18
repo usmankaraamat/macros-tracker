@@ -18,6 +18,8 @@ In the Supabase SQL editor, use:
 select * from product_usage_summary;
 select * from product_usage_daily;
 select * from product_feedback_inbox;
+select * from portfolio_usage_summary;
+select * from product_event_daily;
 ```
 
 `product_usage_summary` shows DAU, WAU, MAU, activated installations,
@@ -29,3 +31,7 @@ The public client roles cannot read these tables or views. Anonymous writes pass
 through the `product-data` Edge Function, which validates input and limits each
 installation to five feedback submissions per day.
 
+`portfolio_usage_summary` contains anonymous daily, weekly, and monthly visitor
+estimates plus page views. `product_event_daily` also shows visits by page and
+the Eatify/Hisaab install funnel. The visitor identifier is random browser
+storage; no cookies, IP addresses, referrers, or user-agent strings are stored.

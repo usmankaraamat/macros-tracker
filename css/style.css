@@ -1937,6 +1937,10 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
 .guide-invite .grow { min-width:220px; }
 .guide-invite .grow span { display:block; margin-top:2px; }
 .guide-invite > button { flex:none; }
+.install-invite { flex-wrap:wrap; margin-bottom:12px; }
+.install-invite .grow { min-width:220px; }
+.install-invite .grow span { display:block; margin-top:3px; color:var(--graphite); }
+.install-invite-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .settings-guide { width:100%; margin:0 0 12px; }
 .guide-progress { display:flex; gap:6px; margin:2px 0 18px; }
 .guide-progress span { width:22px; height:3px; border-radius:99px; background:var(--rule-lit); }

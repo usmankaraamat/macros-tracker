@@ -128,6 +128,8 @@ organisePlan();
 organiseTrends();
 hydrateIcons();
 
+document.getElementById('installAppBtn').onclick=()=>requestEatifyInstall();
+
 const PIN_KEYS = {header:'eatify.pin.header', calories:'eatify.pin.calories'};
 function setPinned(kind, pinned){
   const el = kind==='header' ? document.querySelector('.app-header') : document.getElementById('instrument');

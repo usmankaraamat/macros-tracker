@@ -72,5 +72,10 @@ function noteProductUse(){
 async function submitProductFeedback({message,rating,replyEmail}){
   return productRequest({kind:'feedback', message, rating, replyEmail});
 }
+async function productEvent(event,page=''){
+  if(!productAnalyticsEnabled() || !navigator.onLine) return {skipped:true};
+  try { return await productRequest({kind:'event',event,page}); }
+  catch(error){ return {error}; }
+}
 window.addEventListener('online',()=>productHeartbeat());
 setTimeout(()=>productHeartbeat(),1200);
