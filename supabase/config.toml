@@ -5,3 +5,6 @@ verify_jwt = true
 
 [functions.eatify-usda]
 verify_jwt = true
+
+[functions.product-data]
+verify_jwt = false

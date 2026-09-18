@@ -196,6 +196,29 @@ header h1 { flex: none; margin-right: auto; }
 .sync-dot.err     { background: var(--hot); }
 @keyframes syncPulse { 50% { opacity: 0.25; } }
 
+.pin-toggle {
+  position: relative; width: 32px; height: 32px; min-height: 32px; padding: 0;
+  flex: none; border: 0; background: transparent; box-shadow: none;
+}
+.pin-toggle::before {
+  content: ''; position: absolute; inset: 50% auto auto 50%; width: 8px; height: 8px;
+  border: 1.5px solid var(--faint); border-radius: 50%; transform: translate(-50%,-50%);
+  background: transparent; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.pin-toggle:hover::before { border-color: var(--chalk); }
+.pin-toggle[aria-pressed="true"]::before {
+  background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash);
+}
+.app-header.is-pinned {
+  position: sticky; top: env(safe-area-inset-top); z-index: 40; padding: 8px 4px 10px;
+  background: color-mix(in srgb, var(--bench) 94%, transparent); backdrop-filter: blur(14px);
+}
+.corridor-card { position: relative; }
+.corridor-card .card-pin { position: absolute; top: 5px; left: 4px; z-index: 2; }
+.corridor-card .cor-top { padding-left: 20px; }
+.corridor-card.is-pinned { position: sticky; top: calc(env(safe-area-inset-top) + 6px); z-index: 30; }
+body.header-pinned .corridor-card.is-pinned { top: calc(env(safe-area-inset-top) + 72px); }
+
 /* ========================= sections (the sheet) ========================== */
 
 /* Cards. Each section is a rounded, softly-bordered surface on the near-black

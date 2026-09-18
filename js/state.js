@@ -202,6 +202,7 @@ function save(){
   ledger = ensureLedgerDay(ledger, VIEW_DATE);
   try{ localStorage.setItem('ledger_'+VIEW_DATE, JSON.stringify(ledger)); }catch(e){}
   stampSyncMeta(VIEW_DATE); scheduleSync();    // mark this day edited now; sync (if configured) follows
+  if (typeof noteProductUse === 'function') noteProductUse();
 }
 function load(){ ledger=[]; try{ const r=localStorage.getItem('ledger_'+VIEW_DATE); if(r)ledger=ensureLedgerDay(JSON.parse(r),VIEW_DATE);}catch(e){} }
 

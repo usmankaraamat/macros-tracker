@@ -25,12 +25,13 @@ function organiseSettingsPanel(){
   const children = [...panel.children];
   const marker = prefix => children.findIndex(el =>
     el.classList.contains('panel-title') && el.textContent.trim().startsWith(prefix));
-  const apiI = marker('Included food tools'), syncI = marker('Your account'), bodyI = marker('Body profile');
+  const apiI = marker('Included food tools'), syncI = marker('Your account'), reviewI = marker('Review Eatify'), bodyI = marker('Body profile');
   const goalI = marker('Goal'), targetI = marker('Daily targets');
-  if ([apiI, syncI, bodyI, goalI, targetI].some(i => i < 0)) return;
+  if ([apiI, syncI, reviewI, bodyI, goalI, targetI].some(i => i < 0)) return;
 
   const api = children.slice(apiI, syncI);
-  const sync = children.slice(syncI, bodyI);
+  const sync = children.slice(syncI, reviewI);
+  const review = children.slice(reviewI, bodyI);
   const body = children.slice(bodyI, goalI);
   const tail = children.slice(goalI);
   const detailBy = prefix => tail.find(el => el.tagName === 'DETAILS' &&
@@ -72,6 +73,7 @@ function organiseSettingsPanel(){
     group('Training', 'Optional schedule for workout features.', [training], false),
     group('Food logging & AI', 'Included searches, estimates, and optional API keys.', [...api, penalties, keyHelp], false),
     group('Account & sync', 'Use the same data on your devices.', sync, false),
+    group('Review & privacy', 'Send an idea and choose whether to share anonymous counts.', review, false),
     group('Backup & reset', 'Export, restore, or clear a day.', [backup], false)
   );
 }
@@ -125,6 +127,22 @@ organiseLogs();
 organisePlan();
 organiseTrends();
 hydrateIcons();
+
+const PIN_KEYS = {header:'eatify.pin.header', calories:'eatify.pin.calories'};
+function setPinned(kind, pinned){
+  const el = kind==='header' ? document.querySelector('.app-header') : document.getElementById('instrument');
+  const btn = document.getElementById(kind==='header' ? 'headerPin' : 'caloriePin');
+  el?.classList.toggle('is-pinned',pinned);
+  btn?.setAttribute('aria-pressed',String(pinned));
+  document.body.classList.toggle('header-pinned',document.querySelector('.app-header')?.classList.contains('is-pinned'));
+  try{ localStorage.setItem(PIN_KEYS[kind],pinned?'true':'false'); }catch(e){}
+}
+for(const [kind,key] of Object.entries(PIN_KEYS)){
+  let pinned=false; try{ pinned=localStorage.getItem(key)==='true'; }catch(e){}
+  setPinned(kind,pinned);
+  document.getElementById(kind==='header'?'headerPin':'caloriePin').onclick=event=>
+    setPinned(kind,event.currentTarget.getAttribute('aria-pressed')!=='true');
+}
 
 const gearBtn = document.getElementById('gear');
 gearBtn.onclick = ()=>{
@@ -200,6 +218,38 @@ document.getElementById('syncNowBtn').onclick = async ()=>{
   btn.disabled = false;
   if (result?.ok) setStatus(st, 'Sync complete — your devices are up to date.', 'good');
   else setStatus(st, `Sync failed: ${result?.error?.message || 'please check your connection and try again.'}`, 'bad');
+};
+
+const analyticsToggle=document.getElementById('anonymousAnalytics');
+analyticsToggle.checked=productAnalyticsEnabled();
+analyticsToggle.onchange=()=>{
+  setProductAnalyticsEnabled(analyticsToggle.checked);
+  if(analyticsToggle.checked) productHeartbeat({force:true});
+};
+async function refreshFeedbackIdentity(){
+  const user=await hostedUser().catch(()=>null);
+  const wrap=document.getElementById('feedbackEmailWrap');
+  const note=document.getElementById('feedbackIdentity');
+  wrap.hidden=!!user;
+  note.textContent=user?.email
+    ? 'Feedback will include '+user.email+' so Usman can reply. No meals, nutrition details, or API keys are collected.'
+    : 'Feedback is anonymous unless you add a reply email. No meals, nutrition details, or API keys are collected.';
+}
+refreshFeedbackIdentity();
+window.addEventListener('eatify:auth',refreshFeedbackIdentity);
+document.getElementById('sendFeedback').onclick=async()=>{
+  const button=document.getElementById('sendFeedback');
+  const status=document.getElementById('feedbackStatus');
+  const message=document.getElementById('feedbackMessage').value.trim();
+  const rating=Number(document.getElementById('feedbackRating').value)||null;
+  if(message.length<3){ setStatus(status,'Write a little more first.','bad'); return; }
+  button.disabled=true; setStatus(status,'Sending…');
+  try{
+    const result=await submitProductFeedback({message,rating,replyEmail:document.getElementById('feedbackEmail').value.trim()});
+    document.getElementById('feedbackMessage').value='';
+    setStatus(status,result.replyTo ? 'Sent. A reply can go to '+result.replyTo+'.' : 'Sent anonymously. Thanks for helping shape Eatify.','good');
+  }catch(error){ setStatus(status,error.message,'bad'); }
+  finally{ button.disabled=false; }
 };
 
 // Discover which models this key can actually use, and pick a valid one.

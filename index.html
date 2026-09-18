@@ -32,6 +32,7 @@
     <button type="button" id="dayNext" aria-label="Next day" title="Next day"><span data-ui-icon="next"></span></button>
   </div>
   <div class="head-end">
+    <button type="button" class="pin-toggle" id="headerPin" aria-label="Pin the top bar" aria-pressed="false" title="Keep the top bar in sight"></button>
     <span id="syncDot" class="sync-dot off" role="img" aria-label="Sync off"
           title="Sync off — configure in Settings"></span>
     <button type="button" id="gear" aria-label="Settings" aria-expanded="false"
@@ -120,6 +121,25 @@
     </div>
   </details>
   <div class="tactical" id="syncStatus">Sign in to sync logs, targets, workouts, measurements, and settings across devices. Personal API keys never sync.</div>
+
+  <span class="panel-title">Review Eatify</span>
+  <div class="field">
+    <label for="feedbackRating">How is Eatify treating you?</label>
+    <select id="feedbackRating">
+      <option value="">No rating</option>
+      <option value="5">5 — love it</option>
+      <option value="4">4 — pretty good</option>
+      <option value="3">3 — it is okay</option>
+      <option value="2">2 — needs work</option>
+      <option value="1">1 — rough right now</option>
+    </select>
+  </div>
+  <div class="field"><label for="feedbackMessage">What should change?</label><textarea id="feedbackMessage" rows="4" maxlength="4000" placeholder="A bug, an idea, or anything that feels annoying…"></textarea></div>
+  <div class="field" id="feedbackEmailWrap"><label for="feedbackEmail">Email for a reply <span class="tactical">(optional)</span></label><input type="email" id="feedbackEmail" autocomplete="email" placeholder="you@example.com"></div>
+  <label class="pill"><input type="checkbox" id="anonymousAnalytics"> Share anonymous usage counts</label>
+  <div class="tactical" id="feedbackIdentity">No meals, nutrition details, API keys, or personal entries are collected.</div>
+  <button type="button" id="sendFeedback">Send feedback</button>
+  <div class="tactical" id="feedbackStatus" hidden></div>
 
   <!-- Body profile lives here, not on Trends: it is configuration you set once,
        not a reading you check. Trends shows what it produces. -->
@@ -277,6 +297,7 @@
        the macros below the fold; a horizontal track says the same thing in a fifth
        of the height and leaves room for the numbers that need reading next. -->
   <section class="corridor-card" id="instrument" aria-label="Caloric corridor">
+    <button type="button" class="pin-toggle card-pin" id="caloriePin" aria-label="Pin calorie summary" aria-pressed="false" title="Keep calories in sight"></button>
     <div class="cor-top">
       <div class="cor-hero"><span class="cor-val is-empty" id="readout">0</span><span class="cor-unit">kcal</span></div>
       <div class="cor-state is-empty" id="verdictStamp">no entries</div>
@@ -788,6 +809,7 @@
 <script src="js/lift.js"></script>
 <script src="js/logs.js"></script>
 <script src="js/sync.js"></script>
+<script src="js/analytics.js"></script>
 <script src="js/guide.js"></script>
 <script src="js/app.js"></script>
 </body>
