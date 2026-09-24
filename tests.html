@@ -1405,6 +1405,21 @@ group('fatigueIndex — rep drop-off at fixed load');
   check('session RIR charged to last set marks an estimate', est.estimate===true && est.adjustedDropoff < est.rawDropoff);
 })();
 
+// ---- set-count guardrail ----
+group('setCountCheck — flags a count that looks misread');
+(function(){
+  const sets = n => Array.from({length:n}, () => ({kg:8, reps:12}));
+  const six = [{sets:sets(6)}, {sets:sets(6)}];
+  check('13 sets against a usual 6 is flagged', C.setCountCheck(sets(13), six).flag === true);
+  check('the message says what is usual', /at most 6/.test(C.setCountCheck(sets(13), six).message));
+  check('a normal session is not', C.setCountCheck(sets(6), six).flag === false);
+  check('one extra set is not', C.setCountCheck(sets(8), six).flag === false);
+  check('with no history, 9 sets is flagged and 8 is not',
+        C.setCountCheck(sets(9), []).flag === true && C.setCountCheck(sets(8), []).flag === false);
+  check('a lift that usually gets 10 sets can get 12',
+        C.setCountCheck(sets(12), [{sets:sets(10)}]).flag === false);
+})();
+
 // ---- load-jump guardrail ----
 group('loadJumpCheck — non-blocking progression guardrail');
 (function(){

@@ -314,6 +314,15 @@ function liftJumpNotice(x){
   if (chk.severity === 'none') return '';
   return `<div class="lift-jump ${chk.severity}">⚠ ${Math.round(proposed)} kg — ${escapeHtml(chk.message)}</div>`;
 }
+// The same kind of inline note for a set count far past this lift's usual — the shape a
+// misread line takes ("8×13, 6x12, 6x11" once became thirteen sets).
+function liftSetCountNotice(x){
+  const all = allWorkouts();
+  const history = Object.keys(all).filter(d=>d!==VIEW_DATE).sort()
+    .map(d=>(all[d].exercises||[]).filter(e=>e.id===x.id)[0]).filter(Boolean);
+  const chk = LedgerCore.setCountCheck(x.sets, history);
+  return chk.flag ? `<div class="lift-jump warn">⚠ ${escapeHtml(chk.message)}</div>` : '';
+}
 // Within-exercise rep drop-off at a fixed load — high drop-off usually means rest was too
 // short. Only shown for straight sets at one load; a mixed-load exercise says nothing here.
 const FATIGUE_LABEL = { ok:'', elevated:'elevated', high:'high' };
@@ -351,6 +360,7 @@ function renderLiftPending(){
       </div>
       <div class="lift-sets">${x.sets.map(SET_TXT).join('  ·  ')}</div>
       ${liftJumpNotice(x)}
+      ${liftSetCountNotice(x)}
       <div class="lift-rir"><label for="plr${i}" title="How many more reps you had in you on your hardest set. Guess it — only the change over time is ever read, so a consistent personal bias cancels out.">Reps left in the tank on your hardest set</label>
         <input type="number" id="plr${i}" data-pr="${i}" min="0" max="10" step="1"
                value="${x.rir==null?'':x.rir}" placeholder="–"></div>

@@ -2132,6 +2132,23 @@
                ` — ${pctPerWeek.toFixed(1)}%/wk. Typical safe loading is under ${th.warn}%/wk.` };
   }
 
+  // ---- set-count guardrail -----------------------------------------------------
+  // The parse most likely to be wrong is the one that invents sets: "8×13, 6x12, 6x11"
+  // once read as thirteen. A count well past what this lift usually gets is flagged at
+  // review time. Like the load-jump check it informs and never gates. History is
+  // [{sets:[...]}] from earlier sessions; with none, more than 8 is flagged on its own.
+  const SET_COUNT_CEIL = 8;
+  function setCountCheck(proposedSets, history) {
+    const n = (proposedSets || []).length;
+    const counts = (history || []).map(h => (h && h.sets || []).length).filter(c => c > 0).slice(-5);
+    const usual = counts.length ? Math.max.apply(null, counts) : null;
+    const limit = usual == null ? SET_COUNT_CEIL : Math.max(SET_COUNT_CEIL, Math.ceil(usual * 1.5));
+    if (n <= limit) return { flag: false, sets: n, usual: usual, message: '' };
+    return { flag: true, sets: n, usual: usual,
+             message: (usual == null ? `${n} sets` : `${n} sets, against at most ${usual} in recent sessions`) +
+                      ' — check the line was read the way you meant' };
+  }
+
   // ---- data-quality: intake variability and TDEE confidence ------------------
   // Coefficient of variation of daily intake — the cheapest data-quality signal there is,
   // and the gate on whether an adaptive TDEE means anything. A 4,900 kcal day next to a
@@ -2504,7 +2521,7 @@
     exercisePerformance, sessionPerformance, frequencyConsistency, liftVsWeight,
     normalizeName, exerciseId, matchExercise, parseWorkoutLine, parseWorkout, SEED_EXERCISES,
     MUSCLE_GROUPS, MUSCLE_LABEL, EXERCISE_META, exerciseMeta, normalizeMuscles, cleanCategory, workingSetCount,
-    weeklyVolumeByMuscle, muscleFrequency, muscleProgress, volumeDrift, fatigueIndex, loadJumpCheck,
+    weeklyVolumeByMuscle, muscleFrequency, muscleProgress, volumeDrift, fatigueIndex, loadJumpCheck, setCountCheck,
     intakeStats, tdeeConfidence, tdeeReadout, dataTrust, deloadRatio,
     LIFT_REP_CAP, LIFT_MIN_SESSIONS, LIFT_FLAT_PCT, LIFT_RIR_DRIFT, LIFT_WINDOW_DAYS,
     LIFT_SE_HIGH, LIFT_SE_MED,

@@ -8,7 +8,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -19,4 +19,8 @@ jobs:
       - name: Core regression suite
         run: node scripts/run-core-tests.mjs
       - name: Service-worker cache contract
+        # Compared with the state before this push, so a multi-commit push is
+        # checked as a whole rather than only its last commit.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: node scripts/check-cache-version.mjs
