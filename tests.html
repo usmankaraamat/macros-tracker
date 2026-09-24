@@ -1233,6 +1233,12 @@ group('parseWorkout — the grammar');
   const fives = P('squat 5x5');
   check('a small first number is a set count, so 5x5 is not a 5kg squat',
         fives.exercises.length === 0 && fives.errors.length === 1, JSON.stringify(fives.exercises));
+  const light = P('seated lateral raise 8×13, 6x12, 6x11').exercises[0];
+  check('once a pair reads as a load, later small pairs on the line do too',
+        light.sets.map(s => s.kg + 'x' + s.reps).join(' ') === '8x13 6x12 6x11', JSON.stringify(light.sets));
+  const more = P('bench 60x8, 3x6').exercises[0];
+  check('but a count far below the load is still sets at that load',
+        more.sets.map(s => s.kg + 'x' + s.reps).join(' ') === '60x8 60x6 60x6 60x6', JSON.stringify(more.sets));
   const heavy = P('squat 100x5').exercises[0];
   check('but 100x5 is a load', heavy.sets[0].kg === 100 && heavy.sets[0].reps === 5, JSON.stringify(heavy.sets));
 
@@ -1253,6 +1259,12 @@ group('parseWorkout — the grammar');
   check('bodyweight with no added load still logs',
         puPlain.sets.length === 3 && puPlain.sets.every(s => s.kg === 0 && s.reps === 8 && s.bw === true),
         JSON.stringify(puPlain.sets));
+  const bwSets = t => { const e = P(t).exercises[0];
+    return e ? e.id + ' ' + e.sets.map(s => (s.bw ? 'bw+' : '') + s.kg + 'x' + s.reps).join(' ') : 'none'; };
+  ['pullups bwx12', 'pullups bw x 12', 'pullups bodyweight x 12', 'pull ups BWx12'].forEach(t =>
+    check('"' + t + '" is one bodyweight set of 12', bwSets(t) === 'pull-up bw+0x12', bwSets(t)));
+  check('bw×reps×sets expands like W×R×S', bwSets('pullups bwx12x3') === 'pull-up bw+0x12 bw+0x12 bw+0x12', bwSets('pullups bwx12x3'));
+  check('a small added load is a load, not a set count', bwSets('pullups bw+5x8') === 'pull-up bw+5x8', bwSets('pullups bw+5x8'));
   // The form the "repeat last session" chip writes back, round-tripped.
   const rt = P('pullups bw+10kgx6, bw+10kgx6, bw+10kgx5').exercises[0];
   check('the repeat-chip format round-trips',

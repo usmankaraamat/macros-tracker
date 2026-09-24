@@ -1650,7 +1650,17 @@
     // more specific pattern.
     s = s.replace(/(\d+(?:\.\d+)?)\s*rir\b/i, (m, d) => { rir = +d; return ' '; });
     if (rir == null) s = s.replace(/\brir\s*[:=@]?\s*(\d+(?:\.\d+)?)/i, (m, d) => { rir = +d; return ' '; });
-    if (/\bbw\b|\bbodyweight\b/i.test(s)) { bw = true; s = s.replace(/\bbodyweight\b|\bbw\b/ig, ' '); }
+    // "bw" is usually glued to what follows — "bwx12", "bw+10x6" — so a word boundary
+    // cannot find it. Each form is rewritten into the ordinary grammar: an added load
+    // becomes a stated weight (so "bw+5x8" is 5kg × 8, not five sets), and "bw×" becomes
+    // a zero load in the weight slot (so "bwx12x3" reads like "22.5x10x3").
+    if (/\b(?:body\s*weight|bw)(?=$|[^a-z]|x\s*\d)/i.test(s)) {
+      bw = true;
+      s = s.replace(/\b(?:body\s*weight|bw)\s*\+\s*(\d+(?:\.\d+)?)\s*(kgs?|kilos?|lbs?|pounds?)?/ig,
+                    (m, d, unit) => ' ' + d + (unit || 'kg') + ' ')
+           .replace(/\b(?:body\s*weight|bw)\s*[x×*]\s*(?=\d)/ig, ' 0x')
+           .replace(/\b(?:body\s*weight|bw)\b/ig, ' ');
+    }
 
     // The set list starts at the first digit, or at the word "set" when a line is written
     // out longhand ("bicep curls, set 1 20kg 12 reps").
@@ -1665,7 +1675,7 @@
     const hasUnit = /\d\s*(kgs?|kilos?|lbs?|pounds?)\b/i.test(rest) || /@\s*\d/.test(rest);
 
     const sets = [];
-    let ctxW = null, ctxR = null, bad = 0;
+    let ctxW = null, ctxR = null, bad = 0, loadFirst = false;
     rest.split(/[,;]|\band\b|&/i).map(c => c.trim()).filter(Boolean).forEach(chunk => {
       let c = chunk.replace(/^sets?\s*#?\s*\d+\s*[:.\-]?\s*/i, '');   // "set 1" is a label, not a count
       let w = null, r = null, count = 1;
@@ -1682,16 +1692,20 @@
       const singles = groups.filter(g => g.length === 1).map(g => g[0]);
       if (multi.length) {
         const g = multi[0];
-        if (g.length >= 3) { if (w == null) w = g[0]; r = g[1]; count = g[2]; }        // 22.5x10x3
+        if (bw && g[0] === 0) { w = 0; r = g[1]; if (g.length >= 3) count = g[2]; }      // bwx12, bwx12x3
+        else if (g.length >= 3) { if (w == null) w = g[0]; r = g[1]; count = g[2]; }        // 22.5x10x3
         else if (w != null || hasUnit || singles.length) {                             // weight known ⇒ sets × reps
           count = g[0]; r = g[1];
           if (w == null && singles.length) w = singles[0];
         }
         // No weight anywhere on the line, so A×B is ambiguous. A small first number is a
         // set count ("5x5", "3x12"); anything larger is a load ("20x12", "60x8"). Nobody
-        // runs twenty sets, and nobody benches five kilos.
-        else if (g[0] <= 6 && g[1] >= 5) { count = g[0]; r = g[1]; }
-        else { w = g[0]; r = g[1]; }
+        // runs twenty sets, and nobody benches five kilos. But once a pair on this line has
+        // read as a load, the rest follow it: "8x13, 6x12, 6x11" is three dumbbell sets,
+        // not one set and then twelve more at the carried 8kg. A number far below that load
+        // is still a count: "60x8, 3x6" is three more sets at 60, not a 3kg bench.
+        else if (!(loadFirst && g[0] >= ctxW * 0.4) && g[0] <= 6 && g[1] >= 5) { count = g[0]; r = g[1]; }
+        else { w = g[0]; r = g[1]; loadFirst = true; }
       } else if (singles.length >= 2) {
         if (w == null) { w = singles[0]; r = singles[1]; } else if (r == null) r = singles[0];
       } else if (singles.length === 1) {
