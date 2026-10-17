@@ -20,12 +20,25 @@
     });
     const g = num => Number(m[num] || 0);
     const has = num => Object.prototype.hasOwnProperty.call(m, String(num));
-    const p = g('203'), f = g('204'), c = g('205');
+    // Carbohydrate: total by difference (#205), else by summation (#205.2, which some
+    // Foundation foods ship instead). Starch alone is not total carbohydrate, so it is
+    // never used as a stand-in.
+    const hasC = has('205') || has('205.2');
+    const p = g('203'), f = g('204'), c = has('205') ? g('205') : g('205.2');
+    // A record missing protein, fat or carbohydrate is incomplete, not "zero carbs".
+    // "Beans, Dry, Dark Red Kidney (0% moisture)" (FDC 747440) has no #205 and no energy
+    // at all; reading the gaps as zero produced 0 g carbs and 115 kcal (protein and fat
+    // only). Incomplete records are flagged so they are never picked by default.
+    const missing = [];
+    if (!has('203')) missing.push('protein');
+    if (!has('204')) missing.push('fat');
+    if (!hasC) missing.push('carbs');
     // Prefer Atwater factors (reliable on Foundation foods) over #208, which USDA
     // sometimes ships as a bogus low placeholder — e.g. "Potatoes, gold, raw" reports
     // #208 = 5 kcal while #957 = 73.5. Fall back to #208, then kJ. Finally, if the
     // chosen value is implausibly low versus the macro-derived estimate, trust macros.
     let kcal = g('957') || g('958') || g('208') || (g('268') ? g('268') / 4.184 : 0);
+    if (!(kcal > 0)) missing.push('energy');
     const est = 4 * c + 4 * p + 9 * f;
     if (est > 0 && kcal < est * 0.5) kcal = est;
     // Micronutrients (per 100g), keyed by USDA nutrient number:
@@ -37,9 +50,17 @@
       fsug:has('269'), na:has('307'), k:has('306'), mg:has('304'), fe:has('303'),
       zn:has('309'), vc:has('401'), vd:has('328'), sfa:has('606'),
       ufa:has('645')||has('646'), tfa:has('605') };
-    return { kcal, p, f, c, ca: g('301'), ph: g('305'), fib: g('291'), sug: g('269'), na: g('307'),
+    known.kcal = missing.indexOf('energy') < 0;
+    known.p = has('203'); known.f = has('204'); known.c = hasC;
+    const out = { kcal, p, f, c, ca: g('301'), ph: g('305'), fib: g('291'), sug: g('269'), na: g('307'),
              k: g('306'), mg: g('304'), fe: g('303'), zn: g('309'), vc: g('401'), vd: g('328'),
              sfa: g('606'), ufa: g('645') + g('646'), tfa: g('605'), _known:known };
+    // Energy is only trustworthy when the record ships it, or when all three macros are
+    // present to derive it from. Missing energy over a complete profile is fine (derived);
+    // a missing macro is not, whatever the energy field says.
+    const gaps = missing.filter(m => m !== 'energy');
+    if (gaps.length) { out.incomplete = true; out._missing = missing; }
+    return out;
   }
 
   // ---- Target resolution ---------------------------------------------------
@@ -337,6 +358,9 @@
     const ql = ' ' + (query || '').toLowerCase() + ' ';
     return foods.map((f, i) => {
       let s = scoreFood(f.name, ql);
+      // A different food, or an incomplete record, sinks below every plausible one.
+      if (identityIssue(f.name, query)) s -= 30;
+      if (f.base && f.base.incomplete) s -= 15;
       const k = f.base && f.base.kcal;
       if (estKcal > 0 && k > 0) s -= Math.min(24, 8 * Math.abs(Math.log(k / estKcal)));
       return { f, s, i };
@@ -411,6 +435,163 @@
     return out;
   }
 
+  // ---- Food identity ---------------------------------------------------------
+  // Calories cannot establish what a food IS. Milk powder and a protein supplement are
+  // both ~400-500 kcal/100g; "cooked masoor dal" and "Breadfruit, cooked" are 116 vs 123.
+  // All three passed the energy-density check and landed in the ledger. Identity is
+  // judged here, separately from calories, in three layers:
+  //   1. aliases  — rewrite a regional or ambiguous name into the USDA wording that
+  //                 actually returns the right food, and say what a match must contain;
+  //   2. guards   — food categories that are never the answer unless asked for;
+  //   3. a content-word check — at least one real food word from the query (not
+  //                 "cooked", "plain", ...) must appear in the record's name.
+  // A record that fails is still offered in the picker, but never picked by default.
+  // The query strings marked (verified) were replayed against USDA on 17 Oct 2026
+  // (macros-tracker-review-2026-10-17/curated-query-replays.json). The others rely on
+  // `need`: if USDA returns nothing that satisfies it, the AI estimate is used instead.
+  const FOOD_ALIASES = [{
+    id: 'lentils', label: 'lentils',
+    when: /\b(masoor|red lentils?|lentils?|da?al|dhal)\b/,
+    not: /\b(moong|mung|chana|urad|maash|mash|makhani)\b/,
+    query: prep => prep.state === 'raw' || prep.state === 'dry'
+      ? 'Lentils, raw'
+      : 'Lentils, mature seeds, cooked, boiled, without salt',          // (verified)
+    need: /\blentils?\b/
+  }, {
+    id: 'mung', label: 'mung beans',
+    when: /\b(moong|mung)\b/,
+    query: prep => prep.state === 'raw' || prep.state === 'dry'
+      ? 'Mung beans, mature seeds, raw' : 'Mung beans, mature seeds, cooked, boiled, without salt',
+    need: /\bmung\b/
+  }, {
+    id: 'chickpeas', label: 'chickpeas',
+    when: /\b(chana|chole|chickpeas?|garbanzo)\b/,
+    query: prep => prep.state === 'raw' || prep.state === 'dry'
+      ? 'Chickpeas, mature seeds, raw' : 'Chickpeas, mature seeds, cooked, boiled, without salt',
+    need: /\bchickpeas?\b/
+  }, {
+    id: 'milk-powder', label: 'dried milk',
+    when: /\b(milk powder|powdered milk|dry milk|dried milk|milk,? dry)\b/,
+    query: (prep, q) => /\b(skim|skimmed|non-?fat|fat[- ]free)\b/.test(q)
+      ? 'Milk, dry, nonfat' : 'Milk, dry, whole, without added vitamin D',  // whole: (verified)
+    need: /^milk, dry\b/
+  }, {
+    id: 'sugar-syrup', label: 'sugar syrup',
+    when: /\b(sugar syrup|simple syrup|chashni|sheera|sugar solution)\b/,
+    query: () => 'Simple syrup',                                         // (verified)
+    need: /\b(simple syrup|syrup, nfs)\b/
+  }, {
+    id: 'burger-bun', label: 'a bread roll or bun',
+    when: /\b(burger|hamburger|hot ?dog|sandwich)\s+(buns?|rolls?)\b/,
+    query: () => 'Rolls, hamburger or hotdog, plain',
+    need: /\b(hamburger|hotdog|hot dog|rolls?|buns?)\b/,
+    avoid: /\b(bao|sweet|cinnamon)\b/
+  }, {
+    id: 'vermicelli', label: 'wheat vermicelli or pasta',
+    when: /\b(vermicelli|seviyan|sewai|sevai|sawaiyan)\b/,
+    not: /\b(rice|soy)\b/,
+    query: prep => prep.state === 'raw' || prep.state === 'dry' ? 'Pasta, dry, enriched' : 'Pasta, cooked, enriched',
+    need: /\b(pasta|spaghetti|macaroni|vermicelli)\b/,
+    avoid: /\bsoy\b/
+  }];
+  function foodAlias(query) {
+    const q = ' ' + String(query || '').toLowerCase() + ' ';
+    return FOOD_ALIASES.find(a => a.when.test(q) && !(a.not && a.not.test(q))) || null;
+  }
+  // The USDA query an alias sends; null when no alias applies. prep = {state, addedFat}.
+  function aliasQuery(query, prep) {
+    const a = foodAlias(query);
+    return a ? a.query(prep || {}, String(query || '').toLowerCase()) : null;
+  }
+  // Categories that are a different food, whatever their calories, unless the query
+  // itself asks for them ("protein shake" may match a supplement; "milk powder" may not).
+  const IDENTITY_GUARDS = [
+    { re: /\b(protein supplement|nutritional powder|muscle milk|meal replacement|protein powder)\b/,
+      unless: /\b(protein|whey|supplement|shake|muscle milk|meal replacement)\b/, what: 'a protein supplement' },
+    { re: /\bpopcorn\b/, unless: /\bpopcorn\b/, what: 'popcorn' },
+    { re: /\b(infant formula|baby ?food|babyfood)\b/, unless: /\b(infant|baby)\b/, what: 'baby food' },
+    { re: /\(0% moisture\)/, unless: /\b(dry matter|0% moisture)\b/, what: 'a dry-matter (0% moisture) analysis, not food as eaten' },
+    { re: /\bmade from soy\b/, unless: /\bsoy\b/, what: 'a soy product' },
+    { re: /\bbao\b/, unless: /\bbao\b/, what: 'a bao bun' },
+    { re: /\bsugar[- ]free\b/, unless: /\b(sugar[- ]free|diet|zero)\b/, what: 'a sugar-free product' },
+    { re: /\b(candies|candy)\b/, unless: /\b(candy|candies|sweets?)\b/, what: 'a candy' }
+  ];
+  // Words that describe preparation or portion, not which food it is.
+  const PREP_WORDS = new Set(('cooked raw boiled fried deep shallow pan plain homemade home made fresh frozen ' +
+    'cooking small large medium piece pieces slice slices sliced chopped grilled roasted baked steamed ' +
+    'stewed mashed dry dried with without and the added salt nfs style').split(' '));
+  // Regional and spelling variants: a query word may be satisfied by any of these.
+  const FOOD_SYNONYMS = {
+    dal: ['lentil'], daal: ['lentil'], dhal: ['lentil'], ghee: ['ghee', 'butter'],
+    curd: ['yogurt'], dahi: ['yogurt'], yoghurt: ['yogurt'], atta: ['wheat', 'flour'], maida: ['wheat', 'flour'],
+    chawal: ['rice'], aloo: ['potato'], anda: ['egg'], paneer: ['paneer', 'cheese'], chana: ['chickpea'],
+    roti: ['roti', 'chapati', 'chappatti', 'chapatti'], chapati: ['chapati', 'chappatti', 'roti'],
+    chapatti: ['chapati', 'chappatti', 'roti'], phulka: ['chapati', 'chappatti', 'roti'],
+    keema: ['beef', 'lamb', 'mutton', 'chicken', 'ground'], qeema: ['beef', 'lamb', 'mutton', 'chicken', 'ground'],
+    mince: ['beef', 'lamb', 'mutton', 'chicken', 'ground'], mutton: ['mutton', 'lamb', 'goat'],
+    gosht: ['mutton', 'lamb', 'goat', 'beef'], sabzi: ['vegetable']
+  };
+  const stemWord = w => w.replace(/(es|s)$/, '');
+  // '' when the record can plausibly be the food asked for; otherwise a short reason
+  // for the review screen. query = the user's / parser's own words, not an alias query.
+  function identityIssue(foodName, query) {
+    const n = ' ' + String(foodName || '').toLowerCase() + ' ';
+    const q = ' ' + String(query || '').toLowerCase() + ' ';
+    if (!q.trim()) return '';
+    const guard = IDENTITY_GUARDS.find(g => g.re.test(n) && !g.unless.test(q));
+    if (guard) return `this is ${guard.what}`;
+    const alias = foodAlias(q);
+    if (alias) {
+      if (alias.avoid && alias.avoid.test(n)) return `not ${alias.label}`;
+      return alias.need.test(n.trim()) ? '' : `not ${alias.label}`;
+    }
+    const words = q.split(/[^a-z]+/).filter(w => w.length > 2 && !PREP_WORDS.has(w));
+    if (!words.length) return '';
+    const hit = words.some(w => [stemWord(w)].concat(FOOD_SYNONYMS[w] || []).some(f => n.includes(f)));
+    return hit ? '' : `“${String(query).trim()}” does not appear in this record`;
+  }
+
+  // ---- Local reference records -------------------------------------------------
+  // Foods USDA represents badly for a Pakistani kitchen. USDA's "Bread, chappatti or
+  // roti" (299 kcal, 9.2 g fat) is identical to its FROZEN COMMERCIAL whole-wheat roti;
+  // a plain home roti has about 1 g fat. Values are per 100 g as eaten, transcribed
+  // from UK CoFID 2021, sheet "1.3 Proximates" (columns J protein, K fat, L carbohydrate,
+  // M kcal, Q total sugars; rows in macros-tracker-review-2026-10-17/cofid-2021.selected.json).
+  // NOTE: CoFID carbohydrate is AVAILABLE carbohydrate (no fibre, as monosaccharide
+  // equivalents); USDA's is total by difference. cBasis records that, so the two are
+  // not silently treated as the same measure.
+  const COFID = (code, name, kcal, p, f, c, sug) => ({
+    id: 'cofid:' + code, name: `${name} (CoFID ${code})`, src: 'CoFID 2021',
+    base: { kcal, p, f, c, sug, cBasis: 'available',
+      _known: { kcal: true, p: true, f: true, c: true, sug: true, fsug: true } }
+  });
+  const LOCAL_FOODS = {
+    chapatiPlain: COFID('11-459', 'Chapati, made without fat', 202, 7.3, 1.0, 43.7, 1.6),
+    chapatiFat:   COFID('11-987', 'Chapati, made with fat', 328, 8.1, 12.8, 48.3, 1.8),
+    paratha:      COFID('11-1104', 'Paratha, homemade', 333, 7.8, 14.4, 45.8, 0.7),
+    parathaMooli: COFID('11-912', 'Mooli paratha, homemade', 171, 5.9, 2.3, 33.8, 1.8),
+    puri:         COFID('11-911', 'Puri, homemade', 366, 7.2, 22.3, 36.5, 1.2),
+    gulabHome:    COFID('11-1081', 'Gulab jamun, homemade', 273, 6.5, 6.6, 49.9, 35.6),
+    gulabRetail:  COFID('11-1083', 'Gulab jamun, retail', 306, 7.2, 12.8, 43.3, 38.9)
+  };
+  // Local records offered for a query, best first. prep.addedFat: 'none' | 'some' | 'unknown'.
+  // A roti with no stated fat defaults to the no-fat record: a home roti is cooked dry on
+  // a tawa unless ghee is added. Say "roti with ghee" and the with-fat record leads.
+  function localCandidates(query, prep) {
+    const q = ' ' + String(query || '').toLowerCase() + ' ';
+    const fat = (prep && prep.addedFat) || 'unknown';
+    const L = LOCAL_FOODS;
+    if (/\b(roti|chapatt?i|chappatt?i|phulka)s?\b/.test(q)) {
+      const withFat = fat === 'some' || /\b(ghee|butter|oil)\b/.test(q);
+      return withFat ? [L.chapatiFat, L.chapatiPlain] : [L.chapatiPlain, L.chapatiFat];
+    }
+    if (/\b(parath?as?|parontha|parata)\b/.test(q))
+      return /\b(mooli|radish)\b/.test(q) ? [L.parathaMooli, L.paratha] : [L.paratha];
+    if (/\b(puris?|pooris?)\b/.test(q)) return [L.puri];
+    if (/\bgulab\s*ja(m|mu)[a-z]*\b/.test(q)) return [L.gulabHome, L.gulabRetail];
+    return [];
+  }
+
   // Given ranked candidates and a trusted AI per-100g calorie prior, decide the DEFAULT
   // pick. USDA sometimes returns the wrong food entirely — a generic "water" at 40 kcal,
   // a cousin ingredient — and ranking alone can still float it to the top. When the best
@@ -419,15 +600,22 @@
   // wrong match. Returns 'u<index>' for candidates[index], or 'est' for the AI estimate.
   // pin (optional): when the pinned entry is present it is the answer, full stop — it is
   // a deliberate hardcoding and outranks the estimate-plausibility check.
+  // query (optional): what was asked for. A candidate that fails identityIssue or is an
+  // incomplete record is never the default, however close its calories are — calories
+  // are a sanity check on a match, not evidence of one.
   const SEL_LN_TOL = Math.log(1.8);   // >1.8x or <0.55x off the prior = wrong food, not mere imprecision
-  function defaultSelection(ranked, estKcal, pin) {
+  function defaultSelection(ranked, estKcal, pin, query) {
     if (!ranked || !ranked.length) return 'est';
     if (pin) {
       const p = ranked.findIndex(f => pinMatches(f, pin));
       if (p >= 0) return 'u' + p;
     }
-    if (!(estKcal > 0)) return 'u0';                    // no prior to judge against — keep top match
-    const within = f => { const k = f.base && f.base.kcal; return k > 0 && Math.abs(Math.log(k / estKcal)) <= SEL_LN_TOL; };
+    const sound = f => !(f.base && f.base.incomplete) && !(query && identityIssue(f.name, query));
+    if (!(estKcal > 0)) {                               // no prior to judge against
+      const j = ranked.findIndex(sound);
+      return 'u' + Math.max(0, j);                      // no estimate to fall back to: keep the top match, flagged
+    }
+    const within = f => { const k = f.base && f.base.kcal; return sound(f) && k > 0 && Math.abs(Math.log(k / estKcal)) <= SEL_LN_TOL; };
     if (within(ranked[0])) return 'u0';                 // best match already plausible
     const i = ranked.findIndex(within);                 // else the best candidate that is plausible
     if (i >= 0) return 'u' + i;
@@ -2507,6 +2695,7 @@
     completeMacros, macroKcal, KCAL_PER_G,
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend, robustWeightTrend,
     FOOD_PINS, foodPin, pinMatches, applyPin,
+    FOOD_ALIASES, foodAlias, aliasQuery, identityIssue, LOCAL_FOODS, localCandidates,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
     energyBalance, balanceCheck, BALANCE_MIN_DAYS,
     projectGoal, requiredRate, projectionConfidence, PROJ_Z,

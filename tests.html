@@ -256,6 +256,82 @@ group('defaultSelection — reject a wrong top match, prefer the estimate');
     C.defaultSelection([mk('Water',40), mk('Broth',12)], 300)==='est', 'expected est');
 })();
 
+// ---- Missing macros: an absent nutrient is unknown, not zero ----
+// FDC 747440 as USDA's search returns it (review 2026-10-17, usda-kidney-beans.json):
+// protein, fat and starch, but no total carbohydrate and no energy field.
+group('nutrientsFrom — incomplete records are flagged, not zero-filled');
+(function(){
+  const beans = C.nutrientsFrom({ foodNutrients:[
+    {nutrientNumber:'203', value:25.9}, {nutrientNumber:'204', value:1.31}, {nutrientNumber:'209', value:36.7}
+  ]});
+  check('kidney beans (0% moisture) flagged incomplete', beans.incomplete===true, `got ${beans.incomplete}`);
+  check('…missing carbs and energy named', (beans._missing||[]).join(',')==='carbs,energy', `got ${beans._missing}`);
+  check('…carb availability recorded as unknown', beans._known.c===false, '');
+  const full = C.nutrientsFrom({ foodNutrients:[
+    {nutrientNumber:'203', value:9.02}, {nutrientNumber:'204', value:0.38}, {nutrientNumber:'205', value:20.1}
+  ]});
+  check('complete macros, no energy field → derived, not incomplete', !full.incomplete && approx(full.kcal, 120), `got ${full.kcal}`);
+  const summed = C.nutrientsFrom({ foodNutrients:[
+    {nutrientNumber:'957', value:73.5}, {nutrientNumber:'203', value:1.9}, {nutrientNumber:'204', value:0.1}, {nutrientNumber:'205.2', value:16}
+  ]});
+  check('carbs by summation (#205.2) count as present', !summed.incomplete && summed.c===16, `got c=${summed.c}`);
+  const mk = (name,kcal,inc)=>({name, base: inc ? {kcal, incomplete:true} : {kcal}});
+  check('defaultSelection skips an incomplete record even when its kcal fits',
+    C.defaultSelection([mk('Beans, Dry, Dark Red Kidney (0% moisture)',115,true), mk('Beans, kidney, red, mature seeds, cooked, boiled',127)], 127, null, 'kidney beans')==='u1', 'expected u1');
+})();
+
+// ---- Food identity: calories do not establish what a food is ----
+// Every wrong match below is a real one from the 17 Oct 2026 review (trials + ledger).
+group('identityIssue / defaultSelection — wrong foods with plausible calories');
+(function(){
+  const mk = (name,kcal)=>({name, base:{kcal}});
+  const bad = (name, q) => !!C.identityIssue(name, q);
+  check('milk powder ≠ Muscle Milk', bad('Nutritional powder mix (Muscle Milk)', 'milk powder'), '');
+  check('milk powder ≠ protein supplement', bad('Protein supplement, milk based, Muscle Milk, powder', 'full fat milk powder'), '');
+  check('milk powder = Milk, dry, whole', !bad('Milk, dry, whole, without added vitamin D', 'milk powder'), C.identityIssue('Milk, dry, whole, without added vitamin D','milk powder'));
+  check('protein shake may match a supplement', !bad('Nutritional powder mix (Muscle Milk)', 'protein shake powder'), '');
+  check('sugar syrup ≠ caramel popcorn', bad('Popcorn, sugar syrup/caramel, fat-free', 'sugar syrup'), '');
+  check('sugar syrup = Simple syrup', !bad('Simple syrup', 'sugar syrup'), '');
+  check('cooked masoor dal ≠ Breadfruit, cooked', bad('Breadfruit, cooked', 'cooked masoor dal'), '');
+  check('cooked masoor dal = boiled lentils', !bad('Lentils, mature seeds, cooked, boiled, without salt', 'cooked masoor dal'), '');
+  check('burger bun ≠ Bao bun', bad('Bao bun', 'burger bun'), '');
+  check('bun ≠ Bao bun (guard, no alias)', bad('Bao bun', 'bun'), '');
+  check('vermicelli ≠ soy vermicelli', bad('Vermicelli, made from soy', 'vermicelli'), '');
+  check('kidney beans ≠ 0% moisture analysis', bad('Beans, Dry, Dark Red Kidney (0% moisture)', 'kidney beans'), '');
+  check('ghee may be clarified butter', !bad('Butter, clarified butter (ghee)', 'ghee'), '');
+  check('rotis = chapati record (plural + synonym)', !bad('Bread, chappatti or roti', 'rotis'), '');
+  check('plain names still pass', !bad('Bananas, raw', 'banana') && !bad('Tomatoes, red, ripe, raw', 'tomato'), '');
+  check('aliases rewrite the search', C.aliasQuery('cooked masoor dal', {state:'cooked'})==='Lentils, mature seeds, cooked, boiled, without salt'
+    && C.aliasQuery('dry masoor dal', {state:'dry'})==='Lentils, raw', '');
+  check('no alias for ordinary foods', C.aliasQuery('banana', {})===null, '');
+  // Trial 3: breadfruit is ranked first and sits inside the kcal tolerance (123 vs 116).
+  check('trial 3: breadfruit is not the default; lentils are',
+    C.defaultSelection([mk('Breadfruit, cooked',123), mk('Lentils, mature seeds, cooked, boiled, without salt',116)], 116, null, 'cooked masoor dal')==='u1', 'expected u1');
+  check('trial 1: only wrong foods → AI estimate',
+    C.defaultSelection([mk('Nutritional powder mix (Muscle Milk)',411), mk('Beverages, chocolate malt powder, prepared with 1% milk, fortified',80)], 480, null, 'milk powder')==='est', 'expected est');
+  check('rankFoods sinks a different food below the right one',
+    C.rankFoods([mk('Breadfruit, cooked',123), mk('Lentils, mature seeds, cooked, boiled, without salt',116)], 'cooked masoor dal', 116)[0].name.startsWith('Lentils'), '');
+  check('without a query, selection is unchanged', C.defaultSelection([mk('Breadfruit, cooked',123)], 116)==='u0', '');
+})();
+
+// ---- Local reference records: home roti and paratha from CoFID ----
+group('localCandidates — roti and paratha variants');
+(function(){
+  const first = (q, prep) => (C.localCandidates(q, prep)[0] || {}).id;
+  check('roti, fat unknown → no-fat chapati first', first('roti', {addedFat:'unknown'})==='cofid:11-459', `got ${first('roti',{})}`);
+  check('roti, no added fat → no-fat chapati', first('plain roti', {addedFat:'none'})==='cofid:11-459', '');
+  check('roti with ghee → with-fat chapati first', first('roti with ghee', {})==='cofid:11-987' && first('roti', {addedFat:'some'})==='cofid:11-987', '');
+  check('both chapati variants always offered', C.localCandidates('chapati', {}).length===2, '');
+  check('paratha → homemade paratha', first('paratha', {})==='cofid:11-1104', '');
+  check('mooli paratha → mooli record first', first('mooli paratha', {})==='cofid:11-912', '');
+  check('rice gets no local record', C.localCandidates('rice', {}).length===0, '');
+  const plain = C.LOCAL_FOODS.chapatiPlain.base;
+  check('no-fat chapati values match CoFID 11-459', plain.kcal===202 && plain.p===7.3 && plain.f===1.0 && plain.c===43.7, '');
+  check('CoFID carbs marked as available carbohydrate', plain.cBasis==='available', '');
+  check('local roti is plausible vs an AI roti estimate',
+    C.defaultSelection(C.localCandidates('roti', {}), 280, null, 'roti')==='u0', 'expected u0');
+})();
+
 // ---- Pinned USDA entries: chicken always resolves to the cooked breast ----
 group('foodPin / applyPin — chicken pins to cooked breast, other cuts do not');
 (function(){

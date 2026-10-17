@@ -38,11 +38,22 @@ function nutrientsFrom(food){ return LedgerCore.nutrientsFrom(food); }
 // estKcal (optional): per-100g calorie prior for plausibility ranking — pass the AI's
 // estimate so keyword cousins with absurd energy density ("cooking oil" → plantain oil
 // at 100 kcal/100g) sink below the real thing.
-async function usdaSearch(query, estKcal){
+// prep (optional) = {state, addedFat} from the parser; aliases use it to pick cooked vs raw.
+async function usdaSearch(query, estKcal, prep){
   const q = (query||'').trim();
   if (!q) return [];
   const pin = LedgerCore.foodPin(q);
-  if (!pin) return usdaFetchRanked(q, q, estKcal);
+  if (!pin){
+    // Alias: ask USDA in the wording that returns the right food ("masoor dal" →
+    // cooked lentils), but rank against the user's words. If none of the results is
+    // the right food, fall back to a plain search; identity checks still apply there.
+    const aq = LedgerCore.aliasQuery(q, prep);
+    if (aq){
+      const ranked = await usdaFetchRanked(aq, q, estKcal);
+      if (ranked.some(f => !LedgerCore.identityIssue(f.name, q))) return ranked;
+    }
+    return usdaFetchRanked(q, q, estKcal);
+  }
   // Pinned ingredient: search USDA for the pinned description itself, so the entry we
   // want is actually in the ten results rather than buried behind the raw cuts. Rank
   // with the user's own words so the REST of the list still reflects what was asked for.
@@ -92,6 +103,15 @@ async function usdaFetchRanked(apiQuery, rankQuery, estKcal){
   }
   const foods = (d.foods||[]).map(f => ({ id:f.fdcId, name:f.description, base:nutrientsFrom(f) }));
   return LedgerCore.rankFoods(foods, rankQuery, estKcal);
+}
+// Local reference records (home roti, paratha, ...) first, then USDA. A USDA failure
+// still returns the local records when there are some, so roti resolves offline too.
+async function foodSearch(query, estKcal, prep){
+  const local = LedgerCore.localCandidates(query, prep).map(f => Object.assign({}, f));
+  let usda = [];
+  try { usda = await usdaSearch(query, estKcal, prep); }
+  catch(e){ if (!local.length) throw e; }
+  return local.concat(usda);
 }
 
 // ---- Gemini model discovery ----
@@ -240,6 +260,8 @@ Return JSON: {"items":[{"name":<short generic single-ingredient name good for a 
 `"partOf":<the dish this component came from, or "" if it was logged as a plain food>,`+
 `"grams":<number, estimate a realistic portion if none is stated>,`+
 `"weighed":<boolean, true ONLY if the user gave an explicit weight/measure for THIS component; a decomposed guess is false>,`+
+`"state":<"cooked" | "raw" | "dry" | "unknown": the state THIS component's grams refer to. "cooked" when the user says the weight is after cooking or the food is served cooked (cooked dal, boiled rice); "raw"/"dry" only when the user says so (raw chicken, dry lentils, uncooked rice); otherwise "unknown">,`+
+`"addedFat":<"none" | "some" | "unknown": "none" when the user says no oil/ghee/butter or plain/dry-cooked; "some" when they mention ghee, butter or oil on or in THIS item, or it is fried; otherwise "unknown">,`+
 `"freeSugarFrac":<0 to 1: the share of THIS food's sugar that is FREE sugar (added sugar, plus sugar in honey, syrup and fruit juice) under the WHO definition. 0 for whole fruit, vegetables and plain milk or yogurt whose sugar is all intrinsic; 1 for table sugar, sweets, chocolate, soft drinks, juice and syrups; a value in between for a sweetened or mixed food>,`+
 `"est":{"kcal":<per 100g>,"p":<protein g per 100g>,"f":<fat g per 100g>,"c":<carb g per 100g>}}]}.
 "est" is your best per-100g estimate, used only as a fallback. Output JSON only, no prose.
@@ -317,8 +339,10 @@ function pendResolve(p){
   if (p.sel==='est' || !p.candidates.length)
     return {base: withFrac(p.estBase || {kcal:0,p:0,f:0,c:0}), source:'AI est', label: p.name};
   const c = p.candidates[+p.sel.slice(1)] || p.candidates[0];
-  return {base: withFrac(c.base), source:'USDA', label: c.name};
+  return {base: withFrac(c.base), source: c.src || 'USDA', label: c.name, id: c.id};
 }
+// What the review compares a match against: the parser's words, not a re-search term.
+function pendSaid(p){ return p.said || p.name; }
 // Foods that are essentially always eaten cooked. USDA's ranker favours the raw entry
 // (it is shorter, and `raw` scores a bonus that exists to prefer plain fruit and veg
 // over juice and powder), so these silently resolve to the uncooked form — which for
@@ -326,12 +350,19 @@ function pendResolve(p){
 const COOKED_STAPLES = /\b(chicken|beef|mutton|lamb|pork|turkey|fish|prawn|shrimp|mince|keema|rice|pasta|spaghetti|macaroni|noodle|lentil|daal|dal|chickpea|chana|rajma|bean|potato|egg|oat)\b/i;
 function pendWarn(p){
   const r = pendResolve(p);
-  if (r.source==='USDA' && p.estBase && p.estBase.kcal>0 &&
+  if (r.source==='AI est') return '';
+  // Identity and completeness come first: a wrong food with the right calories is the
+  // failure the calorie check below cannot see.
+  const issue = LedgerCore.identityIssue(r.label, p.name);
+  if (issue) return `${issue} — pick another match, re-search, or use the AI estimate`;
+  if (r.base && r.base.incomplete)
+    return `this record is missing ${(r.base._missing||[]).join(', ')} — its numbers are incomplete; pick another match or use the AI estimate`;
+  if (p.estBase && p.estBase.kcal>0 &&
       Math.abs(r.base.kcal - p.estBase.kcal)/p.estBase.kcal > 0.25)
-    return `USDA ${Math.round(r.base.kcal)} vs AI est ${Math.round(p.estBase.kcal)} kcal/100g — check the match`;
+    return `${r.source} ${Math.round(r.base.kcal)} vs AI est ${Math.round(p.estBase.kcal)} kcal/100g — check the match`;
   // Not an error — weighing raw and cooking it is perfectly valid, and the app cannot
   // know which you did. So this says what was matched and leaves the call to you.
-  if (r.source==='USDA' && /\braw\b/i.test(r.label||'') && COOKED_STAPLES.test(p.name||''))
+  if (/\braw\b/i.test(r.label||'') && COOKED_STAPLES.test(p.name||'') && !(p.prep && /raw|dry/.test(p.prep.state)))
     return `matched the RAW entry — if you weighed this cooked, search for the cooked form`;
   return '';
 }
@@ -399,22 +430,38 @@ function updatePendSummary(){
 // regardless of grouping so syncPendingFromDOM keeps working by index.
 function renderPendItem(p, i){
   const r = pendResolve(p);
-  const badge = `<span class="badge ${r.source==='USDA'?'usda':'est'}">${r.source}</span>`;
+  const badge = `<span class="badge ${r.source==='AI est'?'est':'usda'}">${escapeHtml(r.source)}</span>`;
   const kc = Math.round(r.base.kcal||0);
+  // Each option says when it is a different food or an incomplete record, so a manual
+  // pick of one is a choice made knowingly rather than a silent default.
+  const optNote = c => LedgerCore.identityIssue(c.name, p.name) ? ' · different food?'
+    : (c.base && c.base.incomplete) ? ' · incomplete' : '';
   const opts = p.candidates.map((c,idx)=>
-    `<option value="u${idx}" ${p.sel==='u'+idx?'selected':''}>${escapeHtml(c.name)} · ${Math.round(c.base.kcal)} kcal/100g</option>`).join('')
+    `<option value="u${idx}" ${p.sel==='u'+idx?'selected':''}>${escapeHtml(c.name)} · ${Math.round(c.base.kcal)} kcal/100g${optNote(c)}${c.src?' · '+escapeHtml(c.src):''}</option>`).join('')
     + (p.estBase ? `<option value="est" ${p.sel==='est'?'selected':''}>AI estimate · ${Math.round(p.estBase.kcal)} kcal/100g</option>` : '');
   const picker = (p.candidates.length || p.estBase)
     ? `<select id="pf${i}" style="margin-top:6px;font-size:11px">${opts}</select>` : '';
   const warn = pendWarn(p);
   const warnLine = warn ? `<div class="tactical bad" style="margin-top:6px;font-size:10px;padding-left:8px">${warn}</div>` : '';
   const qv = (p.name||'').replace(/"/g,'&quot;');
+  // "You said X → matched Y": the match is shown as a claim to check, not a fact. A
+  // database badge says where the numbers came from, never that the match is right,
+  // so nothing here is labelled verified.
+  const prepBits = [];
+  if (p.prep && p.prep.state && p.prep.state!=='unknown') prepBits.push(p.prep.state);
+  if (p.prep && p.prep.addedFat==='none') prepBits.push('no added fat');
+  if (p.prep && p.prep.addedFat==='some') prepBits.push('with added fat');
+  const matchLine = `<div class="pend-match">You said <b>${escapeHtml(pendSaid(p))}</b>${prepBits.length?` <span class="ink-dim">(${escapeHtml(prepBits.join(', '))})</span>`:''}
+    → ${r.source==='AI est'
+      ? '<b>AI estimate</b> <span class="ink-dim">· no database record used</span>'
+      : `<b>${escapeHtml(r.label)}</b> <span class="ink-dim">· ${escapeHtml(r.source)} · approximate match</span>`}</div>`;
   return `<div class="pend-item">
     <div class="pend-top">
       <input type="checkbox" id="ps${i}" ${p.include?'checked':''} style="width:auto">
       <span class="pname">${badge} ${escapeHtml(p.name)} <span style="color:var(--graphite);font-family:var(--data);font-size:10px">${kc} kcal/100g</span></span>
       <input type="number" id="pg${i}" value="${Math.round(p.grams)}" min="0" step="1" title="grams">
     </div>
+    ${matchLine}
     ${picker}
     <div class="pend-macros num ${(+p.grams>0 && p.include)?'':'zero'}" id="pm${i}">${pendItemMacroStr(p)}</div>
     <div class="pend-research">
@@ -437,8 +484,13 @@ async function researchPending(i){
   const btn = document.querySelector(`[data-research="${i}"]`);
   if (btn){ btn.disabled = true; btn.innerHTML = '<span class="spin"></span>'; }
   try {
-    const cands = (await usdaSearch(q, pending[i].estBase && pending[i].estBase.kcal)).slice(0,6);
-    if (cands.length){ pending[i].candidates = cands; pending[i].sel = 'u0'; pending[i].name = q; }
+    const est = pending[i].estBase && pending[i].estBase.kcal;
+    const cands = (await foodSearch(q, est, pending[i].prep)).slice(0,6);
+    if (cands.length){
+      pending[i].candidates = cands; pending[i].name = q;
+      // An explicit search still keeps the first record, unless it is a different food or incomplete.
+      pending[i].sel = LedgerCore.defaultSelection(cands, 0, LedgerCore.foodPin(q), q);
+    }
     else if (btn){ btn.disabled = false; btn.textContent = '∅'; return; }
   } catch(e){ if (btn){ btn.disabled = false; btn.textContent = '!'; } return; }
   renderPending();
@@ -504,9 +556,15 @@ function commitPending(){
   pending.forEach(p=>{
     if (!p.include || !p.grams || p.grams<=0) return;
     const r = pendResolve(p);
-    const name = r.source==='USDA' ? r.label : p.name;   // log under the real matched food name
+    const name = r.source!=='AI est' ? r.label : p.name;   // log under the real matched food name
     registerFood(name, r.base, r.source);
-    pushEntry(computeEntry(name, p.grams, p.weighed, r.base, r.source, p.partOf));
+    const e = computeEntry(name, p.grams, p.weighed, r.base, r.source, p.partOf);
+    // What was asked for and what it was matched to. The ledger kept neither before, so
+    // a wrong match could not be traced back to the parser, the resolver or a manual pick.
+    e.match = { said: pendSaid(p), query: p.name, src: r.source };
+    if (r.id != null) e.match.id = r.id;
+    if (p.prep) e.match.prep = p.prep;
+    pushEntry(e);
     added++;
   });
   // Nothing to add means the review isn't finished — keep the list up, or the
@@ -585,13 +643,22 @@ document.getElementById('parseBtn').onclick = async ()=>{
     for (const it of items){
       const estBase = (it.est && it.est.kcal!=null)
         ? {kcal:+it.est.kcal||0, p:+it.est.p||0, f:+it.est.f||0, c:+it.est.c||0} : null;
+      const prep = {
+        state: ['cooked','raw','dry'].includes(it.state) ? it.state : 'unknown',
+        addedFat: ['none','some'].includes(it.addedFat) ? it.addedFat : 'unknown'
+      };
       let candidates = [];
-      if (hasUSDA() && it.name){
-        try { candidates = (await usdaSearch(it.name, estBase && estBase.kcal)).slice(0,6); }
-        catch(e){ /* fall back to AI estimate */ }
+      if (it.name){
+        try {
+          candidates = hasUSDA()
+            ? (await foodSearch(it.name, estBase && estBase.kcal, prep)).slice(0,6)
+            : LedgerCore.localCandidates(it.name, prep).map(f => Object.assign({}, f));
+        } catch(e){ /* fall back to AI estimate */ }
       }
       pending.push({
         name: it.name || 'unknown',
+        said: it.name || 'unknown',              // the parser's words; kept when a re-search renames the item
+        prep,
         partOf: (it.partOf || '').trim(),         // dish this component was split from ('' = plain food)
         grams: Number(it.grams) || 0,
         weighed: !!it.weighed,
@@ -601,14 +668,15 @@ document.getElementById('parseBtn').onclick = async ()=>{
         // Default to the best plausible USDA match; fall back to the AI estimate when the
         // top match's calories are wildly off the estimate (USDA returned the wrong food).
         // A pinned ingredient (e.g. chicken → cooked breast) skips both and takes the pin.
-        sel: LedgerCore.defaultSelection(candidates, estBase && estBase.kcal, LedgerCore.foodPin(it.name)),
+        // A record that is a different food or is missing macros is never the default.
+        sel: LedgerCore.defaultSelection(candidates, estBase && estBase.kcal, LedgerCore.foodPin(it.name), it.name),
         include: true
       });
     }
-    const nUsda = pending.filter(p=>p.sel!=='est').length;
+    const nDb = pending.filter(p=>p.sel!=='est').length;
     // Terse: the tray is short and the list below it now says "check me" on its
     // own, so the status line reports provenance and gets out of the way.
-    setStatus(status, `${pending.length} item${pending.length>1?'s':''} via ${AI_VIA} · ${nUsda} USDA, ${pending.length-nUsda} AI-estimated`);
+    setStatus(status, `${pending.length} item${pending.length>1?'s':''} via ${AI_VIA} · ${nDb} database match${nDb===1?'':'es'}, ${pending.length-nDb} AI-estimated`);
     setMealPhoto(null);                        // consumed — don't leak into the next parse
     renderPending();                           // opens the tray under the bar; no page jump
   } catch(err){

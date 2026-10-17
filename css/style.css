@@ -847,6 +847,7 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .pend-tog { display: flex; gap: 14px; margin-top: 8px; padding-left: 26px; }
 .pend-macros { font-family: var(--data); font-size: 10.5px; color: var(--faint); margin-top: 6px; padding-left: 26px; }
 .pend-macros.zero { color: var(--faint); opacity: 0.6; }
+.pend-match { font-size: 11px; color: var(--chalk); margin-top: 6px; padding-left: 26px; line-height: 1.45; overflow-wrap: anywhere; }
 .pend-group {
   border: 1px solid var(--rule);
   border-left: 2px solid var(--rule-lit);

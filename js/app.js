@@ -285,7 +285,7 @@ document.getElementById('usdaBtn').onclick = async ()=>{
   out.innerHTML = skeleton(4);
   announce('Searching USDA');
   try {
-    const results = await usdaSearch(q);
+    const results = await foodSearch(q);
     if (!results.length){
       out.innerHTML = `<div class="tactical">No matches for “${escapeHtml(q)}”. Try a plainer name — "greek yogurt" rather than a brand.</div>`;
       return;
@@ -293,13 +293,13 @@ document.getElementById('usdaBtn').onclick = async ()=>{
     out.innerHTML = results.map((r,i)=>
       `<div class="result">
          <div><div class="rname">${escapeHtml(r.name)}</div>
-           <div class="rmeta">${Math.round(r.base.kcal)} kcal · P ${r.base.p.toFixed(1)} · F ${r.base.f.toFixed(1)} /100g</div></div>
+           <div class="rmeta">${Math.round(r.base.kcal)} kcal · P ${r.base.p.toFixed(1)} · F ${r.base.f.toFixed(1)} /100g · ${escapeHtml(r.src||'USDA')}${r.base.incomplete?` · <b>missing ${escapeHtml((r.base._missing||[]).join(', '))}</b>`:''}</div></div>
          <button type="button" class="sm ghost" data-i="${i}">Use</button>
        </div>`).join('');
     out.querySelectorAll('button[data-i]').forEach(btn=>{
       btn.onclick = ()=>{
         const r = results[+btn.dataset.i];
-        registerFood(r.name, r.base, 'USDA');
+        registerFood(r.name, r.base, r.src || 'USDA');
         document.getElementById('food').value = r.name;
         out.innerHTML = `<div class="tactical good">Loaded “${escapeHtml(r.name)}”. Set grams below and add.</div>`;
         updateProjection();
@@ -792,6 +792,7 @@ document.getElementById('importFile').onchange = (ev)=>{
         if (!(e.name && base && 'weighed' in e)) return ensureEntryMeta(e,date||VIEW_DATE,i);
         const next=computeEntry(e.name,e.grams,e.weighed,base,e.source,e.partOf);
         next._id=e._id;next.at=e.at;next.eatenAt=e.eatenAt;next.loggedAt=e.loggedAt;next.updatedAt=e.updatedAt;
+        if(e.match)next.match=e.match;
         return ensureEntryMeta(next,date||VIEW_DATE,i);
       });
       if (data.days && typeof data.days === 'object') {

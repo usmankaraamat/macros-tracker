@@ -305,7 +305,7 @@ function renderLedgerTable(){
     return;
   }
   const badgeFor = e => (e.source && e.source !== 'DB')
-    ? `<span class="badge ${e.source === 'USDA' ? 'usda' : 'est'}">${escapeHtml(e.source)}</span>` : '';
+    ? `<span class="badge ${(e.source === 'USDA' || /^CoFID/.test(e.source)) ? 'usda' : 'est'}">${escapeHtml(e.source)}</span>` : '';
   const actionsFor = (e, i) => `<div class="meal-actions" aria-label="Entry actions">
     <button type="button" class="edit" data-edit="${i}" aria-label="Edit grams for ${escapeAttr(e.name)}" title="Edit grams">${uiIcon('edit', 17)}</button>
     <button type="button" class="del" data-del="${i}" aria-label="Remove ${escapeAttr(e.name)}" title="Remove">${uiIcon('trash', 17)}</button>
@@ -325,7 +325,7 @@ function renderLedgerTable(){
   const componentMacros=e=>`<span class="component-macros">${macroText(e)}</span>`;
   const row = (e,i)=>{
     const badge = (e.source && e.source !== 'DB')
-      ? `<span class="badge ${e.source === 'USDA' ? 'usda' : 'est'}">${escapeHtml(e.source)}</span>` : '';
+      ? `<span class="badge ${(e.source === 'USDA' || /^CoFID/.test(e.source)) ? 'usda' : 'est'}">${escapeHtml(e.source)}</span>` : '';
     const flags = e.flags && e.flags.length
       ? `<div class="flags">${escapeHtml(e.flags.join(' · '))}</div>` : '';
     return `<article class="meal-entry">
@@ -421,6 +421,7 @@ async function editEntryGrams(i){
   const prev = ledger[i];
   const next = computeEntry(e.name, g, e.weighed, base, e.source, e.partOf);
   next._id=e._id; next.at=e.at; next.eatenAt=e.eatenAt; next.loggedAt=e.loggedAt;
+  if (e.match) next.match=e.match;
   next.updatedAt=new Date().toISOString();
   ledger[i] = next;
   save(); render();
