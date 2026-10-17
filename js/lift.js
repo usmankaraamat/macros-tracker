@@ -1008,11 +1008,104 @@ function waistLine(r){
   const cm = Math.abs(r.waistCmPerWeek).toFixed(2);
   return `<div class="recomp-waist ${tone}"><span class="rw-tag">Waist axis</span> ${txt(cm)}</div>`;
 }
+// ---- planned session from the calendar ----------------------------------------
+// The lift-plan Edge Function reads the owner's Google Calendar and returns the next
+// eight days of lift sessions. Kept on this device only (eatify_ prefix: the sync only
+// carries ledger_ keys), so the plan still shows at the gym with no signal. Refetched
+// when older than 30 minutes; an account the function does not serve is asked again
+// after 12 hours, so other users of the app never see an empty card.
+const LIFT_PLAN_KEY = 'eatify_liftplan';
+const LIFT_PLAN_FRESH_MS = 30 * 60000, LIFT_PLAN_RETRY_MS = 12 * 3600000;
+let liftPlanLoading = false;
+function liftPlanCache(){ try { return JSON.parse(localStorage.getItem(LIFT_PLAN_KEY)||'null'); } catch(e){ return null; } }
+function saveLiftPlanCache(v){ try { localStorage.setItem(LIFT_PLAN_KEY, JSON.stringify(v)); } catch(e){} }
+async function refreshLiftPlan(force){
+  if (liftPlanLoading || !hostedAccountConfigured()) return;
+  const c = liftPlanCache();
+  const age = c ? Date.now() - Date.parse(c.checkedAt || 0) : Infinity;
+  if (!force && c && (c.unavailable ? age < LIFT_PLAN_RETRY_MS : (age < LIFT_PLAN_FRESH_MS && c.from === ACTIVE_DATE))) return;
+  liftPlanLoading = true; renderLiftPlan();
+  try {
+    const d = await hostedCall('lift-plan', { days: 8 });
+    saveLiftPlanCache({ checkedAt: new Date().toISOString(), from: d.from, sessions: d.sessions||[], skipped: d.skipped||[] });
+  } catch(e){
+    if (e.status === 404 || e.status === 503) saveLiftPlanCache({ checkedAt: new Date().toISOString(), unavailable: true });
+    else if (c && !c.unavailable) saveLiftPlanCache(Object.assign({}, c, { error: e.message }));
+  } finally { liftPlanLoading = false; renderLiftPlan(); }
+}
+// "Barbell RDL — FIRST, free bar" → "Barbell RDL": the calendar's coaching notes are not
+// part of the lift's name, and leaving them in would start a new trend line.
+function planLiftName(name){
+  const bare = String(name||'').replace(/\s*[—(].*$/, '').trim() || String(name||'').trim();
+  const m = LedgerCore.matchExercise(bare, exerciseCatalog());
+  return { log: m ? m.exercise.name : bare, id: m ? m.exercise.id : LedgerCore.exerciseId(bare) };
+}
+function planLastTop(id){
+  const all = (liftPreviewData && liftPreviewData.all) || allWorkouts();
+  const dates = Object.keys(all).filter(d => d !== VIEW_DATE).sort();
+  for (let i = dates.length - 1; i >= 0; i--){
+    const ex = (all[dates[i]].exercises||[]).filter(e => e.id === id)[0];
+    if (ex && (ex.sets||[]).length){
+      const bwKg = LedgerCore.weightAt((liftPreviewData && liftPreviewData.W) || weightSeries(), dates[i]);
+      let top = ex.sets[0], topLoad = -1;
+      ex.sets.forEach(s => { const l = LedgerCore.setLoad(s, bwKg); if (l != null && l > topLoad){ topLoad = l; top = s; } });
+      return `last ${dates[i].slice(5)}: ${ex.sets.map(SET_TXT).join(', ')}` + (ex.sets.length > 1 ? ` · top ${SET_TXT(top)}` : '');
+    }
+  }
+  return 'no previous log';
+}
+function renderLiftPlan(){
+  const el = document.getElementById('liftPlanPanel');
+  if (!el) return;
+  const c = liftPlanCache();
+  if (!c || c.unavailable){ el.hidden = true; el.innerHTML = ''; return; }
+  const day = (c.sessions||[]).filter(s => s.date === VIEW_DATE);
+  const next = (c.sessions||[]).filter(s => s.date > VIEW_DATE)[0];
+  const logged = new Set((workoutFor(VIEW_DATE).exercises||[]).map(e => e.id));
+  const when = c.checkedAt ? new Date(c.checkedAt).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}) : '';
+  const foot = `<div class="lift-plan-foot"><span>From your calendar · ${liftPlanLoading ? 'updating…' : 'checked ' + escapeHtml(when)}${c.error ? ' · offline, showing the last copy' : ''}</span>
+    <button type="button" class="sm ghost" id="liftPlanRefresh" ${liftPlanLoading ? 'disabled' : ''} title="Read the calendar again">${uiIcon('repeat', 14)}</button></div>`;
+  el.hidden = false;
+  if (!day.length){
+    // Outside the fetched window there is nothing to say; an empty day is still worth one line.
+    const inWindow = c.from && VIEW_DATE >= c.from && VIEW_DATE <= addDaysIso(c.from, 7);
+    el.innerHTML = `<span class="panel-title">Planned</span>
+      <div class="lift-sub">${inWindow ? 'No lift on your calendar for this day.' : 'This day is outside the plan window.'}${next ? ` Next: <b>${escapeHtml(next.title)}</b> on ${escapeHtml(next.date)}.` : ''}</div>${foot}`;
+  } else {
+    el.innerHTML = day.map((s, si) => `
+      <span class="panel-title">Planned · ${escapeHtml(s.title)}${s.time ? ` <small>${escapeHtml(s.time)}</small>` : ''}</span>
+      <ul class="lift-plan-list">${s.exercises.map((x, xi) => {
+        const n = planLiftName(x.name);
+        return `<li><button type="button" class="lift-plan-row${logged.has(n.id) ? ' lift-plan-done' : ''}" data-plan="${si}:${xi}" title="Add ${escapeAttr(n.log)} to the logger">
+          <span class="lift-plan-kind">${x.kind === '--' ? 'DRILL' : x.kind === 'C' ? 'COMP' : 'ISO'}</span>
+          <span class="lift-plan-name">${escapeHtml(x.name)}</span>
+          <span class="lift-plan-target">${escapeHtml(x.target)}</span>
+          ${x.kind === '--' ? '' : `<span class="lift-plan-last">${escapeHtml(planLastTop(n.id))}</span>`}
+        </button></li>`; }).join('')}</ul>
+      ${s.notes ? `<details class="lift-plan-notes"><summary>Notes</summary><div>${escapeHtml(s.notes)}</div></details>` : ''}`).join('') + foot;
+    el.querySelectorAll('[data-plan]').forEach(b => {
+      b.onclick = () => {
+        const [si, xi] = b.dataset.plan.split(':').map(Number);
+        const n = planLiftName(day[si].exercises[xi].name);
+        const inp = document.getElementById('liftInput');
+        // Add the name on its own line, ready for the sets; the "last time" preview follows the cursor.
+        inp.value = (inp.value.trim() ? inp.value.replace(/\s*$/, '') + '\n' : '') + n.log + ' ';
+        inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+        renderLiftPreview();
+      };
+    });
+  }
+  const r = document.getElementById('liftPlanRefresh');
+  if (r) r.onclick = () => refreshLiftPlan(true);
+}
+function addDaysIso(iso, n){ const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+
 function renderLift(){
   if (!document.getElementById('liftSession')) return;
   const all = allWorkouts(), W = weightSeries();
   const rows = liftTrends(all, W);
   setLiftPreviewData(all, W, rows);
+  renderLiftPlan(); refreshLiftPlan();
   renderLiftChips(all); renderLiftPicker(all); renderLiftSession(all, W); renderLiftPending();
   renderLiftPreview();
   renderLiftTrends(rows); renderLiftCatalog(); renderLiftHistory(all, W);

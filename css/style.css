@@ -1279,6 +1279,24 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .lift-preview .lift-sets { margin-top: 5px; }
 .lift-preview .lift-sub { color: var(--graphite); }
 
+/* ---- planned session from the calendar ---- */
+.lift-plan-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.lift-plan-row {
+  display: grid; grid-template-columns: 22px 1fr auto; gap: 4px 10px; align-items: baseline;
+  width: 100%; text-align: left; background: none; border: 0; border-top: 1px solid var(--rule);
+  padding: 9px 0; color: var(--chalk); font: inherit; cursor: pointer;
+}
+.lift-plan-row:first-child { border-top: 0; }
+.lift-plan-kind { font-family: var(--data); font-size: 9px; color: var(--faint); letter-spacing: 0.08em; }
+.lift-plan-name { font-size: 13px; overflow-wrap: anywhere; }
+.lift-plan-target { font-family: var(--data); font-size: 11.5px; color: var(--verdigris); white-space: nowrap; }
+.lift-plan-last { grid-column: 2 / 4; font-size: 10.5px; color: var(--faint); }
+.lift-plan-done .lift-plan-name { color: var(--graphite); text-decoration: line-through; }
+.lift-plan-notes { margin-top: 10px; font-size: 11.5px; color: var(--graphite); }
+.lift-plan-notes summary { cursor: pointer; color: var(--faint); font-size: 10.5px; }
+.lift-plan-notes div { white-space: pre-wrap; margin-top: 6px; line-height: 1.5; }
+.lift-plan-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; font-size: 10px; color: var(--faint); }
+
 /* ---- load-jump guardrail (non-blocking) ---- */
 .lift-jump { font-size: 11.5px; margin-top: 7px; padding: 6px 9px; border-radius: var(--radius); line-height: 1.45; }
 .lift-jump.notice { color: var(--brass); background: var(--brass-wash); border: 1px solid var(--brass); }

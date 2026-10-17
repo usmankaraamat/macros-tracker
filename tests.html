@@ -295,8 +295,29 @@ group('identityIssue / defaultSelection — wrong foods with plausible calories'
   check('cooked masoor dal ≠ Breadfruit, cooked', bad('Breadfruit, cooked', 'cooked masoor dal'), '');
   check('cooked masoor dal = boiled lentils', !bad('Lentils, mature seeds, cooked, boiled, without salt', 'cooked masoor dal'), '');
   check('burger bun ≠ Bao bun', bad('Bao bun', 'burger bun'), '');
+  // Real results from the app's USDA cache for "bread bun" (17 Oct 2026).
+  check('bread bun ≠ Cinnamon buns / burger on bun / sloppy joe',
+    ['Cinnamon buns, frosted (includes honey buns)','Veggie burger, on bun','Sloppy joe, no bun'].every(n=>bad(n,'bread bun')), '');
+  check('bread bun = Roll, white, hamburger bun', !bad('Roll, white, hamburger bun', 'bread bun')
+    && C.aliasQuery('sesame bun', {})==='Roll, white, hamburger bun', '');
+  check('urad dal ≠ Dove / Breadfruit; = mungo beans',
+    bad('Dove, cooked, NS as to cooking method','cooked urad dal') && bad('Breadfruit, cooked','cooked urad dal')
+    && !bad('Mungo beans, mature seeds, cooked, boiled, without salt','cooked urad dal'), '');
+  check('chickpeas ≠ besan or "fat added" (oil counted twice)',
+    bad('Chickpea flour (besan)','chickpeas') && bad('Chickpeas, from dried, fat added','chana'), '');
+  check('milk solids / khoya ≠ Cheese, cotija (the gulab jamun bug)',
+    bad('Cheese, cotija, solid','milk solids') && bad('Cheese, cotija, solid','khoya'), '');
+  check('paneer may still be a cheese record', !bad('Cheese, paneer','paneer'), '');
+  check('fries ≠ Calamari, fried; = french fries',
+    bad('Calamari, fried','fries') && !bad('Potato, french fries, from fresh, fried','fries'), '');
+  check('split bengal gram = chickpeas', !bad('Chickpeas (garbanzo beans, bengal gram), mature seeds, raw','split bengal gram'), '');
+  check('vermicelli ≠ Rice and vermicelli mix', bad('Rice and vermicelli mix, beef flavor, unprepared','vermicelli'), '');
   check('bun ≠ Bao bun (guard, no alias)', bad('Bao bun', 'bun'), '');
   check('vermicelli ≠ soy vermicelli', bad('Vermicelli, made from soy', 'vermicelli'), '');
+  check('dal ≠ Lentil curry (would count the oil twice)', bad('Lentil curry', 'masoor dal') && bad('Soup, lentil', 'dal'), '');
+  check('dal = Lentils, raw when weighed dry', !bad('Lentils, raw', 'dry masoor dal'), '');
+  check('seviyan ≠ Macaroni and cheese', bad('Macaroni and cheese', 'seviyan'), '');
+  check('chana ≠ Chickpea curry', bad('Chickpea curry', 'chana'), '');
   check('kidney beans ≠ 0% moisture analysis', bad('Beans, Dry, Dark Red Kidney (0% moisture)', 'kidney beans'), '');
   check('ghee may be clarified butter', !bad('Butter, clarified butter (ghee)', 'ghee'), '');
   check('rotis = chapati record (plural + synonym)', !bad('Bread, chappatti or roti', 'rotis'), '');

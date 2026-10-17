@@ -456,19 +456,37 @@
     query: prep => prep.state === 'raw' || prep.state === 'dry'
       ? 'Lentils, raw'
       : 'Lentils, mature seeds, cooked, boiled, without salt',          // (verified)
-    need: /\blentils?\b/
+    need: /\blentils?\b/,
+    // USDA's "Lentils, raw" search also returns "Lentil curry", "Soup, lentil" and
+    // "Lentil curry with rice" (checked 17 Oct 2026). Those carry their own oil, and the
+    // parser already logs a separate cooking-oil component, so they would count it twice.
+    // FNDDS "X, from dried, fat added" records have the same problem.
+    avoid: /\b(curry|soup|with rice|sprouted|fat added)\b/
+  }, {
+    // Urad / maash dal is black gram, which USDA calls mungo beans. Without this alias,
+    // "cooked urad dal" returned Dal, Dove, Calamari and Breadfruit (app cache, 17 Oct 2026).
+    id: 'urad', label: 'black gram (mungo beans)',
+    when: /\b(urad|maash|mash da?al|black gram)\b/,
+    query: prep => prep.state === 'raw' || prep.state === 'dry'
+      ? 'Mungo beans, mature seeds, raw' : 'Mungo beans, mature seeds, cooked, boiled, without salt',
+    need: /\bmungo\b/,
+    avoid: /\b(curry|soup|fat added)\b/
   }, {
     id: 'mung', label: 'mung beans',
     when: /\b(moong|mung)\b/,
     query: prep => prep.state === 'raw' || prep.state === 'dry'
       ? 'Mung beans, mature seeds, raw' : 'Mung beans, mature seeds, cooked, boiled, without salt',
-    need: /\bmung\b/
+    need: /\bmung\b/,
+    avoid: /\b(curry|soup|with rice|sprouted|fat added)\b/
   }, {
     id: 'chickpeas', label: 'chickpeas',
-    when: /\b(chana|chole|chickpeas?|garbanzo)\b/,
+    when: /\b(chana|channa|chole|chickpeas?|garbanzo|bengal gram)\b/,
     query: prep => prep.state === 'raw' || prep.state === 'dry'
       ? 'Chickpeas, mature seeds, raw' : 'Chickpeas, mature seeds, cooked, boiled, without salt',
-    need: /\bchickpeas?\b/
+    need: /\bchickpeas?\b/,
+    // The app's cached "chickpeas" search returns "Chickpea flour (besan)" and
+    // "Chickpeas, from dried, fat added" among the top results.
+    avoid: /\b(curry|soup|with rice|hummus|flour|fat added)\b/
   }, {
     id: 'milk-powder', label: 'dried milk',
     when: /\b(milk powder|powdered milk|dry milk|dried milk|milk,? dry)\b/,
@@ -481,18 +499,26 @@
     query: () => 'Simple syrup',                                         // (verified)
     need: /\b(simple syrup|syrup, nfs)\b/
   }, {
-    id: 'burger-bun', label: 'a bread roll or bun',
-    when: /\b(burger|hamburger|hot ?dog|sandwich)\s+(buns?|rolls?)\b/,
-    query: () => 'Rolls, hamburger or hotdog, plain',
-    need: /\b(hamburger|hotdog|hot dog|rolls?|buns?)\b/,
-    avoid: /\b(bao|sweet|cinnamon)\b/
+    // The app's cached "bread bun" search returned "Bao bun", "Cinnamon buns, frosted",
+    // "Veggie burger, on bun" and "Sloppy joe, no bun" before the plain roll
+    // "Roll, white, hamburger bun" (17 Oct 2026). Any plain bun is sent to that record.
+    id: 'bun', label: 'a plain bread roll or bun',
+    when: /\b(buns?|bread rolls?|burger rolls?)\b/,
+    not: /\b(bao|cinnamon|honey|sweet|hot cross|chelsea|sticky)\b/,
+    query: () => 'Roll, white, hamburger bun',
+    need: /\b(rolls?|buns?)\b/,
+    avoid: /\b(bao|cinnamon|honey|sweet|on bun|no bun|sloppy|chili|veggie burger|sandwich)\b/
   }, {
     id: 'vermicelli', label: 'wheat vermicelli or pasta',
     when: /\b(vermicelli|seviyan|sewai|sevai|sawaiyan)\b/,
     not: /\b(rice|soy)\b/,
     query: prep => prep.state === 'raw' || prep.state === 'dry' ? 'Pasta, dry, enriched' : 'Pasta, cooked, enriched',
     need: /\b(pasta|spaghetti|macaroni|vermicelli)\b/,
-    avoid: /\bsoy\b/
+    // USDA has no plain wheat vermicelli: the app's cached "vermicelli" search returned
+    // only soy vermicelli and "Rice and vermicelli mix" (17 Oct 2026). Seviyan is a thin
+    // wheat pasta, so plain pasta is the closest record. Finished dishes ("Macaroni and
+    // cheese", "Pasta with tomato sauce") and the rice mixes are excluded.
+    avoid: /\b(soy|soybeans|with|and cheese|sauce|salad|soup|casserole|mix|rice)\b/
   }];
   function foodAlias(query) {
     const q = ' ' + String(query || '').toLowerCase() + ' ';
@@ -514,7 +540,10 @@
     { re: /\bmade from soy\b/, unless: /\bsoy\b/, what: 'a soy product' },
     { re: /\bbao\b/, unless: /\bbao\b/, what: 'a bao bun' },
     { re: /\bsugar[- ]free\b/, unless: /\b(sugar[- ]free|diet|zero)\b/, what: 'a sugar-free product' },
-    { re: /\b(candies|candy)\b/, unless: /\b(candy|candies|sweets?)\b/, what: 'a candy' }
+    { re: /\b(candies|candy)\b/, unless: /\b(candy|candies|sweets?)\b/, what: 'a candy' },
+    // The app's cached "milk solids" search returns "Cheese, cotija, solid" — the likely
+    // route by which Cotija landed inside gulab jamun on 18 Aug and 5 Oct (review 2026-10-17).
+    { re: /\bcheese\b/, unless: /\b(cheese|paneer|cheddar|mozzarella|cotija|feta|parmesan|ricotta|halloumi)\b/, what: 'a cheese' }
   ];
   // Words that describe preparation or portion, not which food it is.
   const PREP_WORDS = new Set(('cooked raw boiled fried deep shallow pan plain homemade home made fresh frozen ' +
@@ -529,9 +558,13 @@
     chapatti: ['chapati', 'chappatti', 'roti'], phulka: ['chapati', 'chappatti', 'roti'],
     keema: ['beef', 'lamb', 'mutton', 'chicken', 'ground'], qeema: ['beef', 'lamb', 'mutton', 'chicken', 'ground'],
     mince: ['beef', 'lamb', 'mutton', 'chicken', 'ground'], mutton: ['mutton', 'lamb', 'goat'],
-    gosht: ['mutton', 'lamb', 'goat', 'beef'], sabzi: ['vegetable']
+    gosht: ['mutton', 'lamb', 'goat', 'beef'], sabzi: ['vegetable'],
+    // Stemming "fries" gives "fri", which matches "Calamari, fried" (app cache, 17 Oct 2026).
+    fries: ['fries', 'french fr'], chips: ['chips', 'french fr']
   };
   const stemWord = w => w.replace(/(es|s)$/, '');
+  // A word with listed synonyms matches only itself or those, never a stem of itself.
+  const wordForms = w => FOOD_SYNONYMS[w] ? [w].concat(FOOD_SYNONYMS[w]) : [stemWord(w)];
   // '' when the record can plausibly be the food asked for; otherwise a short reason
   // for the review screen. query = the user's / parser's own words, not an alias query.
   function identityIssue(foodName, query) {
@@ -547,7 +580,7 @@
     }
     const words = q.split(/[^a-z]+/).filter(w => w.length > 2 && !PREP_WORDS.has(w));
     if (!words.length) return '';
-    const hit = words.some(w => [stemWord(w)].concat(FOOD_SYNONYMS[w] || []).some(f => n.includes(f)));
+    const hit = words.some(w => wordForms(w).some(f => n.includes(f)));
     return hit ? '' : `“${String(query).trim()}” does not appear in this record`;
   }
 

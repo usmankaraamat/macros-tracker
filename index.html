@@ -581,6 +581,9 @@
 
 <!-- ================================= LIFT ================================ -->
 <main id="tabLift" class="tabview" role="tabpanel" aria-labelledby="tabbtn-lift" hidden>
+  <!-- The day's planned session, read from the owner's Google Calendar through the
+       lift-plan Edge Function. Hidden for anyone the function does not serve. -->
+  <section class="panel lift-plan" id="liftPlanPanel" hidden></section>
   <!-- Free text in, sets out. Parsed by the grammar in core.js, not by a model. -->
   <section class="panel">
     <span class="panel-title">Session · <span id="liftDate">today</span><span id="liftSplit"></span></span>

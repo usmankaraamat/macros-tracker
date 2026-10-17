@@ -18,6 +18,8 @@ jobs:
           for f in js/*.js; do node --check "$f"; done
       - name: Core regression suite
         run: node scripts/run-core-tests.mjs
+      - name: Lift plan calendar parser
+        run: node scripts/test-liftplan.mjs
       - name: Service-worker cache contract
         # Compared with the state before this push, so a multi-commit push is
         # checked as a whole rather than only its last commit.
