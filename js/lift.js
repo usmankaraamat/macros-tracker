@@ -617,40 +617,83 @@ function bindLiftEditor(w){
 // by id so a name whose spelling drifted collapses to one entry; the latest session wins the
 // display name, and most-recently-trained sorts to the top of each group. Choosing one drops
 // the canonical name into the logger, ready for the sets.
-function renderLiftPicker(all){
-  const sel = document.getElementById('liftPick'); if (!sel) return;
+// ---- find an exercise -------------------------------------------------------
+// A search box at the top of the logger. Exercises you have logged come first (today's split,
+// then most recent), then the rest of the catalogue. Each typed word must start a word in the
+// name, an alias or a muscle, so "squ" finds Squat and "rdl" finds Romanian deadlift.
+let liftFindList = [];
+function liftFindCandidates(all){
   const todaySplit = splitForDate(VIEW_DATE);
   const seen = {};
-  Object.keys(all).sort().forEach(d=>{               // ascending so the latest date wins name/last
-    const w = all[d], sp = w.split || '';
+  Object.keys(all).sort().forEach(d=>{
+    const w = all[d];
     (w.exercises||[]).forEach(ex=>{
       if (!ex || !ex.id || !ex.name) return;
-      const e = seen[ex.id] || (seen[ex.id] = { name:ex.name, last:d, inSplit:false });
+      const e = seen[ex.id] || (seen[ex.id] = { id:ex.id, name:ex.name, last:d, inSplit:false });
       e.name = ex.name; e.last = d;
-      if (sp === todaySplit) e.inSplit = true;         // has appeared on a day of this split
+      if ((w.split||'') === todaySplit) e.inSplit = true;
     });
   });
-  const ids = Object.keys(seen);
-  if (!ids.length){ sel.hidden = true; sel.innerHTML = ''; return; }   // nothing logged yet → no picker
-  const recent = (a,b)=> seen[a].last < seen[b].last ? 1 : seen[a].last > seen[b].last ? -1 : 0;
-  const mkOpts = list => list.map(id=>`<option value="${escapeAttr(seen[id].name)}">${escapeHtml(seen[id].name)}</option>`).join('');
-  const todays = ids.filter(id=>seen[id].inSplit).sort(recent);
-  const others = ids.filter(id=>!seen[id].inSplit).sort(recent);
-  sel.hidden = false;
-  let html = '<option value="">Insert an exercise name…</option>';
-  if (todays.length) html += `<optgroup label="${escapeHtml(todaySplit)} · your exercises">` + mkOpts(todays) + '</optgroup>';
-  if (others.length) html += '<optgroup label="Other logged exercises">' + mkOpts(others) + '</optgroup>';
-  sel.innerHTML = html;
-  sel.onchange = ()=>{
-    const name = sel.value; sel.value = '';
-    if (!name) return;
-    const inp = document.getElementById('liftInput');
-    const base = (inp.value||'').replace(/\s+$/,'');
-    inp.value = (base ? base + '\n' : '') + name + ' ';   // each pick on its own line, ready for sets
-    inp.focus();
-    inp.setSelectionRange(inp.value.length, inp.value.length);
-    renderLiftPreview();   // programmatic value change fires no input event
+  const cat = exerciseCatalog();
+  const byId = {}; cat.forEach(c=>{ byId[c.id] = c; });
+  const logged = Object.values(seen)
+    .sort((a,b)=> (b.inSplit - a.inSplit) || (a.last < b.last ? 1 : a.last > b.last ? -1 : 0))
+    .map(e=> ({ id:e.id, name:e.name, rec: byId[e.id] || { name:e.name, aliases:[] }, logged:true }));
+  const rest = cat.filter(c=>!seen[c.id]).sort((a,b)=> a.name<b.name?-1:1)
+    .map(c=> ({ id:c.id, name:c.name, rec:c, logged:false }));
+  return logged.concat(rest);
+}
+function insertLiftName(name){
+  const inp = document.getElementById('liftInput');
+  const base = (inp.value||'').replace(/\s+$/,'');
+  inp.value = (base ? base + '\n' : '') + name + ' ';   // each pick on its own line, ready for sets
+  inp.focus();
+  inp.setSelectionRange(inp.value.length, inp.value.length);
+  renderLiftPreview();   // programmatic value change fires no input event
+}
+function renderLiftFind(){
+  const inp = document.getElementById('liftFind'), out = document.getElementById('liftFindResults');
+  if (!inp || !out) return;
+  const q = inp.value.trim();
+  if (!q){ out.hidden = true; out.innerHTML = ''; return; }
+  // The logger's own abbreviations apply here too: "rdl" → romanian deadlift, "ohp", "db"…
+  const qx = q.toLowerCase().split(/\s+/).map(w => LedgerCore.LIFT_ABBR[w] || w).join(' ');
+  // Name or alias matches first; muscle-only matches ("lat" → rows, which train the lats) after.
+  const words = qx.split(/\s+/).filter(Boolean);
+  const named = x => {
+    const tokens = [x.name, x.rec.name].concat(x.rec.aliases||[]).join(' ').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    return words.every(w => tokens.some(t => t.startsWith(w)));
   };
+  const hits = liftFindList.filter(x => named(x))
+    .concat(liftFindList.filter(x => !named(x) && catalogMatches(x.rec, qx))).slice(0, 6);
+  out.hidden = false;
+  out.innerHTML = hits.length
+    ? hits.map((x,i)=>`<button type="button" class="lift-find-row" data-find="${i}">
+        <span class="lift-find-name">${escapeHtml(x.name)}</span>
+        <span class="lift-find-last">${x.logged ? escapeHtml(planLastTop(x.id)) : 'not logged yet'}</span></button>`).join('')
+    : `<div class="lift-sub" style="margin:4px 0 8px">No match for “${escapeHtml(q)}”. Type it in the box below and it is added when you log it.</div>`;
+  out.querySelectorAll('[data-find]').forEach(b=>{
+    b.onclick = ()=>{ pickLiftFind(hits[+b.dataset.find]); };
+  });
+  out._hits = hits;
+}
+function pickLiftFind(x){
+  if (!x) return;
+  const inp = document.getElementById('liftFind');
+  inp.value = ''; renderLiftFind();
+  insertLiftName(x.name);
+}
+function renderLiftPicker(all){
+  liftFindList = liftFindCandidates(all);
+  const inp = document.getElementById('liftFind');
+  if (inp && !inp.oninput){
+    inp.oninput = renderLiftFind;
+    inp.onkeydown = ev => {
+      if (ev.key === 'Enter'){ ev.preventDefault(); const h = document.getElementById('liftFindResults')._hits; if (h && h.length) pickLiftFind(h[0]); }
+      if (ev.key === 'Escape'){ inp.value = ''; renderLiftFind(); }
+    };
+  }
+  renderLiftFind();
 }
 function renderLiftChips(all){
   const el = document.getElementById('liftChips'); if (!el) return;
@@ -1111,11 +1154,7 @@ function renderLiftPlan(){
       b.onclick = () => {
         const [si, xi] = b.dataset.plan.split(':').map(Number);
         const n = planLiftName(day[si].exercises[xi].name);
-        const inp = document.getElementById('liftInput');
-        // Add the name on its own line, ready for the sets; the "last time" preview follows the cursor.
-        inp.value = (inp.value.trim() ? inp.value.replace(/\s*$/, '') + '\n' : '') + n.log + ' ';
-        inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
-        renderLiftPreview();
+        insertLiftName(n.log);
       };
     });
   }

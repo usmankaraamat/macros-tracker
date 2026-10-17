@@ -587,9 +587,11 @@
   <!-- Free text in, sets out. Parsed by the grammar in core.js, not by a model. -->
   <section class="panel">
     <span class="panel-title">Session · <span id="liftDate">today</span><span id="liftSplit"></span></span>
+    <!-- Find an exercise by typing a few letters instead of scrolling a list. -->
+    <label for="liftFind" class="sr-only">Find an exercise to log</label>
+    <input type="search" id="liftFind" class="lift-find" placeholder="Find an exercise: squat, rdl, lat…" autocomplete="off" enterkeyhint="go">
+    <div id="liftFindResults" class="lift-find-results" hidden></div>
     <div class="chips" id="liftChips" hidden></div>
-    <label for="liftPick" class="sr-only">Insert an exercise from your log</label>
-    <select id="liftPick" class="lift-pick" hidden></select>
     <label for="liftInput" class="sr-only">Describe your sets</label>
     <textarea id="liftInput" rows="3" placeholder="One exercise per line — bicep curls 20x12, 20x8, 15x14&#10;bench 60kg 8, 8, 6 rir 2"></textarea>
     <div class="omni-actions">

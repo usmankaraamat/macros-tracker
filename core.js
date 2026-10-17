@@ -2728,7 +2728,7 @@
     completeMacros, macroKcal, KCAL_PER_G,
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend, robustWeightTrend,
     FOOD_PINS, foodPin, pinMatches, applyPin,
-    FOOD_ALIASES, foodAlias, aliasQuery, identityIssue, LOCAL_FOODS, localCandidates,
+    FOOD_ALIASES, foodAlias, aliasQuery, identityIssue, LOCAL_FOODS, localCandidates, LIFT_ABBR,
     fatEstimate, bmrMifflin, calibrateTDEE, corridorFromTDEE, mealPaceKcal, microStatus,
     energyBalance, balanceCheck, BALANCE_MIN_DAYS,
     projectGoal, requiredRate, projectionConfidence, PROJ_Z,

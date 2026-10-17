@@ -1162,7 +1162,18 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .lift-ex-editing { background: var(--chalk-wash); border-radius: 6px; padding: 12px; }
 .lift-edit-lbl { display: block; font-size: 11px; color: var(--faint); margin: 8px 0 3px; }
 .lift-edit-in { width: 100%; }
-.lift-pick { width: 100%; margin-bottom: 8px; }
+.lift-find { width: 100%; margin-bottom: 8px; }
+.lift-find-results { margin: -2px 0 10px; border: 1px solid var(--rule); border-radius: var(--radius); overflow: hidden; }
+.lift-find-row {
+  display: block; width: 100%; text-align: left; background: var(--well); border: 0;
+  border-top: 1px solid var(--rule); padding: 10px 12px; min-height: var(--tap);
+  color: var(--chalk); font: inherit; cursor: pointer;
+}
+.lift-find-row:first-child { border-top: 0; }
+.lift-find-row:active, .lift-find-row:focus-visible { background: var(--rule); }
+.lift-find-name { display: block; font-size: 14px; }
+.lift-find-last { display: block; font-size: 10.5px; color: var(--faint); margin-top: 2px; overflow-wrap: anywhere; }
+.lift-find-results > .lift-sub { padding: 0 12px; }
 .lift-conf { font-family: var(--data); font-size: 10px; letter-spacing: .02em; }
 .lift-conf.high { color: var(--verdigris); }
 .lift-conf.med  { color: var(--chalk); }
