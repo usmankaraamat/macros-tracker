@@ -1015,7 +1015,10 @@ function waistLine(r){
 // when older than 30 minutes; an account the function does not serve is asked again
 // after 12 hours, so other users of the app never see an empty card.
 const LIFT_PLAN_KEY = 'eatify_liftplan';
-const LIFT_PLAN_FRESH_MS = 30 * 60000, LIFT_PLAN_RETRY_MS = 12 * 3600000;
+// 404 = this account is not the plan's owner: ask again in 12 h. Anything else (503 while
+// the secrets are still being set up) is retried after 5 minutes, so finishing the setup
+// shows the card without waiting half a day.
+const LIFT_PLAN_FRESH_MS = 30 * 60000, LIFT_PLAN_RETRY_MS = 12 * 3600000, LIFT_PLAN_SETUP_RETRY_MS = 5 * 60000;
 let liftPlanLoading = false;
 function liftPlanCache(){ try { return JSON.parse(localStorage.getItem(LIFT_PLAN_KEY)||'null'); } catch(e){ return null; } }
 function saveLiftPlanCache(v){ try { localStorage.setItem(LIFT_PLAN_KEY, JSON.stringify(v)); } catch(e){} }
@@ -1023,13 +1026,14 @@ async function refreshLiftPlan(force){
   if (liftPlanLoading || !hostedAccountConfigured()) return;
   const c = liftPlanCache();
   const age = c ? Date.now() - Date.parse(c.checkedAt || 0) : Infinity;
-  if (!force && c && (c.unavailable ? age < LIFT_PLAN_RETRY_MS : (age < LIFT_PLAN_FRESH_MS && c.from === ACTIVE_DATE))) return;
+  const wait = c && c.unavailable ? (c.status === 404 ? LIFT_PLAN_RETRY_MS : LIFT_PLAN_SETUP_RETRY_MS) : 0;
+  if (!force && c && (c.unavailable ? age < wait : (age < LIFT_PLAN_FRESH_MS && c.from === ACTIVE_DATE))) return;
   liftPlanLoading = true; renderLiftPlan();
   try {
     const d = await hostedCall('lift-plan', { days: 8 });
     saveLiftPlanCache({ checkedAt: new Date().toISOString(), from: d.from, sessions: d.sessions||[], skipped: d.skipped||[] });
   } catch(e){
-    if (e.status === 404 || e.status === 503) saveLiftPlanCache({ checkedAt: new Date().toISOString(), unavailable: true });
+    if (e.status === 404 || e.status === 503) saveLiftPlanCache({ checkedAt: new Date().toISOString(), unavailable: true, status: e.status });
     else if (c && !c.unavailable) saveLiftPlanCache(Object.assign({}, c, { error: e.message }));
   } finally { liftPlanLoading = false; renderLiftPlan(); }
 }
