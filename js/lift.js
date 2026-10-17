@@ -762,9 +762,28 @@ function muscleMapHTML(meta){
   const src = meta.explicit ? 'tagged' : (meta.fromSeed ? 'seed' : '');
   return `<div class="cat-muscles">${parts}${src?` <span class="cat-src">${src}</span>`:''}</div>`;
 }
+// Every word typed must START a word in the exercise's name, aliases or muscle labels, so
+// "curl bi" finds Bicep Curl and "rear" finds rear-delt work but not "forearms".
+function catalogMatches(c, q){
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const meta = LedgerCore.exerciseMeta(c);
+  const tokens = [c.name].concat(c.aliases||[], Object.keys(meta.muscles||{}).map(g => LedgerCore.MUSCLE_LABEL[g]||g),
+    meta.pattern||'').join(' ').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return words.every(w => tokens.some(t => t.startsWith(w)));
+}
 function renderLiftCatalog(){
   const el = document.getElementById('liftCatalog'); if (!el) return;
-  const cat = exerciseCatalog().slice().sort((a,b)=> a.name<b.name?-1:1);
+  const search = document.getElementById('liftCatSearch');
+  if (search && !search.oninput) search.oninput = renderLiftCatalog;   // table rebuilds; the box keeps focus
+  const q = search ? search.value.trim() : '';
+  const all = exerciseCatalog();
+  const cat = all.filter(c => catalogMatches(c, q)).sort((a,b)=> a.name<b.name?-1:1);
+  if (q && !cat.length){
+    el.innerHTML = `<div class="tactical" style="margin-top:0">No exercise matches “${escapeHtml(q)}”. Log it once and it joins the catalogue.</div>`;
+    updateCatAiBtn();
+    return;
+  }
   const muscleSel = (c, meta)=>{
     const cur = meta.muscles ? Object.keys(meta.muscles).sort((a,b)=>meta.muscles[b]-meta.muscles[a])[0] : '';
     const tagged = meta.tagged ? '' : ' untagged';
@@ -774,7 +793,8 @@ function renderLiftCatalog(){
   };
   const patSel = (c, meta)=>`<select class="cat-tag" data-pat="${escapeAttr(c.id)}">`
       + ['','compound','isolation'].map(v=>`<option value="${v}"${v===(meta.pattern||'')?' selected':''}>${v||'—'}</option>`).join('') + `</select>`;
-  el.innerHTML = `<table><thead><tr><th>Exercise</th><th>Muscle</th><th>Type</th><th></th></tr></thead><tbody>`
+  el.innerHTML = (q ? `<div class="lift-sub" style="margin:0 0 6px">${cat.length} of ${all.length} exercises</div>` : '')
+    + `<table><thead><tr><th>Exercise</th><th>Muscle</th><th>Type</th><th></th></tr></thead><tbody>`
     + cat.map(c=>{
       const meta = LedgerCore.exerciseMeta(c);
       return `<tr><td>${escapeHtml(c.name)}`

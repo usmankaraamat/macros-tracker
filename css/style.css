@@ -476,7 +476,7 @@ label {
   margin-bottom: 5px;
 }
 
-input[type=text], input[type=number], input[type=password],
+input[type=text], input[type=number], input[type=password], input[type=search],
 input[type=date], input[type=time], select, textarea {
   width: 100%;
   min-height: var(--tap);
@@ -1278,6 +1278,8 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .lift-preview .lift-pv-top b { color: var(--verdigris); font-weight: 600; }
 .lift-preview .lift-sets { margin-top: 5px; }
 .lift-preview .lift-sub { color: var(--graphite); }
+
+.cat-search { width: 100%; margin-bottom: 10px; }
 
 /* ---- planned session from the calendar ---- */
 .lift-plan-list { list-style: none; margin: 10px 0 0; padding: 0; }
