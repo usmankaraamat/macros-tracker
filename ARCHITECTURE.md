@@ -159,14 +159,20 @@ Everything else in the app is UI and storage glue around these functions.
 ## 6. The five tabs
 
 **Today** — the primary screen. A calorie "corridor" (a floor and a ceiling, not
-a single target) is rendered as a **radial speedometer**: a soft "good zone" band
-spans floor→ceiling, a progress arc fills to the current intake (green inside the
-corridor, amber below the floor, red over the ceiling), and the centre shows the
-percentage of the ceiling with the raw kcal beneath it. A pace tick on the arc
-marks where you should be by now. Macro rows (protein as a floor, optional carb/fat
-caps) read as percentage + grams over smooth, per-macro-tinted bars;
-micronutrients, the entry ledger, and one-tap "repeat" chips mined from past
-*meals* (not ingredients) sit below.
+a single target) is drawn on a half-circle **arc gauge** (`LedgerCore.gaugeGeometry`
+computes the dial: scale maximum = ceiling × 1.15, grown if intake passes it): the
+corridor is a band on the arc, the fill runs to the current intake (green inside the
+corridor, amber below the floor, red over the ceiling), the kcal eaten is the headline
+number and one verdict line says how far from the nearest edge. A pace tick on the arc
+marks where you should be by now; the whole dial is exposed as one `role="meter"` with a
+spoken reading. Three **macro tiles** (protein as a floor, optional carb/fat caps) show
+value, target, a thin bar and a status colour. Below them each day's entries are grouped
+into **meals** (`LedgerCore.mealRows`: consecutive entries eaten within 30 minutes of
+the previous one), one collapsed `<details>` row per meal that opens to its ingredients
+with the same edit/remove actions as before; the row's name is the dish, a saved usual,
+or the time of day. Grams per kg, the fat notes, the micronutrient panel and today's
+supplements sit in a collapsed "More detail" block, then one-tap "repeat" chips mined from
+past *meals* (not ingredients).
 The **Offline meals** sheet indexes every distinct meal already present in the
 local ledger history, sorted by frequency. It does not duplicate those meals in
 Supabase or localStorage. Saved usuals are the pinned subset and sync through the
@@ -195,7 +201,10 @@ gap-closing meal combinations to hit the remaining budget, and a **ternary meal
 engineer**: an interactive equilateral-triangle widget for balancing three foods
 against a calorie target with a protein-floor "green zone" overlay.
 
-**Lift** — free-text workout logging ("bench 60kg 8, 8, 6 rir 2"), parsed by a
+**Lift** — three underlined tabs: **Log today** (logger, rest timer, "last time" preview,
+the calendar plan and one card per exercise with its set chips), **History** (progression
+trends, past sessions) and **Catalogue** (aliases, muscle maps, AI categorisation). The
+chosen tab is a variable in `lift.js`, so a re-render never changes it. Free-text workout logging ("bench 60kg 8, 8, 6 rir 2"), parsed by a
 grammar in `core.js` (with an AI fallback only for lines the grammar can't read).
 Each lift is tracked on a **progression trend** with a verdict (progressing /
 grinding / stalled / effort-drift / regressing) judged on estimated-1RM (or work
@@ -322,6 +331,7 @@ Optional and off by default:
 ## 10. Conventions for changing the code
 
 - Put real math in `core.js` (pure, tested); keep DOM and storage out of it.
+- Font sizes in `css/style.css` come from the six `--fs-1..--fs-6` tokens at the top (12px minimum, 16px body); do not add a new size.
 - Escape every externally-sourced string before `innerHTML`.
 - Anything per-day should carry a `*_meta`/`*_updated` timestamp so sync merges it.
 - **Bump `CACHE` in `sw.js` on every shippable change**, or clients won't update.
