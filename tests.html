@@ -2060,7 +2060,7 @@ group('mealRows — repeated time-of-day labels, estimate threshold');
     e('Yogurt, plain, low fat', at(16,12), 41), e('Candy, hard', at(16,13), 59)
   ]);
   check('two dinners are named from their main foods', two.length === 2 && two[0].name === 'Vermicelli' && two[1].name === 'White rice and chicken breast', two.map(r => r.name).join(' | '));
-  check('the second food joins only at a quarter of the meal', two[0].kind === 'foods' && !/ and /.test(two[0].name));
+  check('the second food joins only at a fifth of the meal', two[0].kind === 'foods' && !/ and /.test(two[0].name));
   const three = C.mealRows([e('Tea', at(11,0), 50), e('Nuts', at(12,30), 300), e('Biscuit, plain', at(13,40), 150)]);
   check('three snacks all get food names', three.length === 3 && three.every(r => r.kind === 'foods') && three.map(r => r.name).join('|') === 'Tea|Nuts|Biscuit', three.map(r => r.name).join('|'));
   const uniq = C.mealRows([e('Tea', at(11,0), 50), e('Rice', at(15,0), 500)]);

@@ -335,7 +335,7 @@
       else if (es.length === 1) { name = cap(shortFoodName(es[0].name)); kind = 'food'; }
       else { name = 'Meal'; kind = 'meal'; }
       // The one or two foods carrying the most kcal (a dish counts as one food). The second joins
-      // only when it carries at least a quarter of the meal, so "rice and chicken" but not
+      // only when it carries at least a fifth of the meal, so "rice and chicken" but not
       // "rice and a spoon of yoghurt".
       const byFood = {};
       es.forEach(e => {
@@ -344,7 +344,7 @@
         (byFood[k] = byFood[k] || { label, kcal: 0 }).kcal += (+e.kcal || 0);
       });
       const top = Object.keys(byFood).map(k => byFood[k]).sort((a, b) => b.kcal - a.kcal);
-      const main = top.slice(0, top.length > 1 && top[1].kcal * 4 >= kcal ? 2 : 1).map(x => cap(x.label.toLowerCase()));
+      const main = top.slice(0, top.length > 1 && top[1].kcal * 5 >= kcal ? 2 : 1).map(x => cap(x.label.toLowerCase()));
       // Estimated entries: AI estimates, and components of a dish that was not weighed.
       const estKcal = es.reduce((a, e) => a + ((e.source === 'AI est' || (e.partOf && e.weighed === false)) ? (+e.kcal || 0) : 0), 0);
       return {

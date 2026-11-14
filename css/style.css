@@ -41,10 +41,10 @@
   --chalk-wash:     rgba(238, 242, 240, 0.06);
 
   /* ---- type: Inter for everything, a mono only for data tables ---- */
-  --display: 'Inter', system-ui, -apple-system, sans-serif;
-  --body:    'Inter', system-ui, -apple-system, sans-serif;
-  --data:    'Inter', system-ui, -apple-system, sans-serif;
-  --mono:    'Spline Sans Mono', ui-monospace, 'SF Mono', monospace;
+  --display: var(--font-display);
+  --body:    var(--font-body);
+  --data:    var(--font-body);
+  --mono:    var(--font-mono);
 
   --gutter: 18px;
   --radius: 12px;         /* rounded, friendly */
@@ -64,6 +64,14 @@
    older screens keep using the --bench/--slab family, which is near-identical.
    ========================================================================== */
 :root {
+  /* Typefaces, behind three tokens so they change in one place. All three load from Google
+     Fonts with display=swap (index.html) and are cached by the service worker's font cache the
+     same way as before; each stack falls back to system faces so a first offline launch is
+     readable. Archivo is used with its width axis (font-stretch) for the big numbers. */
+  --font-display: 'Archivo', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-body:    'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
   --fs-1: 12px;   /* captions, tags, units: the minimum */
   --fs-2: 14px;   /* secondary lines, buttons, chips */
   --fs-3: 16px;   /* body text, names, inputs */
@@ -913,8 +921,8 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 }
 .tern-find:hover:not(:disabled) { background: var(--chalk-wash); color: var(--chalk); border-color: var(--graphite); }
 .tern-search { border: 1px solid var(--rule); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; }
-.tern-target { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; margin-bottom: 14px; }
-.tern-target .hint { font-size: var(--fs-1); color: var(--faint); padding-bottom: 13px; white-space: nowrap; }
+.tern-target { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; margin-bottom: 14px; }
+.tern-target .hint { font-size: var(--fs-1); color: var(--faint); padding-bottom: 13px; white-space: normal; max-width: 150px; }
 .tern-stage { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
 .tern-plot { flex: 1 1 220px; min-width: 200px; max-width: 300px; margin: 0 auto; touch-action: none; }
 .tern-plot svg { width: 100%; height: auto; display: block; overflow: visible; cursor: grab; }
@@ -1252,6 +1260,7 @@ tr.rowNew td { animation: rowSettle 0.9s ease-out; }
 .trust-row { display: flex; align-items: baseline; gap: 8px; font-size: var(--fs-1); padding: 4px 0; }
 .trust-row > span:first-of-type, .trust-row > span:nth-child(2) { flex: 1; }
 .trust-dot { font-size: var(--fs-1); }
+.trust-row > span.trust-dot { flex: none; }
 .trust-dot.ok { color: var(--verdigris); }
 .trust-dot.warn { color: var(--brass); }
 .trust-dot.bad { color: var(--hot); }
@@ -2208,3 +2217,6 @@ details.meal > summary::before { margin-right: 0; }
 #liftCatalog td:nth-child(2) { width: 104px; }
 #liftCatalog td:nth-child(3) { width: 92px; }
 #liftCatalog .cat-tag { padding: 4px 22px 4px 8px; background-position: calc(100% - 12px) 50%, calc(100% - 7px) 50%; }
+
+/* The gauge number: Archivo, condensed along its width axis as in the mock-up. */
+.gauge-card .cor-val { font-weight: 800; font-stretch: 88%; letter-spacing: -.02em; }
