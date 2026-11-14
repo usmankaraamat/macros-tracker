@@ -257,7 +257,9 @@
   // or after today are ignored, so a backtest can ask "what would it have said that morning".
   function buildIndex(sessions, catalogue, today, opts) {
     const o = opts || {};
-    const all = (sessions || []).filter(s => s.date < today);
+    // Sorted by date (then planned after real), so the caller's order never matters.
+    const all = (sessions || []).filter(s => s && s.date < today).slice()
+      .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.planned ? 1 : 0) - (b.planned ? 1 : 0));
     const cat = (catalogue && catalogue.length ? catalogue : C.SEED_EXERCISES);
     const byId = {}, info = {}, byLift = {}, lastDate = {}, firstDate = {};
     cat.forEach(c => { if (c && c.id) { byId[c.id] = c; info[c.id] = describeLift(c); } });
@@ -868,7 +870,7 @@
       let worst = 0;
       items.forEach((it, i) => { if (it.value < items[worst].value || (it.value === items[worst].value && it.id > items[worst].id)) worst = i; });
       const it = items.splice(worst, 1)[0];
-      dropped.push({ id: it.id, name: it.name, muscle: it.muscle, sets: it.sets, code: 'TIME_BUDGET' });
+      dropped.push({ id: it.id, name: it.name, muscle: it.muscle, sets: it.sets, value: it.value, code: 'TIME_BUDGET' });
     }
     items.forEach(it => { it.minutes = r1(itemMinutes(it, cfg)); });
     // Nearly nothing left to do: the week's aims are already met for every recovered muscle.
