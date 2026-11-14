@@ -294,39 +294,48 @@
     </div>
   </section>
 
-  <!-- THE CORRIDOR — a single value against a limit, which is a METER, not a dial.
-       The radial gauge spent ~40% of the first screen encoding one ratio and pushed
-       the macros below the fold; a horizontal track says the same thing in a fifth
-       of the height and leaves room for the numbers that need reading next. -->
-  <section class="corridor-card" id="instrument" aria-label="Caloric corridor">
+  <!-- THE CORRIDOR. One arc: 0 kcal at the left, the scale maximum at the right, the
+       corridor drawn as a band on it, the fill running to what has been eaten. The
+       numbers are in HTML over the arc so they scale with the user's text size, and the
+       whole thing is exposed as one meter with a spoken reading (aria-valuetext). -->
+  <section class="corridor-card gauge-card" id="instrument" aria-label="Caloric corridor">
     <button type="button" class="pin-toggle card-pin" id="caloriePin" aria-label="Pin calorie summary" aria-pressed="false" title="Keep calories in sight"></button>
-    <div class="cor-top">
-      <div class="cor-hero"><span class="cor-val is-empty" id="readout">0</span><span class="cor-unit">kcal</span></div>
-      <div class="cor-state is-empty" id="verdictStamp">no entries</div>
+    <div class="gauge" id="scale" role="meter" aria-label="Calories against your daily corridor">
+      <svg class="gauge-svg" viewBox="0 0 360 190" aria-hidden="true" focusable="false">
+        <path class="g-track" id="gaugeTrack"></path>
+        <path class="g-zone" id="gaugeZone"></path>
+        <path class="g-proj" id="projCursor" hidden></path>
+        <path class="g-prog is-empty" id="gaugeProg"></path>
+        <line class="g-tick" id="gaugeTickFloor"></line>
+        <line class="g-tick" id="gaugeTickCeil"></line>
+        <line class="g-pace" id="paceMark" hidden></line>
+        <text class="g-lbl" id="gaugeLblFloor"></text>
+        <text class="g-lbl" id="gaugeLblCeil"></text>
+      </svg>
+      <div class="gauge-read">
+        <span class="cor-val is-empty" id="readout">0</span>
+        <span class="cor-unit">kcal</span>
+      </div>
     </div>
-    <div class="cor-gap" id="gaugeKcal"></div>
-    <div class="cor-meter" id="scale" role="meter" aria-label="Calories against your daily corridor">
-      <div class="cor-band" id="gaugeZone"></div>
-      <div class="cor-ghost" id="projCursor" hidden></div>
-      <div class="cor-fill is-empty" id="gaugeProg"></div>
-      <div class="cor-pace" id="paceMark" hidden></div>
-    </div>
-    <div class="cor-sub" id="readoutSub"></div>
+    <div class="gauge-verdict"><span class="cor-state is-empty" id="verdictStamp">Nothing logged</span></div>
+    <div class="cor-sub" id="readoutSub" hidden></div>
     <div class="pace-line" id="paceLine" hidden></div>
   </section>
 
-  <!-- MACROS -->
-  <section class="panel">
-    <span class="panel-title">Macros</span>
-    <div id="macroRows"></div>
-    <div id="microLine" style="margin-top:16px" hidden></div>
-  </section>
+  <!-- MACROS: protein as a floor, carbs and fat as caps. Three tiles, one row. -->
+  <section class="macro-tiles" id="macroRows" role="group" aria-label="Macros"></section>
 
-  <!-- Supplements that are ON today. "Is today an ON day?" is a Today question,
-       so the answer lives here; the protocols themselves are managed under Plan. -->
-  <section class="panel" id="suppTodayPanel" hidden>
-    <span class="panel-title">Supplements today</span>
-    <div class="supp-strip-today" id="suppTodayStrip"></div>
+  <!-- MEALS: one row per sitting, collapsed. Tapping a row opens its ingredients, each with
+       the same edit and remove actions the flat list always had. -->
+  <section class="meals-block" aria-labelledby="ledgerTitle">
+    <div class="ledger-titlebar">
+      <div class="ledger-heading">
+        <h2 class="panel-title" id="ledgerTitle">Meals</h2>
+        <span class="ledger-count" id="ledgerCount"></span>
+      </div>
+      <button type="button" class="sm ghost" id="saveTplBtn">Save as usual</button>
+    </div>
+    <div id="ledgerBody" class="meal-ledger" aria-label="Meals logged for the day on screen"></div>
   </section>
 
   <!-- LOGGING. The composer at the bottom owns the AI path end to end, review
@@ -371,17 +380,22 @@
     </div>
   </section>
 
-  <!-- LEDGER -->
-  <section class="panel meal-ledger-panel">
-    <div class="ledger-titlebar">
-      <div class="ledger-heading">
-        <span class="panel-title" id="ledgerTitle">Today's entries</span>
-        <span class="ledger-count" id="ledgerCount"></span>
-      </div>
-      <button type="button" class="sm ghost" id="saveTplBtn">Save as usual</button>
+  <!-- MORE DETAIL, collapsed: everything the old Macros card carried that does not
+       belong on the first screen. The notes under protein, carbs and fat, the
+       micronutrient panel (with its own averaging window), and today's supplements. -->
+  <details class="panel today-more" id="todayMore">
+    <summary><span class="panel-title" style="margin:0">More detail <small class="more-hint">g per kg · fats · micronutrients · supplements</small></span></summary>
+    <div class="today-more-body">
+      <div id="macroNotes" class="macro-notes"></div>
+      <div id="microLine" hidden></div>
+      <!-- Supplements that are ON today. "Is today an ON day?" is a Today question,
+           so the answer lives here; the protocols themselves are managed under Plan. -->
+      <section id="suppTodayPanel" hidden>
+        <span class="panel-title">Supplements today</span>
+        <div class="supp-strip-today" id="suppTodayStrip"></div>
+      </section>
     </div>
-    <div id="ledgerBody" class="meal-ledger" aria-label="Foods logged for the day on screen"></div>
-  </section>
+  </details>
 
   <!-- Day maintenance. Close day is the routine action; the destructive ones sit
        behind a disclosure so they can't be hit by accident right next to it. -->

@@ -31,83 +31,79 @@ function applyAdaptiveCorridor(){
   FLOOR = FLOOR_M; CEIL = CEIL_M;   // manual corridor (goal off, or no TDEE yet)
 }
 
-// ---- the gauge (signature element) ----------------------------------------
-// Domain runs 0 .. CEIL*1.15 so a ceiling breach is always visible on the arc.
-function scaleMaxKcal(){ return CEIL * 1.15; }
-
-// Radial-gauge geometry: a 270° sweep starting bottom-left (135°), running
-// clockwise to bottom-right, drawn with stroke-dasharray on rotated circles.
-// The meter is linear, so "where does this value sit" is just a percentage of the
-// track. Everything below is that one idea; there is no geometry left to get wrong.
-function meterPct(kcal){ return Math.max(0, Math.min(100, kcal / scaleMaxKcal() * 100)); }
+/// ---- the gauge (signature element) ----------------------------------------
+// A half-circle dial drawn from LedgerCore.gaugeGeometry: 0 kcal at the left end, the scale
+// maximum (ceiling x 1.15, grown if intake passes it) at the right, the corridor as a band on
+// the arc, the fill to what has been eaten, and a tick for where the meal plan says you should
+// be by now. All the geometry is in core.js and tested; this only writes it into the SVG.
+let _gaugeGeo = null;
+const fmtKcal = n => Math.round(n).toLocaleString();
+const svgAttrs = (id, attrs) => { const el = document.getElementById(id); if (el) for (const k in attrs) el.setAttribute(k, attrs[k]); return el; };
 
 // A ghost segment from current intake to a projected intake — driven by the meal
 // composer while the grams field holds a value (see app.js).
 function setGaugeProjection(kcal){
   const el = document.getElementById('projCursor');
   if (!el) return;
-  if (kcal == null){ el.hidden = true; return; }
-  const cur = meterPct(totals().kcal), proj = meterPct(kcal);
-  if (proj <= cur + 0.2){ el.hidden = true; return; }
-  el.style.left = cur.toFixed(2) + '%';
-  el.style.width = (proj - cur).toFixed(2) + '%';
-  el.hidden = false;
+  if (kcal == null || !_gaugeGeo){ el.setAttribute('hidden', ''); return; }
+  const d = LedgerCore.gaugeArc(_gaugeGeo, totals().kcal, kcal);
+  if (!d){ el.setAttribute('hidden', ''); return; }
+  el.setAttribute('d', d);
+  el.removeAttribute('hidden');
 }
 
 let _lastCorridorKey = '';
 function renderInstrument(t){
   const st = corridorState(t.kcal);
   const inst = document.getElementById('instrument');
-  const max = scaleMaxKcal();
+  const geo = _gaugeGeo = LedgerCore.gaugeGeometry({ floor:FLOOR, ceil:CEIL, intake:t.kcal });
+  const tone = t.kcal < 1 ? 'empty' : st.key;
 
-  // Track: corridor band spans floor→ceiling, fill runs 0→current in the state colour.
-  const band = document.getElementById('gaugeZone');
-  if (band){
-    const l = meterPct(FLOOR);
-    band.style.left = l.toFixed(2) + '%';
-    band.style.width = Math.max(0, meterPct(CEIL) - l).toFixed(2) + '%';
-  }
-  const fill = document.getElementById('gaugeProg');
-  if (fill){
-    fill.style.width = meterPct(t.kcal).toFixed(2) + '%';
-    fill.className = 'cor-fill is-' + (t.kcal < 1 ? 'empty' : st.key);
-  }
+  svgAttrs('gaugeTrack', { d: geo.track });
+  svgAttrs('gaugeZone', { d: geo.zone });
+  const prog = svgAttrs('gaugeProg', { d: geo.progress });
+  if (prog) prog.setAttribute('class', 'g-prog is-' + tone);
+  svgAttrs('gaugeTickFloor', geo.ticks.floor);
+  svgAttrs('gaugeTickCeil', geo.ticks.ceil);
+  [['gaugeLblFloor', geo.labels.floor, FLOOR], ['gaugeLblCeil', geo.labels.ceil, CEIL]].forEach(([id, l, v])=>{
+    const el = svgAttrs(id, { x: l.x.toFixed(1), y: l.y.toFixed(1), 'text-anchor': l.anchor });
+    if (el) el.textContent = fmtKcal(v);
+  });
 
-  // Hero: the calories eaten. The ratio it used to shout as a percentage is what the
-  // meter underneath is FOR, so the headline can be the number you actually act on.
+  // The calories eaten are the headline; the verdict is one line, which says how far from
+  // the nearest edge of the corridor. The corridor itself is printed once, on the arc.
   const readout = document.getElementById('readout');
-  readout.textContent = Math.round(t.kcal).toLocaleString();
-  readout.className = 'cor-val is-' + (t.kcal < 1 ? 'empty' : st.key);
-
+  readout.textContent = fmtKcal(t.kcal);
+  readout.className = 'cor-val is-' + tone;
+  let verdict;
+  if (t.kcal < 1)          verdict = `Nothing logged · ${fmtKcal(FLOOR)} to the floor`;
+  else if (t.kcal < FLOOR) verdict = `Below · ${fmtKcal(FLOOR - t.kcal)} to the floor`;
+  else if (t.kcal <= CEIL) verdict = `Inside · ${fmtKcal(CEIL - t.kcal)} under the ceiling`;
+  else                     verdict = `Over · ${fmtKcal(t.kcal - CEIL)} past the ceiling`;
   const stamp = document.getElementById('verdictStamp');
-  stamp.textContent = st.label;
-  stamp.className = 'cor-state is-' + (t.kcal < 1 ? 'empty' : st.key);
+  stamp.textContent = verdict;
+  stamp.className = 'cor-state is-' + tone;
 
-  // Two short lines instead of one run-on: what to do next, then the settings behind it.
-  let gap;
-  if (t.kcal < 1)          gap = `corridor ${Math.round(FLOOR).toLocaleString()}–${Math.round(CEIL).toLocaleString()}`;
-  else if (t.kcal < FLOOR) gap = `${Math.round(FLOOR - t.kcal).toLocaleString()} kcal to the floor`;
-  else if (t.kcal <= CEIL) gap = `${Math.round(CEIL - t.kcal).toLocaleString()} kcal of headroom`;
-  else                     gap = `${Math.round(t.kcal - CEIL).toLocaleString()} kcal over the ceiling`;
-  document.getElementById('gaugeKcal').textContent = gap;
-
-  let sub = `corridor ${Math.round(FLOOR).toLocaleString()}–${Math.round(CEIL).toLocaleString()}`;
+  // The goal line only exists when a goal is steering the corridor; with a manual corridor the
+  // arc already says everything.
+  const sub = document.getElementById('readoutSub');
+  let subTxt = '';
   if (CORRIDOR_AUTO){
     const dayTxt = CORRIDOR_AUTO.cycled
       ? ` · ${CORRIDOR_AUTO.training ? CORRIDOR_AUTO.split + ' day' : 'rest day'} ${CORRIDOR_AUTO.off >= 0 ? '+' : ''}${CORRIDOR_AUTO.off}`
       : '';
-    sub += ` · ${GOAL_LABEL[GOAL.mode]}${dayTxt} · TDEE ${CORRIDOR_AUTO.tdee.toLocaleString()}`;
+    subTxt = `${GOAL_LABEL[GOAL.mode]}${dayTxt} · TDEE ${CORRIDOR_AUTO.tdee.toLocaleString()}`;
   }
-  document.getElementById('readoutSub').textContent = sub;
+  sub.textContent = subTxt;
+  sub.hidden = !subTxt;
 
-  // Meter semantics for assistive tech, with the whole reading spoken.
+  // Meter semantics for assistive tech: the dial is decorative, this is its text alternative.
   const scale = document.getElementById('scale');
   scale.setAttribute('aria-valuemin', '0');
-  scale.setAttribute('aria-valuemax', String(Math.round(max)));
+  scale.setAttribute('aria-valuemax', String(Math.round(geo.max)));
   scale.setAttribute('aria-valuenow', String(Math.round(t.kcal)));
-  const pctOfCeil = CEIL > 0 ? Math.round(t.kcal / CEIL * 100) : 0;
   scale.setAttribute('aria-valuetext',
-    `${Math.round(t.kcal)} kcal, ${pctOfCeil}% of ceiling, ${st.label}. Floor ${Math.round(FLOOR)}, ceiling ${Math.round(CEIL)}. ${sub}.`);
+    `${fmtKcal(t.kcal)} kcal, ${st.label}. Corridor ${fmtKcal(FLOOR)} to ${fmtKcal(CEIL)}. ${verdict}.${subTxt ? ' ' + subTxt + '.' : ''}`);
 
   // Crossing into breach flashes the card once — not on a re-render while over.
   const key = st.key + '|' + VIEW_DATE;
@@ -116,7 +112,7 @@ function renderInstrument(t){
   }
   _lastCorridorKey = key;
 
-  renderPace(t);
+  renderPace(t, geo);
 }
 
 // Pace marker + protein-aware steering — only meaningful on the live, open day. The marker
@@ -124,7 +120,7 @@ function renderInstrument(t){
 // ceiling early doesn't read as "loads of room". Steering fires when the calories left to
 // the ceiling can no longer comfortably cover the protein still owed — the exact squeeze
 // the user hits at night.
-function renderPace(t){
+function renderPace(t, geo){
   const mark = document.getElementById('paceMark'), line = document.getElementById('paceLine');
   const live = VIEW_DATE === ACTIVE_DATE;
   if (!live || CEIL <= 0){ mark.setAttribute('hidden', ''); line.hidden = true; return; }
@@ -148,9 +144,9 @@ function renderPace(t){
   } else {
     paceKcal = center * Math.max(0, Math.min(1, (h - 6)/(24 - 6)));
   }
-  // Pace shows as a tick across the track, at where you should be by now.
-  mark.style.left = meterPct(paceKcal).toFixed(2) + '%';
-  mark.hidden = false;
+  // Pace shows as a tick across the arc, at where you should be by now.
+  svgAttrs('paceMark', LedgerCore.gaugePaceTick(geo, paceKcal));
+  mark.removeAttribute('hidden');
 
   // Protein steering, anchored to the FLOOR: the aim is to cover protein by the time you
   // reach the floor, keeping floor→ceiling purely as catch-up buffer. A 20% cushion makes
@@ -202,60 +198,54 @@ function mealPlanHours(){
     .filter(m=>m.h!=null && m.kcal>0).sort((a,b)=>a.h-b.h);
 }
 
-// ---- macro rows ------------------------------------------------------------
-// Cards became rows: the protein floor and the optional caps are the same shape,
-// read top to bottom, and no longer wrap awkwardly on a narrow phone.
+/// ---- macro tiles -----------------------------------------------------------
+// Protein is a floor, carbs and fat are caps. Each is one compact tile: the value, the target
+// small beside it, a thin bar and a status colour. What used to sit under each bar (grams per
+// kg, the unsaturated-fat note, "n g over the cap") lives in the collapsed "More detail" block.
 function renderMacros(t){
-  const rows = [];
+  const tiles = [], notes = [];
 
-  // Protein is a floor — the bar fills toward a target you want to reach, so the
-  // headline % is progress to that floor and the bar goes green once it's met.
+  // Protein is a floor: the bar fills toward a target you want to reach and goes green once met.
   const pFrac = P_TARGET > 0 ? t.p / P_TARGET : 0;
-  let pNote = '';
   const bw = latestWeight();
   if (bw > 0){
-    pNote = `${(t.p/bw).toFixed(2)} g/kg · ${bw}kg`;
+    let pNote = `${(t.p/bw).toFixed(2)} g/kg · ${bw}kg`;
     if (GOAL.mode !== 'off'){
       const perKg = GOAL_PROTEIN_PER_KG[GOAL.mode] || 1.8;
       pNote = `${(t.p/bw).toFixed(2)} g/kg · goal ${perKg} (${Math.round(perKg*bw)}g)`;
     }
+    notes.push({ text: `Protein ${pNote}`, tone: '' });
   }
-  rows.push(macroRow({
-    name: 'Protein', qual: `${Math.round(P_TARGET)} g floor`, hue: 'm-protein',
-    pctText: P_TARGET > 0 ? `${Math.round(pFrac*100)}%` : null,
-    value: P_TARGET > 0 ? `${t.p.toFixed(0)} / ${Math.round(P_TARGET)} g` : `${t.p.toFixed(0)} g`,
-    tone: P_TARGET > 0 && pFrac < 0.7 ? 'short' : '',
+  tiles.push(macroTile({
+    label: 'Protein', value: t.p.toFixed(0),
+    of: P_TARGET > 0 ? `/${Math.round(P_TARGET)} g` : ' g',
     frac: P_TARGET > 0 ? pFrac : null,
-    barTone: pFrac >= 1 ? 'met' : (pFrac >= 0.7 ? '' : 'warn'),
-    note: pNote
+    tone: P_TARGET > 0 ? (pFrac >= 1 ? 'ok' : pFrac >= 0.7 ? '' : 'warn') : '',
+    title: P_TARGET > 0 ? `${Math.round(pFrac*100)}% of the ${Math.round(P_TARGET)} g protein floor` : ''
   }));
 
-  // Carbs and fat are caps — the bar fills toward a limit you want to stay under,
-  // so the headline % is share of the cap used and the bar reddens once over.
-  [['Carbs', t.c, C_CAP, 4, 'm-carbs'], ['Fat', t.f, F_CAP, 9, 'm-fat']].forEach(([name, val, cap, kcalPerG, hue])=>{
+  // Carbs and fat are caps: the bar fills toward a limit you want to stay under and reddens once over.
+  [['Carbs', t.c, C_CAP, 4], ['Fat', t.f, F_CAP, 9]].forEach(([label, val, cap, kcalPerG])=>{
     const max = capGrams(cap, kcalPerG);
     const macroKcal = (t.p*4 + t.c*4 + t.f*9) || 1;
-    const pctKcal = Math.round(val * kcalPerG / macroKcal * 100);
-    const fat = name === 'Fat' ? fatBreakdown(t) : null;
+    const fat = label === 'Fat' ? fatBreakdown(t) : null;
+    if (fat) notes.push({ text: `Fat ${fat.text}`, tone: fat.tone });
     if (!max){
-      rows.push(macroRow({ name, hue, qual: `${pctKcal}% of kcal`,
-        pctText: null, value: `${val.toFixed(0)} g`, frac: null,
-        sub: fat && fat.text, subTone: fat && fat.tone }));
+      tiles.push(macroTile({ label, value: val.toFixed(0), of: ` g · ${Math.round(val * kcalPerG / macroKcal * 100)}% kcal`, frac: null, tone: '' }));
       return;
     }
     const frac = val / max;
-    rows.push(macroRow({
-      name, hue, qual: `${Math.round(max)} g cap`,
-      pctText: `${Math.round(frac*100)}%`,
-      value: `${val.toFixed(0)} / ${Math.round(max)} g`,
-      tone: frac > 1 ? 'over' : '',
-      frac, barTone: frac > 1 ? 'over' : (frac >= 0.85 ? 'warn' : ''),
-      note: frac > 1 ? `${Math.round(val - max)} g over the cap` : '',
-      sub: fat && fat.text, subTone: fat && fat.tone
+    if (frac > 1) notes.push({ text: `${label} ${Math.round(val - max)} g over the ${Math.round(max)} g cap`, tone: 'over' });
+    tiles.push(macroTile({
+      label, value: val.toFixed(0), of: `/${Math.round(max)} g`, frac,
+      tone: frac > 1 ? 'bad' : (frac >= 0.85 ? 'warn' : ''),
+      title: `${Math.round(frac*100)}% of the ${Math.round(max)} g ${label.toLowerCase()} cap`
     }));
   });
 
-  document.getElementById('macroRows').innerHTML = rows.join('');
+  document.getElementById('macroRows').innerHTML = tiles.join('');
+  document.getElementById('macroNotes').innerHTML = notes.map(n=>
+    `<div class="macro-note ${n.tone||''}">${escapeHtml(n.text)}</div>`).join('');
 }
 // The line under the fat bar. Saturated + trans is the "unhealthy" share worth watching;
 // the ceiling is 10% of the calorie floor's energy (the WHO cap). Unsaturated rides along for
@@ -272,109 +262,109 @@ function fatBreakdown(t){
              : limit > 0 && unhealthy >= limit * 0.85 ? 'warn' : '';
   return { text, tone };
 }
-function macroRow(o){
-  const groove = o.frac == null ? '' :
-    `<span class="macro-groove ${o.hue||''}"><span class="${o.barTone||''}" style="width:${Math.min(100, o.frac*100)}%"></span></span>`;
-  const note = o.note ? `<span class="macro-note">${escapeHtml(o.note)}</span>` : '';
-  const sub = o.sub ? `<span class="macro-note ${o.subTone||''}">${escapeHtml(o.sub)}</span>` : '';
-  // The headline is the percentage when there's a target; the grams ride along small.
-  const head = o.pctText != null
-    ? `${o.pctText}<small>${escapeHtml(o.value)}</small>`
-    : `${escapeHtml(o.value)}${o.unit ? `<small>${escapeHtml(o.unit)}</small>` : ''}`;
-  const qual = o.qual ? ` <small>${escapeHtml(o.qual)}</small>` : '';
-  return `<div class="macro-row">
-    <span class="macro-name">${escapeHtml(o.name)}${qual}</span>
-    <span class="macro-val ${o.tone||''}">${head}</span>
-    ${groove}${note}${sub}
+function macroTile(o){
+  const bar = o.frac == null ? '' :
+    `<span class="mt-bar" aria-hidden="true"><i class="${o.tone||''}" style="width:${Math.max(0, Math.min(100, o.frac*100)).toFixed(1)}%"></i></span>`;
+  return `<div class="mt" ${o.title ? `title="${escapeAttr(o.title)}"` : ''}>
+    <span class="mt-l">${escapeHtml(o.label)}</span>
+    <span class="mt-v ${o.tone||''}">${escapeHtml(o.value)}<small>${escapeHtml(o.of)}</small></span>${bar}
   </div>`;
 }
 
-// ---- the entry ledger ------------------------------------------------------
+// ---- the meals list ----------------------------------------------------------
+// One row per sitting (LedgerCore.mealRows: entries within 30 minutes of the one before),
+// collapsed. A <details> per meal, so it opens on tap and from the keyboard with no script.
+// Inside, each ingredient keeps the edit and remove actions the flat list had, wired to the
+// very same handlers, so undo and tombstones behave exactly as before.
+//
+// Nothing is remembered between renders except this: the meal you just edited or removed from
+// stays open, so the row does not snap shut under your thumb. It is consumed by one render.
+let _keepOpenId = null;
+function clockOf(e){
+  const t = Date.parse(e.eatenAt || e.at || '');
+  if (!Number.isFinite(t)) return '';
+  const m = (((Math.floor(t/60000) + TZ_OFFSET_MIN) % 1440) + 1440) % 1440;
+  return String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0');
+}
 function renderLedgerTable(){
   const body = document.getElementById('ledgerBody');
-  const title=document.getElementById('ledgerTitle'), count=document.getElementById('ledgerCount');
-  if(title)title.textContent=VIEW_DATE===ACTIVE_DATE?"Today's entries":`${prettyDate(VIEW_DATE)} entries`;
-  if(count){
-    const units=new Set(ledger.map((e,i)=>(e.partOf&&e.dishId)?`dish:${e.dishId}`:`item:${i}`));
-    count.textContent=units.size?`${units.size} entr${units.size===1?'y':'ies'}`:'No entries yet';
-  }
+  const title = document.getElementById('ledgerTitle'), count = document.getElementById('ledgerCount');
+  if (title) title.textContent = 'Meals';           // the day is already in the header and, for a past day, the banner
   if (!ledger.length){
+    if (count) count.textContent = 'Nothing yet';
     body.innerHTML = emptyLedgerCell();
     wireEmptyLedgerChips();
-    _prevLedgerLen = 0;
+    _prevLedgerLen = 0; _keepOpenId = null;
     return;
   }
+  const meals = LedgerCore.mealRows(ledger, { tzOffsetMin: TZ_OFFSET_MIN, templates: templates() });
+  if (count) count.textContent = `${meals.length} meal${meals.length===1?'':'s'} · ${ledger.length} item${ledger.length===1?'':'s'}`;
+
   const badgeFor = e => (e.source && e.source !== 'DB')
     ? `<span class="badge ${(e.source === 'USDA' || /^CoFID/.test(e.source)) ? 'usda' : 'est'}">${escapeHtml(e.source)}</span>` : '';
   const actionsFor = (e, i) => `<div class="meal-actions" aria-label="Entry actions">
     <button type="button" class="edit" data-edit="${i}" aria-label="Edit grams for ${escapeAttr(e.name)}" title="Edit grams">${uiIcon('edit', 17)}</button>
     <button type="button" class="del" data-del="${i}" aria-label="Remove ${escapeAttr(e.name)}" title="Remove">${uiIcon('trash', 17)}</button>
   </div>`;
-  const macroText=e=>`
-    <span class="protein"><small>Protein</small>${e.p.toFixed(1)}g</span>
-    <span class="carbs"><small>Carbs</small>${(e.c||0).toFixed(1)}g</span>
-    <span class="fat"><small>Fat</small>${e.f.toFixed(1)}g</span>`;
-  const macrosFor = e => `<span class="meal-macros" aria-label="Macronutrients">${macroText(e)}</span>`;
-  const timeFor = e => {
-    const at=e.eatenAt||e.at||e.loggedAt; if(!at)return '';
-    const d=new Date(at); if(isNaN(d.getTime()))return '';
-    return d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
-  };
-  const metaFor=e=>`<span class="meal-meta"><span>${Math.round(e.grams)} g</span>${timeFor(e)?`<span>${escapeHtml(timeFor(e))}</span>`:''}</span>`;
-  const energyFor=e=>`<span class="meal-kcal"><strong>${Math.round(e.kcal)}</strong><small>kcal</small></span>`;
-  const componentMacros=e=>`<span class="component-macros">${macroText(e)}</span>`;
-  const row = (e,i)=>{
-    const badge = (e.source && e.source !== 'DB')
-      ? `<span class="badge ${(e.source === 'USDA' || /^CoFID/.test(e.source)) ? 'usda' : 'est'}">${escapeHtml(e.source)}</span>` : '';
-    const flags = e.flags && e.flags.length
-      ? `<div class="flags">${escapeHtml(e.flags.join(' · '))}</div>` : '';
-    return `<article class="meal-entry">
-      <div class="meal-head">
-        <span class="meal-name">${badge}<span class="meal-name-text">${escapeHtml(e.name)}</span>${metaFor(e)}</span>
-        ${energyFor(e)}
+  const partRow = (e, i) => {
+    const short = LedgerCore.shortFoodName(e.name) || e.name;
+    const bits = [];
+    if (short !== e.name) bits.push(escapeHtml(e.name));            // the full database name stays visible here
+    bits.push(`${Math.round(e.grams)} g`);
+    if (clockOf(e)) bits.push(clockOf(e));
+    return `<div class="part">
+      <div class="part-main">
+        <span class="part-nm">${badgeFor(e)}${escapeHtml(short)}</span>
+        <span class="part-meta">${bits.join(' · ')}</span>
+        <span class="part-macros">P ${e.p.toFixed(1)} · C ${(e.c||0).toFixed(1)} · F ${e.f.toFixed(1)} g</span>
+        ${e.flags && e.flags.length ? `<span class="part-flags">${escapeHtml(e.flags.join(' · '))}</span>` : ''}
       </div>
-      <div class="meal-foot">${macrosFor(e)}${actionsFor(e, i)}</div>${flags}
-    </article>`;
+      <span class="part-k">${Math.round(e.kcal)}<small>kcal</small></span>
+      ${actionsFor(e, i)}
+    </div>`;
   };
-  // A decomposed dish is one meal, so it reads as one block with its own total. The
-  // components stay individually editable — the grouping is presentational, which is
-  // what keeps a wrong gram estimate on the rice fixable without unpicking the biryani.
-  const html = [], blocks = [], dishBlocks = {};
-  ledger.forEach((e,i)=>{
-    const dish=(e.partOf||'').trim();
-    if(!dish){blocks.push({dish:'',items:[{e,i}]});return;}
-    const key=e.dishId||`legacy:${i}:${dish.toLowerCase()}`;
-    if(dishBlocks[key]==null){dishBlocks[key]=blocks.length;blocks.push({dish,items:[]});}
-    blocks[dishBlocks[key]].items.push({e,i});
-  });
-  blocks.forEach(block=>{
-    if(!block.dish){const x=block.items[0];html.push(row(x.e,x.i));return;}
-    const part=block.items.map(x=>x.e),dish=block.dish;
-    const sum = part.reduce((s,e)=>({ kcal:s.kcal+e.kcal, p:s.p+e.p, f:s.f+e.f, c:s.c+(e.c||0) }),
-                            {kcal:0,p:0,f:0,c:0});
-    html.push(`<section class="meal-entry dish-entry">
-      <div class="meal-head">
-        <span class="meal-name"><span class="dish-label">Dish</span><span class="meal-name-text">${escapeHtml(dish)}</span><span class="meal-meta"><span>${part.length} ingredient${part.length>1?'s':''}</span><span>${Math.round(part.reduce((s,e)=>s+(+e.grams||0),0))} g</span></span></span>
-        ${energyFor(sum)}
-      </div>
-      <div class="meal-foot dish-total">${macrosFor(sum)}</div>
-        <div class="meal-components">${block.items.map(({e,i})=>`<div class="meal-component">
-          <span class="component-name">${badgeFor(e)}${escapeHtml(e.name)}<small>${Math.round(e.grams)} g · ${Math.round(e.kcal)} kcal${timeFor(e)?` · ${escapeHtml(timeFor(e))}`:''}</small></span>
-          ${componentMacros(e)}
-          ${actionsFor(e, i)}
-        </div>`).join('')}</div>
-    </section>`);
-  });
-  body.innerHTML = html.join('');
+  // A decomposed dish stays one visible unit inside the meal: its components are still
+  // individually editable, which is what keeps a wrong gram estimate on the rice fixable.
+  const partsHtml = m => {
+    const blocks = [], at = {};
+    m.idx.forEach(i=>{
+      const e = ledger[i], dish = (e.partOf || '').trim();
+      if (!dish){ blocks.push({ dish:'', items:[{e,i}] }); return; }
+      const key = e.dishId || `legacy:${dish.toLowerCase()}`;
+      if (at[key] == null){ at[key] = blocks.length; blocks.push({ dish, items:[] }); }
+      blocks[at[key]].items.push({e,i});
+    });
+    return blocks.map(b=>{
+      const rows = b.items.map(x=>partRow(x.e, x.i)).join('');
+      if (!b.dish || m.kind === 'dish') return rows;                // the meal's own name already is the dish
+      const kc = b.items.reduce((s,x)=>s + x.e.kcal, 0);
+      return `<div class="part-dish"><span>Dish · ${escapeHtml(b.dish)} <small>${b.items.length} ingredient${b.items.length>1?'s':''}</small></span><span>${Math.round(kc)} kcal</span></div>${rows}`;
+    }).join('');
+  };
 
-  // Settle only the row(s) added since the last render — a quiet "logged" confirmation.
-  // Keyed off the entry index rather than row position: dish headers mean the table
-  // now has more rows than the ledger has entries.
+  body.innerHTML = meals.map(m=>{
+    const open = _keepOpenId != null && m.idx.some(i => ledger[i]._id === _keepOpenId);
+    const tags = (m.usual ? '<span class="tag mine">your usual</span>' : '')
+               + (m.estimate ? '<span class="tag">estimate</span>' : '');
+    return `<details class="meal"${open ? ' open' : ''}>
+      <summary>
+        <span class="meal-t">${m.time ? escapeHtml(m.time) : '–'}</span>
+        <span class="meal-mid"><span class="meal-nm">${escapeHtml(m.name)}${tags}</span><span class="meal-sub">${escapeHtml(m.summary)}</span></span>
+        <span class="meal-k">${Math.round(m.kcal)}<small>${Math.round(m.p)} g P</small></span>
+      </summary>
+      <div class="meal-parts">${partsHtml(m)}
+        <div class="meal-total"><span>Meal total</span><span>P ${m.p.toFixed(0)} · C ${m.c.toFixed(0)} · F ${m.f.toFixed(0)} g</span></div>
+      </div>
+    </details>`;
+  }).join('');
+  _keepOpenId = null;
+
+  // Settle only the meal(s) that gained entries since the last render — a quiet "logged" flash.
   if (ledger.length > _prevLedgerLen && !prefersReducedMotion()){
     for (let i = _prevLedgerLen; i < ledger.length; i++){
       const btn = body.querySelector(`[data-edit="${i}"]`);
-      const entry = btn && btn.closest('.meal-entry');
-      if (entry) entry.classList.add('rowNew');
+      const meal = btn && btn.closest('.meal');
+      if (meal) meal.classList.add('rowNew');
     }
   }
   _prevLedgerLen = ledger.length;
@@ -390,10 +380,14 @@ function escapeAttr(s){ return escapeHtml(String(s == null ? '' : s)).replace(/"
 function removeEntry(i){
   const e = ledger[i];
   if (!e) return;
+  // Keep the meal this entry belonged to open: remember another of its entries, if it has one.
+  const sibling = LedgerCore.mealRows(ledger, { tzOffsetMin: TZ_OFFSET_MIN }).filter(m => m.idx.indexOf(i) >= 0)[0];
+  const other = sibling ? sibling.idx.filter(x => x !== i)[0] : null;
   tombstoneEntry(VIEW_DATE,e._id);
   ledger.splice(i, 1);
+  _keepOpenId = other != null ? ledger[other > i ? other - 1 : other]._id : null;
   save(); render();
-  toast(`Removed ${e.name}`, { undo: ()=>{ untombstoneEntry(VIEW_DATE,e._id); ledger.splice(i, 0, e); save(); render(); } });
+  toast(`Removed ${e.name}`, { undo: ()=>{ untombstoneEntry(VIEW_DATE,e._id); ledger.splice(i, 0, e); _keepOpenId = e._id; save(); render(); } });
 }
 
 async function editEntryGrams(i){
@@ -424,8 +418,9 @@ async function editEntryGrams(i){
   if (e.match) next.match=e.match;
   next.updatedAt=new Date().toISOString();
   ledger[i] = next;
+  _keepOpenId = e._id;
   save(); render();
-  toast(`${e.name} set to ${g}g`, { undo: ()=>{ ledger[i] = prev; save(); render(); } });
+  toast(`${e.name} set to ${g}g`, { undo: ()=>{ ledger[i] = prev; _keepOpenId = e._id; save(); render(); } });
 }
 
 // ---- render dispatch -------------------------------------------------------
@@ -451,12 +446,22 @@ function render(){
   else if (ACTIVE_TAB === 'trends') renderTrendsTab();
 }
 
+// The collapsed "More detail" row says what is inside it, and flags supplements still to take
+// (the one daily action that lives in there).
+function renderMoreHint(){
+  const el = document.querySelector('#todayMore .more-hint');
+  if (!el) return;
+  const todo = document.querySelectorAll('#suppTodayStrip [data-suppquick]:not(.on)').length;
+  el.textContent = todo ? `${todo} supplement${todo===1?'':'s'} to take · g per kg · fats · micronutrients`
+                        : 'g per kg · fats · micronutrients · supplements';
+}
 function renderToday(){
   const t = totals();
   renderInstrument(t);
   renderMacros(t);
   renderMicros(t);
   renderSuppToday();
+  renderMoreHint();
   renderLedgerTable();
   renderFrequents();
   renderTemplates();

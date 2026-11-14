@@ -116,11 +116,14 @@ body {
 }
 
 /* Tabular figures everywhere a number can change under you. */
-.num, .data, td, th, input, .scale-legend, .macro-val {
+.num, .data, td, th, input, .scale-legend {
   font-variant-numeric: tabular-nums;
 }
 
 a { color: var(--chalk); text-underline-offset: 3px; }
+
+/* Browsers shrink <small> to 83% of its parent, which lands off the type scale. */
+small { font-size: var(--fs-1); }
 
 /* One focus treatment for the whole app, on every interactive element
    including the custom ones that used to be unfocusable spans. */
@@ -250,7 +253,7 @@ header h1 { flex: none; margin-right: auto; }
 }
 .corridor-card { position: relative; }
 .corridor-card .card-pin { position: absolute; top: 5px; left: 4px; z-index: 2; }
-.corridor-card .cor-top { padding-left: 20px; }
+
 .corridor-card.is-pinned { position: sticky; top: calc(env(safe-area-inset-top) + 6px); z-index: 30; }
 body.header-pinned .corridor-card.is-pinned { top: calc(env(safe-area-inset-top) + 72px); }
 
@@ -337,8 +340,7 @@ details:not(.panel)[open] > summary::before { transform: rotate(45deg); }
   padding: 18px var(--gutter) 16px;
   margin-bottom: 14px;
 }
-.cor-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.cor-hero { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+
 /* Proportional figures, not tabular: at display sizes equal-width digits make a
    number like 1,704 look loose. tabular-nums belongs in columns, not on a hero. */
 .cor-val {
@@ -364,45 +366,7 @@ details:not(.panel)[open] > summary::before { transform: rotate(45deg); }
 .cor-state.is-under  { color: var(--brass);  background: var(--brass-wash); }
 .cor-state.is-inside { color: var(--accent); background: var(--accent-wash); }
 .cor-state.is-breach { color: var(--hot);    background: var(--hot-wash); }
-.cor-gap { margin-top: 6px; font-size: var(--fs-2); color: var(--chalk); }
 
-.cor-meter {
-  position: relative;
-  height: 12px;
-  margin: 14px 0 10px;
-  border-radius: var(--radius-pill);
-  background: var(--well);
-  overflow: hidden;
-}
-.cor-band {                       /* floor → ceiling */
-  position: absolute; inset-block: 0;
-  /* A ±100 band is ~6% of a track that runs to the ceiling, so at accent-wash it
-     disappears. This is the one region the whole card is about — it gets enough
-     tone to find, and hairline edges so the exact floor and ceiling stay readable. */
-  background: rgba(84, 207, 134, 0.26);
-  box-shadow: inset 1px 0 0 var(--accent), inset -1px 0 0 var(--accent);
-}
-.cor-fill {                       /* 0 → current intake */
-  position: absolute; inset-block: 0; left: 0;
-  border-radius: var(--radius-pill);
-  background: var(--graphite);
-  transition: width .6s cubic-bezier(.22,1,.36,1), background-color .3s ease;
-}
-.cor-fill.is-under  { background: var(--brass); }
-.cor-fill.is-inside { background: var(--accent); }
-.cor-fill.is-breach { background: var(--hot); }
-.cor-fill.is-empty  { background: transparent; }
-.cor-ghost {                      /* projected addition from the composer */
-  position: absolute; inset-block: 0;
-  background: var(--accent); opacity: .32;
-  transition: left .25s ease, width .25s ease;
-}
-.cor-pace {                       /* where the meal plan says you should be by now */
-  position: absolute; inset-block: 0; width: 2px;   /* the track clips overflow */
-  margin-left: -1px;
-  background: var(--chalk); opacity: .75;
-  border-radius: 1px;
-}
 .cor-sub { font-size: var(--fs-1); line-height: 1.5; color: var(--faint); }
 
 /* The one orchestrated moment: crossing the ceiling flashes the card once. */
@@ -431,64 +395,6 @@ details:not(.panel)[open] > summary::before { transform: rotate(45deg); }
 /* Each macro reads as one clean line: name, the headline percentage, the grams,
    and a smooth rounded bar tinted in the macro's own hue. Colour switches to a
    state (amber/red) only when a floor is unmet or a cap is exceeded. */
-.macro-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px 12px;
-  align-items: baseline;
-  padding: 13px 0;
-  border-bottom: 1px solid var(--rule);
-}
-.macro-row:first-child { padding-top: 2px; }
-.macro-row:last-of-type { border-bottom: none; padding-bottom: 2px; }
-
-.macro-name {
-  font-size: var(--fs-1);
-  font-weight: 600;
-  color: var(--chalk);
-}
-.macro-name small {
-  font-weight: 500;
-  font-size: var(--fs-1);
-  color: var(--faint);
-  margin-left: 2px;
-}
-.macro-val {
-  font-family: var(--display);
-  font-weight: 700;
-  font-size: var(--fs-3);
-  letter-spacing: -0.01em;
-  color: var(--chalk);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.macro-val small {
-  font-size: var(--fs-1); font-weight: 500;
-  color: var(--faint); margin-left: 5px;
-}
-.macro-val.short { color: var(--brass); }
-.macro-val.over  { color: var(--hot); }
-
-.macro-groove {
-  grid-column: 1 / -1;
-  height: 8px;
-  background: var(--well);
-  border-radius: var(--radius-pill);
-  overflow: hidden;
-  margin-top: 3px;
-}
-.macro-groove > span {
-  display: block; height: 100%; width: 0;
-  border-radius: var(--radius-pill);
-  background: var(--graphite);
-  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.macro-groove.m-protein > span { background: var(--m-protein); }
-.macro-groove.m-carbs   > span { background: var(--m-carbs); }
-.macro-groove.m-fat     > span { background: var(--m-fat); }
-.macro-groove > span.met  { background: var(--accent); }
-.macro-groove > span.warn { background: var(--brass); }
-.macro-groove > span.over { background: var(--hot); }
 
 .macro-note {
   grid-column: 1 / -1;
@@ -730,43 +636,22 @@ td {
 }
 tbody tr:last-child td { border-bottom: none; }
 td .ename { font-family: var(--body); font-size: var(--fs-2); color: var(--chalk); }
-td .egrams { color: var(--faint); font-size: var(--fs-1); margin-left: 5px; }
 
 /* A decomposed dish is one meal. Its header carries the meal's totals and its
    components are indented under it — still individually editable, because the
    grouping is how it reads, not how it is stored. */
-tr.dish-head td { border-bottom: none; padding-bottom: 3px; }
-tr.dish-head .dish-name { font-family: var(--body); font-size: var(--fs-2); font-weight: 600; color: var(--chalk); }
+
 /* nowrap so a narrow column drops the whole "4 ingredients · 410g" to the next line
    rather than breaking it after the number. */
-tr.dish-head .dish-meta { font-family: var(--data); font-size: var(--fs-1); color: var(--faint);
-                          margin-left: 7px; white-space: nowrap; }
-tr.of-dish td:first-child { padding-left: 16px; position: relative; }
+
 /* One hairline down the left of the block, so where a dish starts and ends is
    readable without a box around it. */
-tr.of-dish td:first-child::before {
-  content: '';
-  position: absolute;
-  left: 5px; top: 0; bottom: 0;
-  border-left: 1px solid var(--rule);
-}
-tr.of-dish .ename { font-size: var(--fs-1); color: var(--graphite); }
+
 td .flags { display: block; font-family: var(--body); font-size: var(--fs-1); color: var(--brass); margin-top: 3px; }
 
 /* Row actions: real buttons, real tap targets, reachable by keyboard. */
 /* Actions flow inline after the grams so they stay attached to the food they
    act on, instead of floating into the gap before the numbers. */
-.row-actions { display: inline-flex; gap: 2px; vertical-align: middle; margin-left: 4px; }
-.row-actions button {
-  width: 30px; height: 30px; min-height: 30px;
-  padding: 0;
-  background: none; border: none;
-  color: var(--faint);
-  font-size: var(--fs-1);
-  display: grid; place-items: center;
-}
-.row-actions button:hover { background: var(--chalk-wash); color: var(--chalk); }
-.row-actions button.del:hover { color: var(--hot); }
 
 @keyframes rowSettle { from { background: var(--chalk-wash); } to { background: transparent; } }
 tr.rowNew td { animation: rowSettle 0.9s ease-out; }
@@ -1830,8 +1715,7 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
    stick after a tap, so they are simply not defined there. */
 @media (hover: none) {
   .chip:hover, .omni-chip:hover, button.ghost:hover:not(:disabled),
-  .icon-btn:hover, #gear:hover, #navToggle:hover,
-  .row-actions button:hover, .cm-item:hover { background: transparent; }
+  .icon-btn:hover, #gear:hover, #navToggle:hover, .cm-item:hover  { background: transparent; }
 }
 
 /* ============================== responsive ============================== */
@@ -2019,12 +1903,7 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
 
 /* Logged food is a dense list, but it should not read like a database table. Each item is
    a quiet nested card with one stable visual grammar: identity -> energy -> macro strip. */
-.meal-ledger-panel {
-  padding: 16px;
-  background:
-    radial-gradient(circle at 100% 0, rgba(84,207,134,.055), transparent 34%),
-    var(--slab);
-}
+
 .ledger-titlebar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
 .ledger-heading { display:flex; align-items:baseline; min-width:0; gap:8px; }
 .ledger-titlebar .panel-title { margin:0; font-size:var(--fs-2); }
@@ -2037,64 +1916,10 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
 }
 .ledger-titlebar #saveTplBtn { flex:0 0 auto; min-height:34px; padding:7px 11px; }
 .meal-ledger { display:grid; grid-template-columns:minmax(0,1fr); gap:9px; }
-.meal-entry {
-  position:relative;
-  min-width:0;
-  padding:13px;
-  overflow:hidden;
-  background:linear-gradient(145deg, rgba(255,255,255,.035), rgba(255,255,255,.012));
-  border:1px solid var(--rule);
-  border-radius:15px;
-  box-shadow:0 8px 18px -18px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.025);
-  transition:transform .16s ease, background .16s ease, border-color .16s ease;
-}
-@media (hover:hover) {
-  .meal-entry:hover { transform:translateY(-1px); background:var(--slab-lit); border-color:var(--rule-lit); }
-}
-.meal-head {
-  display:grid;
-  grid-template-columns:minmax(0,1fr) auto;
-  align-items:start;
-  gap:14px;
-  min-width:0;
-}
+
 .settings-section > summary::before,
 #liftSession .session-exercise > summary::before { display:none; }
-.meal-name { display:block; min-width:0; color:var(--chalk); }
-.meal-name-text {
-  display:inline;
-  font-size:var(--fs-2);
-  font-weight:680;
-  line-height:1.32;
-  letter-spacing:-.012em;
-  overflow-wrap:anywhere;
-}
-.meal-name > .badge, .component-name > .badge { margin:0 6px 5px 0; vertical-align:middle; }
-.meal-meta { display:flex; align-items:center; flex-wrap:wrap; gap:0; margin-top:5px; color:var(--faint); font-size:var(--fs-1); font-weight:500; }
-.meal-meta span { display:inline-flex; align-items:center; }
-.meal-meta span + span::before { content:''; width:3px; height:3px; margin:0 7px; background:var(--faint); border-radius:50%; opacity:.65; }
-.meal-kcal {
-  display:grid;
-  justify-items:end;
-  padding-top:1px;
-  font-family:var(--data);
-  font-variant-numeric:tabular-nums;
-  white-space:nowrap;
-}
-.meal-kcal strong { color:var(--chalk); font-size:var(--fs-4); font-weight:720; line-height:1; letter-spacing:-.035em; }
-.meal-kcal small { margin-top:4px; color:var(--faint); font-size:var(--fs-1); font-weight:700; letter-spacing:.13em; text-transform:uppercase; }
-.meal-foot { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; margin-top:11px; }
-.meal-macros {
-  display:flex;
-  flex-wrap:wrap;
-  align-items:center;
-  gap:5px 10px;
-  min-width:0;
-  padding:2px 1px;
-  background:transparent;
-  border:0;
-  border-radius:0;
-}
+
 .meal-actions { display:grid; grid-template-columns:repeat(2,34px); align-content:center; flex:0 0 auto; gap:4px; }
 .meal-actions button {
   display:grid;
@@ -2110,57 +1935,18 @@ body.with-composer .toast { bottom: calc(var(--composer-h, 88px) + 12px); }
 }
 .meal-actions button:hover { color:var(--chalk); background:var(--chalk-wash); border-color:var(--rule-lit); }
 .meal-actions .del:hover { color:var(--hot); border-color:rgba(239,106,85,.45); background:var(--hot-wash); }
-.meal-entry > .flags { margin:9px 2px 0; padding-top:8px; border-top:1px dashed var(--rule); font-size:var(--fs-1); }
 
 /* A decomposed dish remains one card. Its ingredients are secondary rows, not a second
    competing card hierarchy. */
-.dish-entry { border-color:rgba(84,207,134,.24); }
-.dish-entry::before { content:''; position:absolute; top:0; bottom:0; left:0; width:2px; background:linear-gradient(var(--accent), transparent 82%); }
-.dish-label {
-  display:inline-flex;
-  margin:0 6px 5px 0;
-  padding:2px 6px;
-  color:var(--accent-hi);
-  background:var(--accent-wash);
-  border:1px solid rgba(84,207,134,.18);
-  border-radius:var(--radius-pill);
-  font-size:var(--fs-1);
-  font-weight:800;
-  letter-spacing:.12em;
-  text-transform:uppercase;
-}
-.dish-total { padding-bottom:11px; border-bottom:1px solid var(--rule); }
-.meal-components { display:grid; gap:0; }
-.meal-component {
-  display:grid;
-  grid-template-columns:minmax(0,1fr) auto;
-  grid-template-areas:'name actions' 'macros actions';
-  align-items:center;
-  gap:7px 10px;
-  min-width:0;
-  padding:11px 0;
-  border-bottom:1px solid var(--rule);
-}
-.meal-component:last-child { padding-bottom:0; border-bottom:0; }
-.component-name { grid-area:name; min-width:0; color:var(--graphite); font-size:var(--fs-1); font-weight:620; line-height:1.35; overflow-wrap:anywhere; }
-.component-name small { display:block; margin-top:3px; color:var(--faint); font-size:var(--fs-1); font-weight:500; }
-.component-macros { grid-area:macros; display:flex; flex-wrap:wrap; gap:5px 10px; color:var(--graphite); font-family:var(--data); font-size:var(--fs-1); font-variant-numeric:tabular-nums; }
-.meal-macros span, .component-macros span { white-space:nowrap; }
-.meal-macros small, .component-macros small { margin-right:3px; font-size:var(--fs-1); font-weight:800; text-transform:uppercase; }
-.meal-macros .protein small, .component-macros .protein small { color:var(--m-protein); }
-.meal-macros .carbs small, .component-macros .carbs small { color:var(--m-carbs); }
-.meal-macros .fat small, .component-macros .fat small { color:var(--m-fat); }
-.meal-component .meal-actions { grid-area:actions; }
-.meal-component .meal-actions button { width:32px; min-height:36px; }
+
 @media (max-width:380px) {
-  .meal-ledger-panel { padding:13px; }
-  .meal-entry { padding:11px; }
-  .meal-macros { gap:4px 7px; }
+  
+  
+  
   .meal-actions { grid-template-columns:30px 30px; }
   .meal-actions button { width:30px; }
 }
 @keyframes mealSettle { from { border-color:var(--accent); background:var(--accent-wash); } to { border-color:var(--rule); background:rgba(255,255,255,.02); } }
-.meal-entry.rowNew { animation:mealSettle .9s ease-out; }
 
 /* The composer reads as one raised control rather than three adjacent boxes. */
 .composer { padding-top: 8px; background: var(--bench); border-top-color: transparent; }
@@ -2285,6 +2071,114 @@ body.settings-open #pastBanner { display: none !important; }
 @media (max-width: 350px) {
   .head-name h1 { display: none; }
   .head-section { font-size: var(--fs-1); }
-  .meal-component { grid-template-columns: 1fr; grid-template-areas: 'name' 'macros' 'actions'; }
-  .meal-component .meal-actions { justify-content: flex-start; margin-top: 5px; }
+  
+  
 }
+
+/* ============================================================================
+   TODAY — "Instrument" (the approved direction A)
+   ----------------------------------------------------------------------------
+   One arc, three macro tiles, one collapsed row per meal. Sizes come from the --fs-*
+   scale and colours from the --c-* tokens at the top of this file.
+   ========================================================================== */
+
+/* ---- the arc gauge ---- */
+.gauge-card { padding: var(--sp-4) var(--sp-4) var(--sp-4); background: var(--c-card); border-color: var(--c-line); }
+.gauge { position: relative; }
+.gauge-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.g-track, .g-zone, .g-proj, .g-prog { fill: none; }
+.g-track { stroke: var(--c-track); stroke-width: 14; stroke-linecap: round; }
+/* The corridor is a halo wider than the arc, so it stays visible where the fill runs over it. */
+.g-zone  { stroke: var(--c-zone); stroke-width: 26; stroke-linecap: butt; }
+.g-proj  { stroke: var(--c-ok); stroke-width: 14; stroke-linecap: butt; opacity: .35; }
+.g-prog  { stroke: var(--c-mut); stroke-width: 14; stroke-linecap: round; transition: stroke .3s ease; }
+.g-prog.is-inside { stroke: var(--c-ok); }
+.g-prog.is-under  { stroke: var(--c-warn); }
+.g-prog.is-breach { stroke: var(--c-bad); }
+.g-prog.is-empty  { stroke: transparent; }
+.g-tick { stroke: var(--c-mut); stroke-width: 1.5; }
+.g-pace { stroke: var(--c-ink); stroke-width: 3; stroke-linecap: round; }
+.g-lbl  { fill: var(--c-mut); font-family: var(--mono); font-size: var(--fs-1); }
+.gauge-read { position: absolute; left: 0; right: 0; bottom: 2px; text-align: center; line-height: 1; }
+.gauge-read .cor-val { display: block; }
+.gauge-read .cor-unit { display: block; margin-top: 6px; color: var(--c-mut); font-weight: 500; }
+.gauge-card .cor-val.is-inside { color: var(--c-ink); }
+.gauge-card .cor-val.is-under  { color: var(--c-warn); }
+.gauge-card .cor-val.is-breach { color: var(--c-bad); }
+.gauge-card .cor-val.is-empty  { color: var(--c-mut); }
+.gauge-verdict { margin-top: var(--sp-3); text-align: center; }
+.gauge-card .cor-state {
+  display: inline-block; font-size: var(--fs-2); font-weight: 600; letter-spacing: 0; text-transform: none;
+  padding: 6px 14px; color: var(--c-mut); background: rgba(147,163,154,.12);
+}
+.gauge-card .cor-state.is-inside { color: var(--c-ok);   background: rgba(95,211,154,.14); }
+.gauge-card .cor-state.is-under  { color: var(--c-warn); background: rgba(240,182,90,.14); }
+.gauge-card .cor-state.is-breach { color: var(--c-bad);  background: rgba(240,127,122,.14); }
+.gauge-card .cor-sub { margin-top: var(--sp-2); text-align: center; color: var(--c-mut); }
+/* Pinned, the card collapses to one line: the number and the verdict, no arc. */
+.gauge-card.is-pinned .gauge-svg, .gauge-card.is-pinned .cor-sub, .gauge-card.is-pinned .pace-line { display: none; }
+.gauge-card.is-pinned .gauge-read { position: static; display: flex; align-items: baseline; gap: var(--sp-2); padding-left: 24px; text-align: left; }
+.gauge-card.is-pinned .gauge-read .cor-val { display: inline; font-size: var(--fs-5); }
+.gauge-card.is-pinned .gauge-read .cor-unit { display: inline; margin: 0; }
+.gauge-card.is-pinned .gauge-verdict { margin-top: var(--sp-2); text-align: left; padding-left: 24px; }
+
+/* ---- macro tiles ---- */
+.macro-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.mt { display: flex; flex-direction: column; min-width: 0; padding: 10px 12px; background: var(--c-card); border: 1px solid var(--c-line); border-radius: 14px; }
+.mt-l { font-size: var(--fs-1); font-weight: 500; color: var(--c-mut); }
+.mt-v { margin: 2px 0 8px; font-family: var(--mono); font-size: var(--fs-3); font-weight: 600; color: var(--c-ink); white-space: nowrap; }
+.mt-v small { font-size: var(--fs-1); font-weight: 400; color: var(--c-mut); }
+.mt-v.warn { color: var(--c-warn); }
+.mt-v.bad  { color: var(--c-bad); }
+.mt-bar { display: block; height: 5px; margin-top: auto; border-radius: 9px; background: var(--c-track); overflow: hidden; }
+.mt-bar i { display: block; height: 100%; border-radius: 9px; background: var(--c-mut); transition: width .5s cubic-bezier(.22,1,.36,1); }
+.mt-bar i.ok   { background: var(--c-ok); }
+.mt-bar i.warn { background: var(--c-warn); }
+.mt-bar i.bad  { background: var(--c-bad); }
+
+/* ---- meals ---- */
+.meals-block { margin: 0 0 var(--sp-3); }
+.meals-block .ledger-titlebar { margin: var(--sp-4) 4px var(--sp-2); }
+.meals-block .panel-title { margin: 0; font-size: var(--fs-1); font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--c-mut); }
+.meals-block .ledger-count { color: var(--c-acc); }
+.meal-ledger { display: grid; gap: var(--sp-2); }
+.meal { background: var(--c-card); border: 1px solid var(--c-line); border-radius: 16px; overflow: hidden; }
+details.meal > summary {
+  list-style: none; cursor: pointer;
+  display: grid; grid-template-columns: 8px 44px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  min-height: 60px; padding: 12px 14px;
+}
+details.meal > summary::-webkit-details-marker { display: none; }
+details.meal > summary::before { margin-right: 0; }
+.meal > summary:focus-visible { outline-offset: -3px; border-radius: 16px; }
+.meal[open] > summary { border-bottom: 1px solid var(--c-line); }
+.meal-t { font-family: var(--mono); font-size: var(--fs-1); color: var(--c-mut); }
+.meal-mid { min-width: 0; }
+.meal-nm { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: var(--fs-3); font-weight: 600; color: var(--c-ink); }
+.meal-sub { display: block; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-2); color: var(--c-mut); }
+.meal-k { text-align: right; font-family: var(--mono); font-size: var(--fs-3); font-weight: 600; color: var(--c-ink); white-space: nowrap; }
+.meal-k small { display: block; font-size: var(--fs-1); font-weight: 400; color: var(--c-mut); }
+.tag { padding: 1px 7px; border: 1px solid var(--c-line); border-radius: 6px; font-size: var(--fs-1); font-weight: 500; color: var(--c-mut); white-space: nowrap; }
+.tag.mine { color: var(--c-acc); border-color: rgba(184,242,107,.35); }
+.meal.rowNew { animation: mealSettle .9s ease-out; }
+.meal-parts { padding: 2px 14px 12px; }
+.part { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--sp-2); align-items: center; padding: 10px 0; border-bottom: 1px solid var(--c-line); }
+.part-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.part-nm { font-size: var(--fs-3); font-weight: 600; color: var(--c-ink); overflow-wrap: anywhere; }
+.part-nm .badge { margin-right: 6px; vertical-align: middle; }
+.part-meta, .part-macros, .part-flags { font-size: var(--fs-1); color: var(--c-mut); overflow-wrap: anywhere; }
+.part-macros { font-family: var(--mono); }
+.part-flags { color: var(--c-warn); }
+.part-k { text-align: right; font-family: var(--mono); font-size: var(--fs-3); font-weight: 600; color: var(--c-ink); }
+.part-k small { display: block; font-size: var(--fs-1); font-weight: 400; color: var(--c-mut); }
+.part-dish { display: flex; justify-content: space-between; gap: var(--sp-2); padding: 12px 0 0; font-size: var(--fs-1); font-weight: 600; color: var(--c-acc); }
+.part-dish small { font-weight: 400; color: var(--c-mut); }
+.meal-total { display: flex; justify-content: space-between; gap: var(--sp-2); padding-top: 10px; font-family: var(--mono); font-size: var(--fs-1); color: var(--c-mut); }
+
+/* ---- "More detail": everything the old Macros card carried that is not first-screen ---- */
+.today-more > summary .more-hint { display: block; margin-top: 2px; font-size: var(--fs-1); font-weight: 400; color: var(--c-mut); letter-spacing: 0; }
+.today-more-body { margin-top: var(--sp-3); }
+.today-more-body > * + * { margin-top: var(--sp-4); }
+.macro-notes { display: grid; gap: var(--sp-2); }
+.macro-notes:empty { display: none; }
+.macro-notes .macro-note { margin: 0; font-size: var(--fs-2); }

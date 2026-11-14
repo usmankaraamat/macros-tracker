@@ -127,6 +127,10 @@ function hideEatifyGuideInvite(state){
 function maybeOfferEatifyGuide(){
   const card=document.getElementById('guideInvite');
   if(!card||getKey(EATIFY_GUIDE_KEY))return;
+  // First-run help is for someone who has never logged. A person with logged days has already
+  // found their way in, and the card would sit above the gauge every morning; the walkthrough
+  // stays one tap away under Settings.
+  if(allDays(true).some(d=>d.ledger.length))return;
   card.hidden=false;
 }
 
