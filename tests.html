@@ -1940,6 +1940,85 @@ group('new durability and zero-friction insights');
   check('frequency derives a personal baseline', f.expected!=null && f.current===1, JSON.stringify(f));
 })();
 
+// ---- meals: grouping, naming and short names for the Today screen ----
+group('groupMeals / mealRows — a day as meals, not ingredients');
+(function(){
+  const at = (h, m, s) => `2026-11-12T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s||0).padStart(2,'0')}.000Z`;
+  const e = (name, iso, extra) => Object.assign({ name, grams:100, kcal:100, p:5, c:10, f:2, source:'USDA', weighed:true, eatenAt:iso, at:iso, loggedAt:iso }, extra);
+
+  // 29 minutes apart joins, 31 does not, and the gap is measured from the PREVIOUS entry,
+  // so a slow lunch of several small gaps stays one meal.
+  const g1 = C.groupMeals([e('a', at(4,0)), e('b', at(4,29)), e('c', at(4,58)), e('d', at(5,27))]);
+  check('gap is measured from the previous entry, not the first', g1.length === 1 && g1[0].idx.length === 4, JSON.stringify(g1));
+  const g2 = C.groupMeals([e('a', at(4,0)), e('b', at(4,31))]);
+  check('31 minutes apart is two meals', g2.length === 2);
+  const g3 = C.groupMeals([e('a', at(4,0)), e('b', at(4,30))]);
+  check('exactly 30 minutes still joins', g3.length === 1);
+  check('empty ledger gives no meals', C.groupMeals([]).length === 0 && C.mealRows([]).length === 0);
+  check('indices point back into the ledger order', JSON.stringify(C.groupMeals([e('a', at(4,0)), e('b', at(9,0)), e('c', at(9,5))]).map(m => m.idx)) === '[[0],[1,2]]');
+
+  // The 12 Nov shape: 21 entries, UTC stamps, Pakistan is +5h.
+  const day = [
+    e('Bread, white', at(4,15), {kcal:347,p:10}), e('Milk, whole', at(4,15,56), {kcal:101,weighed:false}),
+    e('Sugar, NFS', at(4,16), {kcal:80}), e('Egg, yolk, raw, fresh', at(4,16,44), {kcal:193}),
+    e('Egg, white only, raw', at(4,16,44), {kcal:62}),
+    e('potato', at(9,37,46), {partOf:'aalu mattar gaajar', source:'AI est', weighed:false, kcal:123}),
+    e('Vegetable oil, NFS', at(9,37,46), {partOf:'aalu mattar gaajar', weighed:false, kcal:396}),
+    e('Chapati, made without fat (CoFID 11-459)', at(9,37,54), {kcal:121, source:'CoFID 2021'}),
+    e('Yogurt, plain, low fat', at(9,38,6), {kcal:252}),
+    e('vermicelli', at(15,5,39), {partOf:'vermicelli', source:'AI est', weighed:false, kcal:281}),
+    e('Milk, whole', at(15,5,39), {partOf:'vermicelli', weighed:false, kcal:27}),
+    e('Rice, white, cooked, as ingredient', at(16,11,57), {kcal:650}),
+    e('Chicken, broilers or fryers, breast, meat only, cooked, stewed', at(16,12,0), {kcal:257,p:50}),
+    e('Yogurt, plain, low fat', at(16,12,19), {kcal:41}),
+    e('Candy, hard', at(16,13,7), {kcal:59})
+  ];
+  const rows = C.mealRows(day, { tzOffsetMin:300, templates:[
+    { name:'Chicken and rice', items:[{name:'Rice, white, cooked, as ingredient'},{name:'Chicken, broilers or fryers, breast, meat only, cooked, stewed'},{name:'Yogurt, plain, low fat'}] }
+  ]});
+  check('15 entries across four sittings become four meals', rows.length === 4, rows.map(r => r.name + '@' + r.time).join(' | '));
+  check('times use Pakistan time, 24-hour', rows.map(r => r.time).join(',') === '09:15,14:37,20:05,21:11', rows.map(r => r.time).join(','));
+  check('a mixed meal is named by the hour of its start', rows[0].name === 'Breakfast' && rows[1].name === 'Lunch', rows[0].name + '/' + rows[1].name);
+  check('a meal of one dish alone takes the dish name', rows[2].kind === 'dish' && rows[2].name === 'Vermicelli', rows[2].name);
+  check('saved usual wins over the hour and is tagged', rows[3].name === 'Chicken and rice' && rows[3].usual && rows[3].kind === 'usual', JSON.stringify(rows[3]));
+  check('the usual still matches with a sweet on the side (>= 70% of kcal)', rows[3].idx.length === 4);
+  check('totals sum kcal and protein', Math.round(rows[0].kcal) === 783 && Math.round(rows[3].p) >= 50, rows[0].kcal + '/' + rows[3].p);
+  check('AI-estimated or unweighed dish carries the estimate tag', rows[1].estimate && rows[2].estimate && !rows[0].estimate, rows.map(r => r.estimate).join());
+  check('summary uses the dish name and short food names', rows[1].summary === 'aalu mattar gaajar, chapati, low fat yogurt', rows[1].summary);
+  check('summary shortens database names', rows[3].summary === 'white rice, chicken breast, low fat yogurt, hard candy', rows[3].summary);
+
+  const one = C.mealRows([e('x', at(9,0), {partOf:'Biryani'}), e('y', at(9,1), {partOf:'biryani'})]);
+  check('exactly one dish alone: dish name, whatever the case', one.length === 1 && one[0].name === 'Biryani' && one[0].kind === 'dish', JSON.stringify(one[0]));
+  const notUsual = C.mealRows([e('Rice', at(9,0), {kcal:100}), e('Cake', at(9,1), {kcal:900})], {templates:[{name:'Rice only', items:[{name:'Rice'}]}]});
+  check('a usual covering under 70% of the meal does not match', !notUsual[0].usual && notUsual[0].name === 'Lunch', JSON.stringify(notUsual[0]));
+  check('the largest matching usual wins', C.mealRows([e('A', at(9,0)), e('B', at(9,1))], {templates:[{name:'small', items:[{name:'A'}]},{name:'big', items:[{name:'A'},{name:'B'}]}]})[0].name === 'big');
+  check('hour labels', [[5,'Breakfast'],[10,'Breakfast'],[11,'Lunch'],[15,'Lunch'],[16,'Snack'],[18,'Snack'],[19,'Dinner'],[22,'Dinner'],[23,'Late meal'],[2,'Late meal']].every(([h,n]) => C.mealTimeLabel(h*60+30) === n));
+  const late = C.mealRows([e('x', at(19,30))], {tzOffsetMin:300});
+  check('19:30 UTC is half past midnight in Pakistan, a late meal on the same ledger day', late[0].time === '00:30' && late[0].name === 'Late meal', late[0].time + ' ' + late[0].name);
+
+  // Back-filled days carry no eaten time, only a loggedAt of when you typed it in.
+  const bare = n => ({ name:n, grams:100, kcal:100, p:5, c:1, f:1, source:'USDA', weighed:true, loggedAt:at(8,0) });
+  const nt = C.mealRows([bare('Rice, white'), bare('Egg, whole, raw'), Object.assign(bare('dal'), {partOf:'dal chawal'}), Object.assign(bare('rice'), {partOf:'dal chawal'})]);
+  check('untimed entries are not given an invented time', nt.every(r => r.time === '' && r.minutes === null));
+  check('untimed entries stay apart unless they share a dish', nt.length === 3 && nt[2].idx.length === 2 && nt[2].name === 'Dal chawal', nt.map(r => r.name).join('|'));
+  check('an untimed single food is named after the food', nt[0].name === 'White rice', nt[0].name);
+})();
+
+group('shortFoodName — database names to readable ones');
+(function(){
+  const cases = [
+    ['Chicken, broilers or fryers, breast, meat only, cooked, stewed', 'Chicken breast'],
+    ['Egg, yolk, raw, fresh', 'Egg yolk'], ['Egg, white only, raw', 'Egg white'],
+    ['Rice, white, cooked, as ingredient', 'White rice'], ['Yogurt, plain, low fat', 'Low fat yogurt'],
+    ['Milk, whole', 'Milk'], ['Sugar, NFS', 'Sugar'], ['Vegetable oil, NFS', 'Vegetable oil'],
+    ['Nuts, pistachio nuts, raw', 'Pistachio nuts'], ['Chocolate, dark, 60-69% cacao solids', 'Dark chocolate'],
+    ['Candy, hard', 'Hard candy'], ['Carrots, raw', 'Carrots'], ['Bread, white', 'White bread'],
+    ['Chapati, made without fat (CoFID 11-459)', 'Chapati'], ['potato', 'potato'], ['', '']
+  ];
+  cases.forEach(([a, b]) => check(`"${a}" -> "${b}"`, C.shortFoodName(a) === b, C.shortFoodName(a)));
+  check('non-string input does not throw', C.shortFoodName(null) === '' && C.shortFoodName(undefined) === '');
+})();
+
 // ---- summary ----
 const sum = document.getElementById('summary');
 sum.className = failed === 0 ? 'allpass' : 'anyfail';

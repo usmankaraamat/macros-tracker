@@ -222,6 +222,126 @@
       .map(k => Object.assign({ count: count[k] }, last[k]));
   }
 
+  // ---- Meals: a day's entries, grouped the way you actually ate ---------------
+  // The ledger is one row per ingredient, which is right for the arithmetic and tiring to
+  // read: a 21-entry day is really five or six sittings. A MEAL is a run of consecutive
+  // entries whose eaten time is within MEAL_GAP_MIN minutes of the entry before it. Pure and
+  // DOM-free; the caller passes the timezone offset so the hour a meal is labelled by is the
+  // app's fixed Pakistan time, not whatever zone the phone is in.
+  const MEAL_GAP_MIN = 30;
+  const normMealText = s => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  // The time the entry was eaten. loggedAt is deliberately NOT a fallback: on a back-filled
+  // past day it is the moment of back-filling, which would invent a meal time.
+  function entryEatenMs(e) {
+    const t = Date.parse((e && (e.eatenAt || e.at)) || '');
+    return Number.isFinite(t) ? t : null;
+  }
+  // entries -> [{idx:[indices into entries], ms:first eaten time or null}]. Entry order is
+  // kept (the caller's edit/delete handlers address entries by index). An entry with no time
+  // can only be joined to the one before it when both belong to the same dish.
+  function groupMeals(entries, opts) {
+    const gap = ((opts && +opts.gapMin > 0) ? +opts.gapMin : MEAL_GAP_MIN) * 60000;
+    const meals = [];
+    let cur = null, prevMs = null, prevDish = '';
+    (entries || []).forEach((e, i) => {
+      if (!e) return;
+      const ms = entryEatenMs(e), dish = normMealText(e.partOf);
+      let join = false;
+      if (cur) {
+        if (ms != null && prevMs != null) join = Math.abs(ms - prevMs) <= gap;
+        else join = !!dish && dish === prevDish;
+      }
+      if (join) { cur.idx.push(i); if (cur.ms == null && ms != null) cur.ms = ms; }
+      else { cur = { idx: [i], ms }; meals.push(cur); }
+      prevMs = ms; prevDish = dish;
+    });
+    return meals;
+  }
+  // Time-of-day label for a meal's start, by the hour in the app's own timezone.
+  function mealTimeLabel(minutesOfDay) {
+    const h = Math.floor((((minutesOfDay % 1440) + 1440) % 1440) / 60);
+    if (h >= 5 && h < 11) return 'Breakfast';
+    if (h >= 11 && h < 16) return 'Lunch';
+    if (h >= 16 && h < 19) return 'Snack';
+    if (h >= 19 && h < 23) return 'Dinner';
+    return 'Late meal';
+  }
+  // A readable name from a database name: "Chicken, broilers or fryers, breast, meat only,
+  // cooked, stewed" -> "Chicken breast". Drops the parenthetical source code and preparation
+  // boilerplate, keeps the first meaningful qualifier, and puts an adjective-like qualifier in
+  // front ("Yogurt, plain, low fat" -> "Low fat yogurt"). The full name is never altered
+  // elsewhere; this is only for the one-line summaries.
+  const NAME_DROP = /^(raw|fresh|nfs|ns as to .+|cooked|boiled|stewed|roasted|baked|fried|steamed|grilled|as ingredient|meat only|meat and skin|skin not eaten|drained|unprepared|prepared|without salt.*|made without fat|plain|whole|dry|dried|canned|frozen|regular|commercially prepared|ready-to-eat|ready to eat|home prepared|mature seeds|separable lean only|lean only|trimmed to .+|[a-z]+ or [a-z]+|[a-z]+ or [a-z]+ [a-z]+|\d[\d.\-% ]*(cacao|fat|lean).*)$/i;
+  const NAME_BEFORE = /^(low fat|lowfat|reduced fat|nonfat|fat free|skim|dark|brown|sweet|sweetened|unsweetened|whole wheat|whole grain|white|hard|soft|green|red|black|salted|unsalted|ground|olive|cheddar|mozzarella)$/i;
+  function shortFoodName(name) {
+    const s = String(name == null ? '' : name).replace(/\s*\([^)]*\)/g, '').replace(/\s+/g, ' ').trim();
+    if (!s) return '';
+    const seg = s.split(',').map(x => x.trim()).filter(Boolean);
+    if (seg.length < 2) return s;
+    const head = seg[0], hl = head.toLowerCase();
+    const kept = seg.slice(1).map(x => x.replace(/\s+only$/i, '')).filter(x => !NAME_DROP.test(x));
+    if (!kept.length) return head;
+    const q = kept[0], ql = q.toLowerCase();
+    const stem = w => w.replace(/(ies|es|s)$/, '');
+    const up = x => x.charAt(0).toUpperCase() + x.slice(1);
+    // "Nuts, pistachio nuts" -> "Pistachio nuts": the qualifier already names the head.
+    if (ql.split(' ').some(w => stem(w) === stem(hl))) return up(q);
+    if (NAME_BEFORE.test(q) && hl !== 'egg') return up(ql) + ' ' + hl;
+    return head + ' ' + ql;
+  }
+  // Meals for display: name, one-line summary, totals and the tags. `opts`:
+  //   tzOffsetMin  minutes ahead of UTC for the clock (default 300 = Pakistan)
+  //   templates    [{name, items:[{name}]}] saved usuals
+  // Name rule, first match wins: exactly one dish (every entry shares one partOf) -> the dish;
+  // matches a saved usual -> its name; else the time-of-day label of the meal's start. A usual is
+  // matched when all its foods are present in the meal and they carry >= 70% of the meal's kcal.
+  // The "your usual" tag shows whenever a usual matches, whichever name won.
+  function mealRows(entries, opts) {
+    const o = opts || {}, tz = o.tzOffsetMin == null ? 300 : +o.tzOffsetMin;
+    const tpls = (o.templates || []).map(t => ({
+      name: t && t.name, names: ((t && t.items) || []).map(x => normMealText(x && x.name)).filter(Boolean)
+    })).filter(t => t.name && t.names.length);
+    const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+    return groupMeals(entries, o).map(g => {
+      const es = g.idx.map(i => entries[i]);
+      const sum = k => es.reduce((a, e) => a + (+e[k] || 0), 0);
+      const kcal = sum('kcal');
+      const dishes = es.map(e => normMealText(e.partOf));
+      const oneDish = es.length > 0 && !!dishes[0] && dishes.every(d => d === dishes[0]);
+      const have = new Set(es.map(e => normMealText(e.name)));
+      let usual = null, usualScore = 0;
+      tpls.forEach(t => {
+        if (!t.names.every(n => have.has(n))) return;
+        const tk = es.reduce((a, e) => a + (t.names.indexOf(normMealText(e.name)) >= 0 ? (+e.kcal || 0) : 0), 0);
+        if (kcal > 0 && tk / kcal < 0.7) return;
+        const score = t.names.length * 1e6 + tk;
+        if (score > usualScore) { usualScore = score; usual = t; }
+      });
+      let minutes = null, time = '';
+      if (g.ms != null) {
+        minutes = (((Math.floor(g.ms / 60000) + tz) % 1440) + 1440) % 1440;
+        time = String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
+      }
+      // One short label per entry; a dish is named once however many ingredients it has.
+      const labels = [], seen = {};
+      const push = l => { const k = l.toLowerCase(); if (l && !seen[k]) { seen[k] = 1; labels.push(l); } };
+      es.forEach(e => push(oneDish ? shortFoodName(e.name) : (e.partOf ? String(e.partOf).trim() : shortFoodName(e.name))));
+      const summary = labels.slice(0, 4).map(l => l.toLowerCase()).join(', ')
+        + (labels.length > 4 ? `, +${labels.length - 4} more` : '');
+      let name, kind;
+      if (oneDish) { name = cap(String(es[0].partOf).trim()); kind = 'dish'; }
+      else if (usual) { name = usual.name; kind = 'usual'; }
+      else if (minutes != null) { name = mealTimeLabel(minutes); kind = 'time'; }
+      else if (es.length === 1) { name = cap(shortFoodName(es[0].name)); kind = 'food'; }
+      else { name = 'Meal'; kind = 'meal'; }
+      return {
+        idx: g.idx, ms: g.ms, minutes, time, name, kind, usual: !!usual, summary,
+        kcal, p: sum('p'), c: sum('c'), f: sum('f'),
+        estimate: es.some(e => e.source === 'AI est' || (e.partOf && e.weighed === false))
+      };
+    });
+  }
+
   // A day that reports zero fat AND zero carbs against real calories did not measure
   // them — it is a kcal/protein-only import. Averaging those zeros in reports fat and
   // carbs as if they had been observed, which is how 21 imported days can quietly
@@ -2723,7 +2843,7 @@
   };
 
   return {
-    nutrientsFrom, resolvePTarget, capGrams, computeEntry, mineRepeats, macrosComplete,
+    nutrientsFrom, resolvePTarget, capGrams, computeEntry, mineRepeats, groupMeals, mealRows, mealTimeLabel, shortFoodName, MEAL_GAP_MIN, macrosComplete,
     corridorDrift, DRIFT_MIN_DAYS, singularise,
     completeMacros, macroKcal, KCAL_PER_G,
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend, robustWeightTrend,
