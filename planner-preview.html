@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planner preview</title>
+<style>
+  :root {
+    --bg: #101214; --panel: #181b1f; --line: #2a2f35; --text: #e6e8ea; --dim: #9aa3ab;
+    --accent: #7cc4a4; --warn: #e2b76a; --bad: #e07a6f; --swap: #8fb3e8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  p.note { color: var(--dim); font-size: 12px; margin: 0 0 12px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 12px 0; }
+  .controls { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 12px; }
+  label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--dim); }
+  input, select, button { font: inherit; font-size: 14px; color: var(--text); background: #0c0e10; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-height: 34px; }
+  input[type=file] { padding: 4px; }
+  button { cursor: pointer; background: #22303a; }
+  .answer { font-size: 18px; font-weight: 600; }
+  .answer.train { color: var(--accent); } .answer.pull_back { color: var(--warn); }
+  .answer.swap { color: var(--swap); } .answer.rest { color: var(--bad); }
+  .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin-top: 8px; }
+  .fact { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 13px; }
+  .codes { font-size: 12px; color: var(--dim); margin-top: 6px; word-break: break-word; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 500; font-size: 12px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .scroll { overflow-x: auto; }
+  .bar { height: 6px; background: #0c0e10; border-radius: 3px; position: relative; min-width: 60px; }
+  .bar > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent); }
+  .bar > span.low { background: var(--warn); }
+  .item { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .item:last-child { border-bottom: 0; }
+  .item b { font-weight: 600; }
+  .tag { display: inline-block; font-size: 12px; padding: 0 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--dim); margin-left: 4px; }
+  .tag.legs { color: var(--warn); border-color: var(--warn); }
+  .why { color: var(--dim); font-size: 12px; }
+  .day { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .day h3 { font-size: 14px; margin: 0 0 4px; }
+  .day.rest h3 { color: var(--dim); font-weight: 400; }
+  .day ul { margin: 0; padding-left: 18px; font-size: 13px; }
+  .err { color: var(--bad); }
+  .muted { color: var(--dim); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Session planner preview</h1>
+  <p class="note">A tool for judging the engine. Your export is read in this browser only; nothing is uploaded or saved. Not part of the app.</p>
+
+  <section>
+    <div class="controls">
+      <label>Export file <input type="file" id="file" accept=".json,application/json"></label>
+      <label>Planning date <input type="date" id="today"></label>
+      <label>Priority 1 <select id="p1"></select></label>
+      <label>Priority 2 <select id="p2"></select></label>
+      <label>Priority 3 <select id="p3"></select></label>
+      <label>Days per week <select id="days"><option>3</option><option selected>4</option><option>5</option></select></label>
+      <label>How do you feel <select id="feel"><option value="">not asked</option><option value="low">low</option><option value="ok">ok</option><option value="good">good</option></select></label>
+      <label>When rest is due <select id="restMode"><option value="rest">say rest</option><option value="lighter">offer a lighter session</option></select></label>
+      <label>Session minutes <input type="number" id="minutes" min="20" max="240" step="5" value="75"></label>
+    </div>
+    <p class="note" id="status">Pick an export file to start.</p>
+  </section>
+
+  <div id="out"></div>
+</main>
+<script src="core.js"></script>
+<script src="planner.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = window.LedgerCore, P = window.LedgerPlanner;
+  var L = C.MUSCLE_LABEL;
+  var data = null, cfg = null;
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function $(id) { return document.getElementById(id); }
+  var defaults = ['chest', 'lats', 'sideDelts'];
+  ['p1', 'p2', 'p3'].forEach(function (id, i) {
+    var opts = (i ? '<option value="">none</option>' : '') + C.MUSCLE_GROUPS.map(function (g) { return '<option value="' + g + '">' + esc(L[g]) + '</option>'; }).join('');
+    $(id).innerHTML = opts; $(id).value = defaults[i];
+  });
+  var now = new Date();
+  $('today').value = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
+  $('file').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    var rd = new FileReader();
+    rd.onload = function () {
+      try { data = JSON.parse(rd.result); $('status').textContent = 'Loaded ' + Object.keys(data.workouts || {}).length + ' workout days.'; run(); }
+      catch (err) { data = null; $('status').innerHTML = '<span class="err">Could not read that file: ' + esc(err.message) + '</span>'; }
+    };
+    rd.readAsText(f);
+  });
+  ['today', 'p1', 'p2', 'p3', 'days', 'feel', 'restMode', 'minutes'].forEach(function (id) { $(id).addEventListener('change', run); });
+
+  function pct(x) { return x == null ? '-' : Math.round(x * 100) + '%'; }
+  function kcalOn(date) { var d = data.days && data.days[date]; return Array.isArray(d) ? d.reduce(function (s, e) { return s + (+e.k || 0); }, 0) : 0; }
+
+  function run() {
+    if (!data) return;
+    var prios = ['p1', 'p2', 'p3'].map(function (id) { return $(id).value; }).filter(Boolean);
+    var v = P.validateConfig({ priorities: prios, restMode: $('restMode').value, sessionMinutes: +$('minutes').value });
+    if (!v.ok) { $('out').innerHTML = '<section class="err">' + v.errors.map(esc).join('<br>') + '</section>'; return; }
+    cfg = P.resolveConfig({ priorities: prios, restMode: $('restMode').value, sessionMinutes: +$('minutes').value });
+    var today = $('today').value;
+    var sessions = P.normalizeSessions(data.workouts || {});
+    var floor = data.targets && +data.targets.floor;
+    var input = { feel: $('feel').value || undefined, intake: { kcal: kcalOn(P.addDays(today, -1)), floor: floor } };
+    var t0 = performance.now();
+    var td = P.planToday({ sessions: sessions, catalogue: data.exercises, weights: data.weights, today: today, config: cfg, readinessInput: input });
+    var wk = P.planWeek({ sessions: sessions, catalogue: data.exercises, weights: data.weights, today: today, config: cfg, model: td.model, daysPerWeek: +$('days').value, readinessInput: input });
+    var ms = Math.round(performance.now() - t0);
+    $('out').innerHTML = readinessHtml(td.readiness) + sessionHtml(td) + weekHtml(wk) + musclesHtml(td.state) + modelHtml(td.model) +
+      '<p class="note">Computed in ' + ms + ' ms.</p>';
+  }
+
+  function readinessHtml(r) {
+    return '<section><h2>Readiness · ' + esc(r.date) + '</h2>' +
+      '<div class="answer ' + r.answer + '">' + esc(r.headline) + '</div>' +
+      '<div>' + esc(r.sentence) + '</div>' +
+      '<div class="facts">' + r.facts.slice(0, 4).map(function (f) { return '<div class="fact">' + esc(f.label) + '</div>'; }).join('') + '</div>' +
+      '<div class="codes">answer: ' + esc(r.answer) + ' · reasons: ' + r.reasons.map(function (x) { return esc(x.code) + ' (' + esc(x.answer) + ')'; }).join(', ') +
+      (r.facts.length > 4 ? '<br>more facts: ' + r.facts.slice(4).map(function (f) { return esc(f.label); }).join(' · ') : '') + '</div></section>';
+  }
+
+  function itemHtml(it) {
+    var rx = it.prescription;
+    var last = rx.last ? 'last ' + esc(rx.last.date) + ': ' + esc(rx.last.kg) + 'kg × ' + esc(rx.last.reps.join(', ')) + (rx.last.rir != null ? ' @ RIR ' + esc(rx.last.rir) : '') : 'no previous log';
+    return '<div class="item"><b>' + esc(it.name) + '</b>' + (it.block ? '<span class="tag legs">legs block</span>' : '') +
+      '<span class="tag">' + esc(it.pattern) + '</span><span class="tag">' + esc(it.movement) + '</span>' +
+      '<div>' + esc(rx.text) + ' <span class="muted">[' + esc(rx.rule) + ', range ' + rx.repLow + '-' + rx.repHigh + ']</span></div>' +
+      '<div class="why">' + esc(it.reasonText) + ' · ' + last + ' · window ' + it.window.earliest + ' d (' + esc(it.window.source) + ') · ' + it.minutes + ' min</div>' +
+      '<div class="why">codes: ' + it.reasons.map(function (x) { return esc(x.code); }).join(', ') + '</div></div>';
+  }
+
+  function sessionHtml(td) {
+    var s = td.session;
+    if (s.rest) return '<section><h2>Today</h2><div class="muted">Rest day. No session.</div></section>';
+    var alts = s.items.map(function (it) {
+      var a = P.alternatives(it.id, { state: td.state, index: td.index, config: cfg, model: td.model, readiness: td.readiness }, 3).filter(function (x) { return x.available; });
+      return '<tr><td>' + esc(it.name) + '</td><td>' + (a.length ? a.map(function (x) { return esc(x.name); }).join(', ') : '<span class="muted">none available</span>') + '</td></tr>';
+    }).join('');
+    return '<section><h2>Today’s session · ' + s.minutes + ' of ' + s.budget + ' min' + (s.lighter ? ' · lighter' : '') + '</h2>' +
+      (s.items.length ? s.items.map(itemHtml).join('') : '<div class="muted">Nothing to add.</div>') +
+      (s.notes && s.notes.length ? '<p class="note">' + s.notes.map(function (n) { return esc(n.text); }).join(' ') + '</p>' : '') +
+      (s.dropped.length ? '<p class="note">Dropped for time: ' + s.dropped.map(function (d) { return esc(d.name); }).join(', ') + '</p>' : '') +
+      '<h2 style="margin-top:12px">Swap options</h2><div class="scroll"><table><tr><th>Lift</th><th>Next best</th></tr>' + alts + '</table></div></section>';
+  }
+
+  function weekHtml(w) {
+    var days = w.days.map(function (d) {
+      if (!d.train) return '<div class="day rest"><h3>' + esc(d.weekday) + ' ' + esc(d.date) + ' · rest</h3></div>';
+      var s = d.session;
+      return '<div class="day"><h3>' + esc(d.weekday) + ' ' + esc(d.date) + ' · ' + s.minutes + ' min · ' + esc(d.readiness.answer) + '</h3><ul>' +
+        s.items.map(function (it) { return '<li>' + (it.block ? '[legs] ' : '') + esc(it.name) + ': ' + esc(it.prescription.text) + '</li>'; }).join('') + '</ul></div>';
+    }).join('');
+    var rows = Object.keys(w.summary).filter(function (g) { return w.summary[g].aim > 0; }).map(function (g) {
+      var x = w.summary[g];
+      return '<tr><td>' + esc(L[g]) + '</td><td class="num">' + x.planned + '</td><td class="num">' + x.aim + '</td><td class="num">' + x.days + '</td><td class="num">' + x.lifts + '</td></tr>';
+    }).join('');
+    return '<section><h2>Next 7 days · ' + w.daysPerWeek + ' sessions · ' + w.legBlocks + ' leg blocks</h2>' +
+      (w.warnings.length ? '<p class="note">' + w.warnings.map(function (x) { return esc(x.code + (x.why ? ': ' + x.why : '')); }).join('<br>') + '</p>' : '') + days +
+      '<div class="scroll" style="margin-top:8px"><table><tr><th>Muscle</th><th class="num">Planned</th><th class="num">Aim</th><th class="num">Days</th><th class="num">Lifts</th></tr>' + rows + '</table></div></section>';
+  }
+
+  function musclesHtml(st) {
+    var rows = C.MUSCLE_GROUPS.map(function (g) {
+      var m = st.muscles[g];
+      var share = m.target.aim > 0 ? Math.min(1, m.done / m.target.aim) : 0;
+      return '<tr><td>' + esc(L[g]) + (m.kind === 'priority' ? ' <span class="tag">priority</span>' : '') + '</td>' +
+        '<td class="num">' + m.done + '</td><td class="num">' + (m.target.aim > 0 ? m.target.aim : '-') + '</td>' +
+        '<td>' + (m.target.aim > 0 ? '<div class="bar"><span class="' + (share < 1 ? 'low' : '') + '" style="width:' + Math.round(share * 100) + '%"></span></div>' : '') + '</td>' +
+        '<td class="num">' + (m.daysSince == null ? '-' : m.daysSince + ' d') + '</td><td class="num">' + m.minGap + ' d</td></tr>';
+    }).join('');
+    return '<section><h2>Muscles, trailing 7 days</h2><div class="scroll"><table><tr><th>Muscle</th><th class="num">Done</th><th class="num">Aim</th><th></th><th class="num">Since</th><th class="num">Min gap</th></tr>' + rows + '</table></div>' +
+      '<p class="note">Done = involvement-weighted hard sets from ' + esc(st.range.from) + ' to ' + esc(st.range.to) + '. ' + st.consecutive + ' training days in a row going into today.</p></section>';
+  }
+
+  function modelHtml(m) {
+    var t = m.tables.byLiftGap.map(function (r) { return '<tr><td>' + esc(r.label) + '</td><td class="num">' + r.n + '</td><td class="num">' + pct(r.rate) + '</td></tr>'; }).join('');
+    var s = m.tables.bySessionGap.map(function (r) { return '<tr><td>' + esc(r.label) + '</td><td class="num">' + r.n + '</td><td class="num">' + pct(r.rate) + '</td></tr>'; }).join('');
+    return '<section><h2>Recovery model</h2><p>Same-lift window: <b>' + m.global.value + ' days</b> (' + esc(m.global.source) + ', ' + esc(m.global.confidence) + ', n ' + m.global.n + '). ' + esc(m.global.note) + '</p>' +
+      '<div class="scroll"><table><tr><th>Days since same lift</th><th class="num">n</th><th class="num">PR rate</th></tr>' + t + '</table></div>' +
+      '<div class="scroll" style="margin-top:8px"><table><tr><th>Days since last session</th><th class="num">n</th><th class="num">PR rate</th></tr>' + s + '</table></div></section>';
+  }
+})();
+</script>
+</body>
+</html>
