@@ -594,56 +594,83 @@
 </main>
 
 <!-- ================================= LIFT ================================ -->
+<!-- Three views behind underlined text tabs. Log today is what you use at the gym; History
+     and Catalogue are what you read afterwards. The tab state lives in lift.js and is not
+     touched by a re-render, so logging a set never moves you to another view. -->
 <main id="tabLift" class="tabview" role="tabpanel" aria-labelledby="tabbtn-lift" hidden>
-  <!-- The day's planned session, read from the owner's Google Calendar through the
-       lift-plan Edge Function. Hidden for anyone the function does not serve. -->
-  <section class="panel lift-plan" id="liftPlanPanel" hidden></section>
-  <!-- Free text in, sets out. Parsed by the grammar in core.js, not by a model. -->
-  <section class="panel">
-    <span class="panel-title">Session · <span id="liftDate">today</span><span id="liftSplit"></span></span>
-    <!-- Find an exercise by typing a few letters instead of scrolling a list. -->
-    <label for="liftFind" class="sr-only">Find an exercise to log</label>
-    <input type="search" id="liftFind" class="lift-find" placeholder="Find an exercise: squat, rdl, lat…" autocomplete="off" enterkeyhint="go">
-    <div id="liftFindResults" class="lift-find-results" hidden></div>
-    <div class="chips" id="liftChips" hidden></div>
-    <label for="liftInput" class="sr-only">Describe your sets</label>
-    <textarea id="liftInput" rows="3" placeholder="One exercise per line — bicep curls 20x12, 20x8, 15x14&#10;bench 60kg 8, 8, 6 rir 2"></textarea>
-    <div class="omni-actions">
-      <button type="button" id="liftBtn" class="omni-primary">Log sets</button>
-      <button type="button" class="omni-chip" id="liftAiBtn" hidden title="Have the AI read a line the parser could not">Ask AI</button>
-    </div>
-    <!-- Rest timer: starts on every logged set, counts down 90s, and never gates
-         logging — the next set just restarts it. -->
-    <div id="restTimer" class="rest-timer" hidden aria-live="polite">
-      <div class="rest-timer-bar"><span id="restTimerFill"></span></div>
-      <div class="rest-timer-row">
-        <span class="rest-timer-label" id="restTimerLabel">Rest</span>
-        <span class="rest-timer-time" id="restTimerTime">1:30</span>
-        <button type="button" class="rest-timer-skip" id="restTimerSkip">Skip</button>
+  <div class="lift-tabs" role="tablist" aria-label="Lift views">
+    <button type="button" role="tab" id="liftTabLog" data-lifttab="log" aria-selected="true" aria-controls="liftViewLog">Log today</button>
+    <button type="button" role="tab" id="liftTabHistory" data-lifttab="history" aria-selected="false" aria-controls="liftViewHistory" tabindex="-1">History</button>
+    <button type="button" role="tab" id="liftTabCatalogue" data-lifttab="catalogue" aria-selected="false" aria-controls="liftViewCatalogue" tabindex="-1">Catalogue</button>
+  </div>
+
+  <!-- ---------------------------- LOG TODAY ---------------------------- -->
+  <div id="liftViewLog" role="tabpanel" aria-labelledby="liftTabLog">
+    <!-- READINESS CARD: would be inserted here. Not built; the design is undecided. -->
+
+    <!-- Free text in, sets out. Parsed by the grammar in core.js, not by a model. -->
+    <section class="panel lift-logger">
+      <span class="panel-title">Session · <span id="liftDate">today</span><span id="liftSplit"></span></span>
+      <!-- Find an exercise by typing a few letters instead of scrolling a list. -->
+      <label for="liftFind" class="sr-only">Find an exercise to log</label>
+      <input type="search" id="liftFind" class="lift-find" placeholder="Find an exercise: squat, rdl, lat…" autocomplete="off" enterkeyhint="go">
+      <div id="liftFindResults" class="lift-find-results" hidden></div>
+      <div class="chips" id="liftChips" hidden></div>
+      <label for="liftInput" class="sr-only">Describe your sets</label>
+      <textarea id="liftInput" rows="3" placeholder="One exercise per line — bicep curls 20x12, 20x8, 15x14&#10;bench 60kg 8, 8, 6 rir 2"></textarea>
+      <div class="omni-actions">
+        <button type="button" id="liftBtn" class="omni-primary">Log sets</button>
+        <button type="button" class="omni-chip" id="liftAiBtn" hidden title="Have the AI read a line the parser could not">Ask AI</button>
       </div>
-    </div>
-    <div class="tactical" id="liftStatus" hidden></div>
-    <!-- Live "last time" reference for the exercise being typed, so a top set can be
-         gauged against what was done last session. -->
-    <div id="liftPreview" class="lift-preview" hidden></div>
-    <div id="liftPending" style="margin-top:12px"></div>
-    <div id="liftSession" style="margin-top:14px"></div>
-  </section>
+      <!-- Rest timer: starts on every logged set, counts down 90s, and never gates
+           logging — the next set just restarts it. -->
+      <div id="restTimer" class="rest-timer" hidden aria-live="polite">
+        <div class="rest-timer-bar"><span id="restTimerFill"></span></div>
+        <div class="rest-timer-row">
+          <span class="rest-timer-label" id="restTimerLabel">Rest</span>
+          <span class="rest-timer-time" id="restTimerTime">1:30</span>
+          <button type="button" class="rest-timer-skip" id="restTimerSkip">Skip</button>
+        </div>
+      </div>
+      <div class="tactical" id="liftStatus" hidden></div>
+      <!-- Live "last time" reference for the exercise being typed, so a top set can be
+           gauged against what was done last session. -->
+      <div id="liftPreview" class="lift-preview" hidden></div>
+      <div id="liftPending" style="margin-top:12px"></div>
+    </section>
 
-  <section class="panel">
-    <span class="panel-title">Progression · <span id="liftWindowLbl">last 8 weeks</span></span>
-    <div id="liftTrends"><div class="empty">Log a few sessions and the trends appear here.</div></div>
-    <div class="tactical" style="margin-top:12px">
-      Strength lifts are judged on best-set e1RM; high-rep work on capacity (load × reps-to-failure),
-      because an estimated 1RM stops meaning anything past 12 reps. Only the <i>change</i> in your RIR
-      is ever read, so guessing it consistently is fine — a constant bias cancels out of a trend.
-    </div>
-  </section>
+    <!-- The day's planned session, read from the owner's Google Calendar through the
+         lift-plan Edge Function. Hidden for anyone the function does not serve. This is the
+         header and notes; the planned exercises are the cards below, beside what was logged. -->
+    <section class="lift-plan" id="liftPlanPanel" hidden></section>
 
+    <!-- Exercise cards: planned exercises first (logged sets filled, the rest dashed), then
+         anything else logged today. -->
+    <div id="liftSession" class="lift-cards"></div>
+  </div>
+
+  <!-- ------------------------------ HISTORY ----------------------------- -->
+  <div id="liftViewHistory" role="tabpanel" aria-labelledby="liftTabHistory" hidden>
+    <section class="panel">
+      <span class="panel-title">Progression · <span id="liftWindowLbl">last 8 weeks</span></span>
+      <div id="liftTrends"><div class="empty">Log a few sessions and the trends appear here.</div></div>
+      <div class="tactical" style="margin-top:12px">
+        Strength lifts are judged on best-set e1RM; high-rep work on capacity (load × reps-to-failure),
+        because an estimated 1RM stops meaning anything past 12 reps. Only the <i>change</i> in your RIR
+        is ever read, so guessing it consistently is fine — a constant bias cancels out of a trend.
+      </div>
+    </section>
+    <section class="panel">
+      <span class="panel-title">Past sessions</span>
+      <div id="liftHistory"><div class="empty">No sessions logged yet.</div></div>
+    </section>
+  </div>
+
+  <!-- ----------------------------- CATALOGUE ---------------------------- -->
   <!-- The alias map that keeps one lift on one trend line. -->
-  <details class="panel">
-    <summary><span class="panel-title" style="margin:0">Exercises</span></summary>
-    <div style="margin-top:12px">
+  <div id="liftViewCatalogue" role="tabpanel" aria-labelledby="liftTabCatalogue" hidden>
+    <section class="panel">
+      <span class="panel-title">Exercises</span>
       <div class="tactical" style="margin-top:0;margin-bottom:12px">
         Every way you write a lift has to resolve to one entry here, or its history splits in two
         and no trend can be fit. Deleting an exercise drops it from the catalogue — logged sessions are untouched.
@@ -655,13 +682,8 @@
       <label for="liftCatSearch" class="sr-only">Search exercises</label>
       <input type="search" id="liftCatSearch" class="cat-search" placeholder="Search name, alias or muscle" autocomplete="off">
       <div id="liftCatalog"></div>
-    </div>
-  </details>
-
-  <details class="panel">
-    <summary><span class="panel-title" style="margin:0">Past sessions</span></summary>
-    <div id="liftHistory" style="margin-top:12px"><div class="empty">No sessions logged yet.</div></div>
-  </details>
+    </section>
+  </div>
 </main>
 
 <!-- ================================ TRENDS =============================== -->

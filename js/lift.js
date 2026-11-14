@@ -456,54 +456,101 @@ let liftEditIdx = null;
 // One exercise as a text line the parser round-trips: "Name  60kgx8, 60kgx7". rir is edited
 // in its own field, so it is deliberately left off the sets line here.
 function exerciseEditLine(ex){ return (ex.sets||[]).map(SET_IN).join(', '); }
+// ---- the exercise cards ------------------------------------------------------
+// One card per exercise: planned ones first (from the calendar, when there is a plan for the
+// day), then anything else logged today. A card is the name and its target on one line, a
+// "last: …" line in the mono face, and a row of set chips: logged sets filled (tap one to toggle
+// it as a warm-up), the rest of the planned sets dashed. Everything a logged exercise used to
+// show — volume, e1RM, fatigue readout, RIR, edit, remove — is still here: the fatigue warning
+// stays in view, the rest sits behind the card's own Details disclosure.
+function planSetCount(target){
+  const m = /^\s*(\d{1,2})\s*[x×*]/i.exec(String(target||''));
+  return m ? Math.min(12, +m[1]) : 0;
+}
+function liftPlanDay(){
+  const c = liftPlanCache();
+  return (c && !c.unavailable) ? (c.sessions||[]).filter(s => s.date === VIEW_DATE) : [];
+}
 function renderLiftSession(all, W){
   const w = all[VIEW_DATE] || workoutFor(VIEW_DATE);
   document.getElementById('liftDate').textContent = VIEW_DATE===ACTIVE_DATE ? 'today' : VIEW_DATE;
   document.getElementById('liftSplit').textContent = ' · ' + splitForDate(VIEW_DATE);
   const el = document.getElementById('liftSession');
-  if (!(w.exercises||[]).length){
+  const exs = w.exercises || [];
+  const planned = [];
+  liftPlanDay().forEach((s, si) => (s.exercises||[]).forEach((x, xi) => {
+    const n = planLiftName(x.name);
+    const full = String(x.name||''), bare = full.replace(/\s*[—(].*$/, '').trim() || full.trim();
+    planned.push({ si, xi, x, id: n.id, log: n.log, bare, note: full.slice(bare.length).replace(/^[\s—-]+/, '') });
+  }));
+  if (!exs.length && !planned.length){
     el.innerHTML = '<div class="empty">Nothing logged for this day.</div>';
     liftEditIdx = null;
     return;
   }
-  if (liftEditIdx != null && liftEditIdx >= w.exercises.length) liftEditIdx = null;
+  if (liftEditIdx != null && liftEditIdx >= exs.length) liftEditIdx = null;
   const bwKg = LedgerCore.weightAt(W, VIEW_DATE);
-  el.innerHTML = w.exercises.map((ex,i)=>{
-    if (i === liftEditIdx) return renderLiftExEditor(ex, i);
-    const m = LedgerCore.sessionMetrics(ex.sets, {bodyweightKg: bwKg, rir: ex.rir});
-    const warmN = (ex.sets||[]).filter(s=>s.warmup).length;
-    return `<details class="lift-ex session-exercise">
-      <summary class="lift-ex-head">
-        <span class="lift-ex-name">${escapeHtml(ex.name)}<small>${m.sets} set${m.sets===1?'':'s'} · ${Math.round(m.volume).toLocaleString()} kg</small></span>
-        <span class="lift-ex-progress">${m.bestE1RM ? `${m.bestE1RM.toFixed(1)} <small>e1RM</small>` : `${(ex.sets||[]).length} <small>sets</small>`}</span>
-      </summary>
-      <div class="lift-ex-body">
+
+  // Pair each planned exercise with the logged one of the same catalogue id; what is left over
+  // is logged-but-unplanned and follows after the plan.
+  const used = new Set(), cards = [];
+  planned.forEach(p => {
+    const i = exs.findIndex((e, ix) => e && e.id === p.id && !used.has(ix));
+    if (i >= 0) used.add(i);
+    cards.push({ p, i });
+  });
+  exs.forEach((e, i) => { if (!used.has(i)) cards.push({ p: null, i }); });
+
+  const kindTag = p => `<span class="tag">${p.x.kind === '--' ? 'drill' : p.x.kind === 'C' ? 'comp' : 'iso'}</span>`;
+  const card = ({ p, i }) => {
+    const ex = i >= 0 ? exs[i] : null;
+    if (ex && i === liftEditIdx) return renderLiftExEditor(ex, i);
+    const sets = ex ? (ex.sets||[]) : [];
+    const working = sets.filter(s => !s.warmup).length;
+    const m = ex ? LedgerCore.sessionMetrics(ex.sets, {bodyweightKg: bwKg, rir: ex.rir}) : null;
+    const name = p ? p.bare : ex.name;
+    const right = p ? (p.x.target || '') : (m.bestE1RM ? `${m.bestE1RM.toFixed(1)} e1RM` : `${sets.length} set${sets.length===1?'':'s'}`);
+    const last = (p && p.x.kind === '--') ? '' : planLastTop(p ? p.id : ex.id);
+    const todo = p ? Math.max(0, Math.min(12, planSetCount(p.x.target) - working)) : 0;
+    const chips = sets.map((s,si)=>
+      `<button type="button" class="set-chip done${s.warmup?' warm':''}" data-set="${i}.${si}" title="Tap to toggle warm-up">${SET_TXT(s)}${s.warmup?' <span class="wu">wu</span>':''}</button>`
+    ).join('') + Array.from({length: todo}, (_, k)=> `<span class="set-chip plan">set ${working + k + 1}</span>`).join('');
+    const head = `<div class="xc-h"><b class="xc-n">${escapeHtml(name)}${p ? kindTag(p) : ''}</b><i class="xc-t">${escapeHtml(right)}</i></div>`
+      + (p && p.note ? `<div class="xc-note">${escapeHtml(p.note)}</div>` : '')
+      + (last ? `<div class="xc-last">${escapeHtml(last)}</div>` : '');
+    // A planned card is one tap to put that exercise into the logger above.
+    const top = p ? `<button type="button" class="xc-add" data-plan="${p.si}:${p.xi}" title="Add ${escapeAttr(p.log)} to the logger">${head}</button>` : head;
+    const warmN = sets.filter(s => s.warmup).length;
+    const more = ex ? `<details class="xc-more">
+        <summary>Details · reps in reserve · edit</summary>
+        <div class="lift-sub">${m.sets} set${m.sets===1?'':'s'} · ${Math.round(m.volume).toLocaleString()} kg volume`
+          + (m.bestE1RM ? ` · best e1RM ${m.bestE1RM.toFixed(1)} kg` : '')
+          + (warmN ? ` · ${warmN} warm-up${warmN===1?'':'s'} excluded` : '')
+          + (m.incomplete ? ` · <span style="color:var(--brass)">log a weight to score this</span>` : '') + `</div>
+        <div class="lift-rir"><label for="slr${i}" title="How many more reps you had in you on your hardest set. Guess it — only the change over time is ever read, so a consistent personal bias cancels out.">Reps left in the tank on your hardest set</label>
+          <input type="number" id="slr${i}" data-lr="${i}" min="0" max="10" step="1"
+                 value="${ex.rir==null?'':ex.rir}" placeholder="–"></div>
         <div class="lift-ex-btns">
           <button type="button" class="lift-edit" data-le="${i}" aria-label="Edit ${escapeAttr(ex.name)}" title="Edit">${uiIcon('edit', 17)}</button>
           <button type="button" class="lift-del" data-lx="${i}" aria-label="Remove ${escapeAttr(ex.name)} from this session" title="Remove">${uiIcon('trash', 17)}</button>
         </div>
-        <div class="lift-sets">${(ex.sets||[]).map((s,si)=>
-        `<button type="button" class="set-chip${s.warmup?' warm':''}" data-set="${i}.${si}" title="Tap to toggle warm-up">${SET_TXT(s)}${s.warmup?' <span class="wu">wu</span>':''}</button>`
-        ).join(' ')}</div>
-      <div class="lift-sub">${m.sets} set${m.sets===1?'':'s'} · ${Math.round(m.volume).toLocaleString()} kg volume`
-      + (m.bestE1RM ? ` · best e1RM ${m.bestE1RM.toFixed(1)} kg` : '')
-      + (warmN ? ` · ${warmN} warm-up${warmN===1?'':'s'} excluded` : '')
-      + (m.incomplete ? ` · <span style="color:var(--brass)">log a weight to score this</span>` : '') + `</div>`
-      + fatigueLine(ex) + `
-        <div class="lift-rir"><label for="slr${i}" title="How many more reps you had in you on your hardest set. Guess it — only the change over time is ever read, so a consistent personal bias cancels out.">Reps left in the tank on your hardest set</label>
-        <input type="number" id="slr${i}" data-lr="${i}" min="0" max="10" step="1"
-               value="${ex.rir==null?'':ex.rir}" placeholder="–"></div>
-      </div>
-    </details>`;
-  }).join('');
-  const perf=LedgerCore.sessionPerformance(w,Object.keys(all).map(d=>all[d]),{weights:W});
-  const timing=w.startedAt?`${new Date(w.startedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`
-    +(w.endedAt&&w.endedAt!==w.startedAt?`–${new Date(w.endedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`:''):'';
-  const duration=w.startedAt&&w.endedAt?Math.max(0,Math.round((Date.parse(w.endedAt)-Date.parse(w.startedAt))/60000)):0;
-  const meta=document.createElement('div');meta.className='tactical lift-session-read';
-  meta.innerHTML=(timing?`Session ${escapeHtml(timing)}${duration?` · ${duration} min`:''}`:'Session time starts with the first logged sets')
-    +(perf.status==='ok'?` · <b>${perf.scorePct>=0?'+':''}${perf.scorePct.toFixed(1)}% vs expected</b> across ${perf.n} comparable lift${perf.n===1?'':'s'} <span class="lift-conf ${CONF_CLS[perf.confidence]||'low'}">${perf.confidence}</span>`:' · expected-vs-actual appears after repeated lifts');
-  el.prepend(meta);
+      </details>` : '';
+    const done = p && todo === 0 && working > 0;
+    return `<article class="xc${p ? ' xc-planned' : ''}${done ? ' xc-done' : ''}">${top}
+      ${chips ? `<div class="xc-sets">${chips}</div>` : ''}${ex ? fatigueLine(ex) : ''}${more}</article>`;
+  };
+  el.innerHTML = cards.map(card).join('');
+
+  if (exs.length){
+    const perf=LedgerCore.sessionPerformance(w,Object.keys(all).map(d=>all[d]),{weights:W});
+    const timing=w.startedAt?`${new Date(w.startedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`
+      +(w.endedAt&&w.endedAt!==w.startedAt?`–${new Date(w.endedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`:''):'';
+    const duration=w.startedAt&&w.endedAt?Math.max(0,Math.round((Date.parse(w.endedAt)-Date.parse(w.startedAt))/60000)):0;
+    const meta=document.createElement('div');meta.className='tactical lift-session-read';
+    meta.innerHTML=(timing?`Session ${escapeHtml(timing)}${duration?` · ${duration} min`:''}`:'Session time starts with the first logged sets')
+      +(perf.status==='ok'?` · <b>${perf.scorePct>=0?'+':''}${perf.scorePct.toFixed(1)}% vs expected</b> across ${perf.n} comparable lift${perf.n===1?'':'s'} <span class="lift-conf ${CONF_CLS[perf.confidence]||'low'}">${perf.confidence}</span>`:' · expected-vs-actual appears after repeated lifts');
+    el.appendChild(meta);
+  }
   el.querySelectorAll('[data-le]').forEach(s=>{
     s.onclick = ()=>{ liftEditIdx = +s.dataset.le; renderLiftSession(allWorkouts(), weightSeries()); };
   });
@@ -543,20 +590,29 @@ function renderLiftSession(all, W){
       saveWorkout(cur); render();
     };
   });
+  el.querySelectorAll('[data-plan]').forEach(b=>{
+    b.onclick = ()=>{
+      const [si, xi] = b.dataset.plan.split(':').map(Number);
+      const p = planned.filter(q => q.si === si && q.xi === xi)[0];
+      if (p) insertLiftName(p.log);
+    };
+  });
   // Deload marker: a deliberate light day should not read as regression, so it can be excluded
   // from every lift's trend fit while still being kept as the session you actually did.
-  const foot = document.createElement('label');
-  foot.className = 'lift-deload';
-  foot.innerHTML = `<input type="checkbox" id="liftDeload"${w.deload?' checked':''}> `
-    + `Deload day <span class="ink-dim">— logged, but excluded from progression trends</span>`;
-  el.appendChild(foot);
-  const dcb = document.getElementById('liftDeload');
-  if (dcb) dcb.onchange = ()=>{
-    const cur = workoutFor(VIEW_DATE);
-    if (dcb.checked) cur.deload = true; else delete cur.deload;
-    saveWorkout(cur); render();
-    toast(dcb.checked ? 'Marked as a deload — kept out of trends' : 'Deload flag cleared');
-  };
+  if (exs.length){
+    const foot = document.createElement('label');
+    foot.className = 'lift-deload';
+    foot.innerHTML = `<input type="checkbox" id="liftDeload"${w.deload?' checked':''}> `
+      + `Deload day <span class="ink-dim">— logged, but excluded from progression trends</span>`;
+    el.appendChild(foot);
+    const dcb = document.getElementById('liftDeload');
+    if (dcb) dcb.onchange = ()=>{
+      const cur = workoutFor(VIEW_DATE);
+      if (dcb.checked) cur.deload = true; else delete cur.deload;
+      saveWorkout(cur); render();
+      toast(dcb.checked ? 'Marked as a deload — kept out of trends' : 'Deload flag cleared');
+    };
+  }
   bindLiftEditor(w);
 }
 // The inline editor a logged exercise turns into. Name and sets are free text so a rename
@@ -841,7 +897,7 @@ function renderLiftCatalog(){
     + cat.map(c=>{
       const meta = LedgerCore.exerciseMeta(c);
       return `<tr><td>${escapeHtml(c.name)}`
-        + ((c.aliases||[]).length?`<br><span class="ink-dim" style="font-size:10px">${escapeHtml(c.aliases.join(', '))}</span>`:'')
+        + ((c.aliases||[]).length?`<br><span class="ink-dim" style="font-size:var(--fs-1)">${escapeHtml(c.aliases.join(', '))}</span>`:'')
         + muscleMapHTML(meta)
         + `</td><td>${muscleSel(c, meta)}</td><td>${patSel(c, meta)}</td>`
         + `<td><button type="button" class="lift-del" data-cd="${escapeAttr(c.id)}" aria-label="Remove ${escapeAttr(c.name)} from the catalogue" title="Remove">${uiIcon('trash', 16)}</button></td></tr>`;
@@ -942,7 +998,6 @@ Exercises:
     });
     if (!catAiProposed.length) throw new Error('the AI returned nothing usable');
     renderCatAiReview();
-    liftStatus(`Read by ${escapeHtml(AI_VIA)} — check the tags, then apply.`);
   } catch(err){
     toast('AI categorise failed: ' + err.message, { tone:'warn' });
   } finally { if (btn){ btn.disabled = false; btn.textContent = restore; } updateCatAiBtn(); }
@@ -974,7 +1029,7 @@ function renderCatAiReview(){
       <button type="button" class="ghost" id="catAiCancel">Cancel</button>
       <button type="button" id="catAiApply">Apply ${catAiProposed.length} tag${catAiProposed.length===1?'':'s'}</button>
     </div></div>`;
-  document.getElementById('catAiCancel').onclick = ()=>{ catAiProposed = null; renderCatAiReview(); liftStatus(''); };
+  document.getElementById('catAiCancel').onclick = ()=>{ catAiProposed = null; renderCatAiReview(); };
   document.getElementById('catAiApply').onclick = ()=>{
     const list = exerciseCatalog().slice(), byId = {}; list.forEach((c,i)=>byId[c.id]=i);
     let n = 0;
@@ -982,7 +1037,7 @@ function renderCatAiReview(){
       const i = byId[p.id]; if (i==null) return;
       list[i] = Object.assign({}, list[i], { muscles: p.muscles, pattern: p.pattern }); n++;
     });
-    saveCatalog(list); catAiProposed = null; liftStatus(''); haptic(); render();
+    saveCatalog(list); catAiProposed = null; haptic(); render();
     toast(`Categorised ${n} exercise${n===1?'':'s'} — tweak any in the table`);
   };
 }
@@ -1004,7 +1059,7 @@ function renderLiftHistory(all, W){
     }).join('');
     return `<div class="lift-ex"><div class="lift-ex-head">
         <span class="lift-ex-name">${d}${w.split?` · ${escapeHtml(w.split)}`:''}</span>
-        <span class="ink-dim" style="font-size:11px">${Math.round(vol).toLocaleString()} kg</span></div>
+        <span class="ink-dim" style="font-size:var(--fs-1)">${Math.round(vol).toLocaleString()} kg</span></div>
       ${lines}</div>`;
   }).join('');
 }
@@ -1098,7 +1153,7 @@ async function refreshLiftPlan(force){
   } catch(e){
     if (e.status === 404 || e.status === 503) saveLiftPlanCache({ checkedAt: new Date().toISOString(), unavailable: true, status: e.status });
     else if (c && !c.unavailable) saveLiftPlanCache(Object.assign({}, c, { error: e.message }));
-  } finally { liftPlanLoading = false; renderLiftPlan(); }
+  } finally { liftPlanLoading = false; renderLiftPlan(); renderLiftSession(allWorkouts(), weightSeries()); }
 }
 // "Barbell RDL — FIRST, free bar" → "Barbell RDL": the calendar's coaching notes are not
 // part of the lift's name, and leaving them in would start a new trend line.
@@ -1121,17 +1176,19 @@ function planLastTop(id){
   }
   return 'no previous log';
 }
+// The strip above the cards: which session the calendar planned, its notes, and when it was last
+// read. The planned exercises themselves are cards (renderLiftSession), so that what was planned
+// and what was logged sit together.
 function renderLiftPlan(){
   const el = document.getElementById('liftPlanPanel');
   if (!el) return;
   const c = liftPlanCache();
   if (!c || c.unavailable){ el.hidden = true; el.innerHTML = ''; return; }
-  const day = (c.sessions||[]).filter(s => s.date === VIEW_DATE);
+  const day = liftPlanDay();
   const next = (c.sessions||[]).filter(s => s.date > VIEW_DATE)[0];
-  const logged = new Set((workoutFor(VIEW_DATE).exercises||[]).map(e => e.id));
   const when = c.checkedAt ? new Date(c.checkedAt).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}) : '';
   const foot = `<div class="lift-plan-foot"><span>From your calendar · ${liftPlanLoading ? 'updating…' : 'checked ' + escapeHtml(when)}${c.error ? ' · offline, showing the last copy' : ''}</span>
-    <button type="button" class="sm ghost" id="liftPlanRefresh" ${liftPlanLoading ? 'disabled' : ''} title="Read the calendar again">${uiIcon('repeat', 14)}</button></div>`;
+    <button type="button" class="sm ghost" id="liftPlanRefresh" ${liftPlanLoading ? 'disabled' : ''} title="Read the calendar again" aria-label="Read the calendar again">${uiIcon('repeat', 14)}</button></div>`;
   el.hidden = false;
   if (!day.length){
     // Outside the fetched window there is nothing to say; an empty day is still worth one line.
@@ -1139,35 +1196,63 @@ function renderLiftPlan(){
     el.innerHTML = `<span class="panel-title">Planned</span>
       <div class="lift-sub">${inWindow ? 'No lift on your calendar for this day.' : 'This day is outside the plan window.'}${next ? ` Next: <b>${escapeHtml(next.title)}</b> on ${escapeHtml(next.date)}.` : ''}</div>${foot}`;
   } else {
-    el.innerHTML = day.map((s, si) => `
+    el.innerHTML = day.map(s => `
       <span class="panel-title">Planned · ${escapeHtml(s.title)}${s.time ? ` <small>${escapeHtml(s.time)}</small>` : ''}</span>
-      <ul class="lift-plan-list">${s.exercises.map((x, xi) => {
-        const n = planLiftName(x.name);
-        return `<li><button type="button" class="lift-plan-row${logged.has(n.id) ? ' lift-plan-done' : ''}" data-plan="${si}:${xi}" title="Add ${escapeAttr(n.log)} to the logger">
-          <span class="lift-plan-kind">${x.kind === '--' ? 'DRILL' : x.kind === 'C' ? 'COMP' : 'ISO'}</span>
-          <span class="lift-plan-name">${escapeHtml(x.name)}</span>
-          <span class="lift-plan-target">${escapeHtml(x.target)}</span>
-          ${x.kind === '--' ? '' : `<span class="lift-plan-last">${escapeHtml(planLastTop(n.id))}</span>`}
-        </button></li>`; }).join('')}</ul>
       ${s.notes ? `<details class="lift-plan-notes"><summary>Notes</summary><div>${escapeHtml(s.notes)}</div></details>` : ''}`).join('') + foot;
-    el.querySelectorAll('[data-plan]').forEach(b => {
-      b.onclick = () => {
-        const [si, xi] = b.dataset.plan.split(':').map(Number);
-        const n = planLiftName(day[si].exercises[xi].name);
-        insertLiftName(n.log);
-      };
-    });
   }
   const r = document.getElementById('liftPlanRefresh');
   if (r) r.onclick = () => refreshLiftPlan(true);
 }
 function addDaysIso(iso, n){ const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 
+// ---- the three Lift views ------------------------------------------------------
+// Log today / History / Catalogue. The choice is a variable, not something render() rebuilds:
+// the three views are static containers and a re-render (after logging a set, say) only refills
+// them, so the view you are on is never changed underneath you. It is not persisted across
+// reloads; Lift opens on Log today.
+let liftSubTab = 'log';
+const LIFT_VIEWS = { log:['liftTabLog','liftViewLog'], history:['liftTabHistory','liftViewHistory'], catalogue:['liftTabCatalogue','liftViewCatalogue'] };
+function applyLiftSubTab(){
+  Object.keys(LIFT_VIEWS).forEach(k=>{
+    const tab = document.getElementById(LIFT_VIEWS[k][0]), view = document.getElementById(LIFT_VIEWS[k][1]);
+    if (!tab || !view) return;
+    const on = k === liftSubTab;
+    tab.setAttribute('aria-selected', String(on));
+    tab.tabIndex = on ? 0 : -1;
+    view.hidden = !on;
+  });
+}
+function setLiftSubTab(name, focusTab){
+  if (!LIFT_VIEWS[name]) return;
+  liftSubTab = name;
+  applyLiftSubTab();
+  if (focusTab){ const t = document.getElementById(LIFT_VIEWS[name][0]); if (t) t.focus(); }
+}
+(function bindLiftTabs(){
+  const list = document.querySelector('.lift-tabs');
+  if (!list) return;
+  list.addEventListener('click', ev=>{
+    const b = ev.target.closest('[data-lifttab]');
+    if (b) setLiftSubTab(b.dataset.lifttab);
+  });
+  // Arrow keys move between tabs, as a tablist is expected to.
+  list.addEventListener('keydown', ev=>{
+    const keys = Object.keys(LIFT_VIEWS), at = keys.indexOf(liftSubTab);
+    let to = null;
+    if (ev.key === 'ArrowRight') to = keys[(at + 1) % keys.length];
+    else if (ev.key === 'ArrowLeft') to = keys[(at + keys.length - 1) % keys.length];
+    else if (ev.key === 'Home') to = keys[0];
+    else if (ev.key === 'End') to = keys[keys.length - 1];
+    if (to){ ev.preventDefault(); setLiftSubTab(to, true); }
+  });
+})();
+
 function renderLift(){
   if (!document.getElementById('liftSession')) return;
   const all = allWorkouts(), W = weightSeries();
   const rows = liftTrends(all, W);
   setLiftPreviewData(all, W, rows);
+  applyLiftSubTab();
   renderLiftPlan(); refreshLiftPlan();
   renderLiftChips(all); renderLiftPicker(all); renderLiftSession(all, W); renderLiftPending();
   renderLiftPreview();
