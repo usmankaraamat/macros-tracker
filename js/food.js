@@ -440,9 +440,9 @@ function renderPendItem(p, i){
     `<option value="u${idx}" ${p.sel==='u'+idx?'selected':''}>${escapeHtml(c.name)} · ${Math.round(c.base.kcal)} kcal/100g${optNote(c)}${c.src?' · '+escapeHtml(c.src):''}</option>`).join('')
     + (p.estBase ? `<option value="est" ${p.sel==='est'?'selected':''}>AI estimate · ${Math.round(p.estBase.kcal)} kcal/100g</option>` : '');
   const picker = (p.candidates.length || p.estBase)
-    ? `<select id="pf${i}" style="margin-top:6px;font-size:11px">${opts}</select>` : '';
+    ? `<select id="pf${i}" style="margin-top:6px;font-size:var(--fs-1)">${opts}</select>` : '';
   const warn = pendWarn(p);
-  const warnLine = warn ? `<div class="tactical bad" style="margin-top:6px;font-size:10px;padding-left:8px">${warn}</div>` : '';
+  const warnLine = warn ? `<div class="tactical bad" style="margin-top:6px;font-size:var(--fs-1);padding-left:8px">${warn}</div>` : '';
   const qv = (p.name||'').replace(/"/g,'&quot;');
   // "You said X → matched Y": the match is shown as a claim to check, not a fact. A
   // database badge says where the numbers came from, never that the match is right,
@@ -458,7 +458,7 @@ function renderPendItem(p, i){
   return `<div class="pend-item">
     <div class="pend-top">
       <input type="checkbox" id="ps${i}" ${p.include?'checked':''} style="width:auto">
-      <span class="pname">${badge} ${escapeHtml(p.name)} <span style="color:var(--graphite);font-family:var(--data);font-size:10px">${kc} kcal/100g</span></span>
+      <span class="pname">${badge} ${escapeHtml(p.name)} <span style="color:var(--graphite);font-family:var(--data);font-size:var(--fs-1)">${kc} kcal/100g</span></span>
       <input type="number" id="pg${i}" value="${Math.round(p.grams)}" min="0" step="1" title="grams">
     </div>
     ${matchLine}
