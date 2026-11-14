@@ -385,5 +385,42 @@ function validWeek(w, sessions, n, label) {
   ok(recs.every(r => r.date && r.advised && Array.isArray(r.advised.lifts)), 'nudge records have the documented shape');
 }
 
+// ---- 13. Available weekdays -------------------------------------------------------------
+// He trains Monday to Friday only: nothing may land on a weekend, a weekend day answers
+// "rest" even in lighter mode, and five weekdays do not fit a two-in-a-row limit.
+{
+  const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  ok(!P.validateConfig({ availableWeekdays: ['Funday'] }).ok, 'unknown weekday rejected');
+  ok(!P.validateConfig({ availableWeekdays: [] }).ok, 'empty weekday list rejected');
+  ok(P.validateConfig({ availableWeekdays: WD }).ok, 'Monday to Friday validates');
+  const h = history(T, { until: add(T, -2) });          // last session on the Saturday before
+  const c = { availableWeekdays: WD };
+  [3, 4].forEach(n => {
+    const w = plan(h, T, n, c);
+    const tr = w.days.filter(d => d.train);
+    ok(tr.length === n, `weekdays only: ${n} training days`, tr.length);
+    ok(tr.every(d => WD.indexOf(d.weekday) >= 0), `weekdays only: ${n}-day week has no weekend session`, tr.map(d => d.weekday));
+  });
+  const five = plan(h, T, 5, c);
+  ok(five.days.filter(d => d.train).every(d => WD.indexOf(d.weekday) >= 0), '5 asked, weekdays only: still no weekend session');
+  ok(five.daysPerWeek === 4 && five.warnings.some(x => x.code === 'DAYS_REDUCED'),
+     '5 weekdays with a 2-in-a-row limit is reduced to 4, with a warning', { n: five.daysPerWeek, w: five.warnings });
+  const allFive = plan(h, T, 5, { availableWeekdays: WD, maxConsecutiveDays: 5 });
+  ok(allFive.daysPerWeek === 5, 'raising the in-a-row limit allows all five weekdays', allFive.daysPerWeek);
+  const sat = add(T, 5);
+  const wk = plan(h, sat, 4, c);
+  ok(wk.days[0].train === false && wk.days[1].train === false, 'planning from a Saturday: Saturday and Sunday stay empty',
+     wk.days.slice(0, 2).map(d => d.weekday + ':' + d.train));
+  ok(wk.days.filter(d => d.train).every(d => WD.indexOf(d.weekday) >= 0), 'planning from a Saturday: sessions fall on weekdays');
+  const today = P.planToday({ sessions: h, catalogue: CAT, today: sat, config: { availableWeekdays: WD, restMode: 'lighter' } });
+  ok(today.readiness.answer === 'rest' && today.readiness.reasons.some(r => r.code === 'NOT_A_TRAINING_DAY'),
+     'a day off answers rest even in lighter mode', today.readiness.answer);
+  ok(today.session.rest === true && today.session.items.length === 0, 'a day off has no session');
+  ok(today.readiness.headline === 'Not a training day' && /Saturday/.test(today.readiness.sentence), 'the card names the day off',
+     { h: today.readiness.headline, s: today.readiness.sentence });
+  const all = plan(h, T, 4, {});
+  ok(all.days.filter(d => d.train).length === 4, 'default (all seven days) still plans four days');
+}
+
 console.log(`planner tests: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

@@ -76,6 +76,7 @@
     maxLiftsPerSession: 7,
     loadStep: { barbell: 2.5, smith: 2.5, machine: 2.5, cable: 2.5, dumbbell: 2, bodyweight: 0, other: 2.5 },
     timing: { warmupMin: 8, workSec: 45, restSec: { compound: 150, isolation: 90 }, changeoverSec: 60 },
+    availableWeekdays: WEEKDAY.slice(),             // weekdays he can train on, e.g. ['Mon','Tue','Wed','Thu','Fri']
     restMode: 'rest',                               // 'rest' or 'lighter' (never says "rest")
     readiness: {
       recentDays: 7,            // window for the share of exercises taken to failure
@@ -157,6 +158,8 @@
     });
     if (!isNum(c.maxConsecutiveDays) || c.maxConsecutiveDays < 1 || c.maxConsecutiveDays > 7) e.push('maxConsecutiveDays must be 1..7');
     if (!isNum(c.sessionMinutes) || c.sessionMinutes < 20 || c.sessionMinutes > 240) e.push('sessionMinutes must be 20..240');
+    if (!Array.isArray(c.availableWeekdays) || !c.availableWeekdays.length || c.availableWeekdays.some(d => WEEKDAY.indexOf(d) < 0))
+      e.push('availableWeekdays must be a non-empty list of ' + WEEKDAY.join(', '));
     if (['rest', 'lighter'].indexOf(c.restMode) < 0) e.push('restMode must be "rest" or "lighter"');
     const s = c.setsPerLift;
     if (!(s.min >= 1) || !(s.min <= s.max) || s.max > 8) e.push('setsPerLift needs 1 <= min <= max <= 8');
@@ -549,6 +552,7 @@
     });
     return best;
   }
+  const DAY_NAME = { Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday' };
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
   function readiness(index, state, config, input, model) {
@@ -562,6 +566,10 @@
     const lowIntake = !!(inp.intake && inp.intake.kcal > 0 && inp.intake.floor > 0 && inp.intake.kcal < inp.intake.floor * R.lowIntakeRatio);
     const feelLow = inp.feel === 'low';
     const nSignals = [sig.failureHigh, sig.dropoffHigh, sig.regressing.length >= R.regressingCount, lowIntake].filter(Boolean).length;
+
+    // A weekday he does not train on is never a session, whatever restMode says.
+    const dayOff = cfg.availableWeekdays.indexOf(weekday(index.today)) < 0;
+    if (dayOff) add('NOT_A_TRAINING_DAY', 'rest', { weekday: weekday(index.today) });
 
     // Rest rules
     if (state.consecutive >= cfg.maxConsecutiveDays) add('CONSECUTIVE_LIMIT', 'rest', { inARow: wouldBe, max: cfg.maxConsecutiveDays });
@@ -589,7 +597,7 @@
     const has = a => reasons.some(r => r.answer === a);
     let answer = has('rest') ? 'rest' : has('swap') ? 'swap' : has('pull_back') ? 'pull_back' : 'train';
     let lighter = false;
-    if (answer === 'rest' && cfg.restMode === 'lighter') {
+    if (answer === 'rest' && cfg.restMode === 'lighter' && !dayOff) {
       answer = 'pull_back'; lighter = true;
       add('LIGHTER_INSTEAD_OF_REST', 'pull_back', {});
     }
@@ -626,7 +634,7 @@
 
     const first = reasons.filter(r => r.answer === answer || (lighter && r.answer === 'rest'))[0] || reasons[0];
     return { date: index.today, answer: answer, lighter: lighter,
-             headline: { train: 'Train as planned', pull_back: lighter ? 'Lighter session today' : 'Train, but pull back', swap: 'Swap today’s focus', rest: 'Rest today' }[answer],
+             headline: dayOff ? 'Not a training day' : { train: 'Train as planned', pull_back: lighter ? 'Lighter session today' : 'Train, but pull back', swap: 'Swap today’s focus', rest: 'Rest today' }[answer],
              sentence: readinessSentence(answer, first, reasons, state, sig, cfg, lighter),
              reasons: reasons, facts: facts, modifiers: modifiers,
              signals: { consecutive: state.consecutive, daysSinceLast: state.daysSinceLast,
@@ -639,6 +647,7 @@
     const capC = cfg.rirCap.compound + cfg.pullBackRirExtra;
     const code = r && r.code;
     if (answer === 'rest') {
+      if (code === 'NOT_A_TRAINING_DAY') return `${DAY_NAME[r.data.weekday]} is not one of your training days.`;
       if (code === 'CONSECUTIVE_LIMIT') return `This would be day ${r.data.inARow} in a row. Take today off.`;
       if (code === 'LOW_FEEL_AND_FATIGUE') return 'You feel low and your last sessions show fatigue. Take today off.';
       return `${plural(sig.regressing.length, 'lift')} regressing and reps fell off set to set. Take today off.`;
@@ -919,12 +928,14 @@
   // Feasible = never more than maxRun days in a row, counting the run already going into today.
   // Spacing cost = squared deviation of each gap from the even spacing 7/n (the first gap
   // counted from the last real session), plus a charge for each back-to-back pair.
-  function chooseTrainingDays(n, consecutiveBefore, daysSinceLast, maxRun, todayAllowed) {
+  function chooseTrainingDays(n, consecutiveBefore, daysSinceLast, maxRun, todayAllowed, allowedMask) {
+    const allowed = allowedMask == null ? 127 : allowedMask;
     const out = [];
     for (let mask = 0; mask < 128; mask++) {
       let bits = 0; for (let i = 0; i < 7; i++) if (mask >> i & 1) bits++;
       if (bits !== n) continue;
       if (!todayAllowed && (mask & 1)) continue;
+      if (mask & ~allowed) continue;                 // a day he does not train on
       let run = consecutiveBefore, ok = true, pairs = 0;
       for (let i = 0; i < 7; i++) {
         if (mask >> i & 1) { run++; if (run > maxRun) { ok = false; break; } if (run >= 2) pairs++; } else run = 0;
@@ -953,10 +964,12 @@
     let n = clamp(input.daysPerWeek || cfg.daysPerWeek.preferred, cfg.daysPerWeek.min, cfg.daysPerWeek.max);
     if (input.daysPerWeek && input.daysPerWeek !== n) warnings.push({ code: 'DAYS_CLAMPED', asked: input.daysPerWeek, used: n });
     const todayAllowed = rd0.answer !== 'rest';
+    let allowedMask = 0;
+    for (let i = 0; i < 7; i++) if (cfg.availableWeekdays.indexOf(weekday(addDays(today, i))) >= 0) allowedMask |= 1 << i;
     let options = [];
     for (let k = n; k >= 1 && !options.length; k--) {
-      options = chooseTrainingDays(k, state0.consecutive, state0.daysSinceLast, cfg.maxConsecutiveDays, todayAllowed);
-      if (options.length && k < n) warnings.push({ code: 'DAYS_REDUCED', asked: n, used: k, why: `${n} days would need more than ${cfg.maxConsecutiveDays} in a row` });
+      options = chooseTrainingDays(k, state0.consecutive, state0.daysSinceLast, cfg.maxConsecutiveDays, todayAllowed, allowedMask);
+      if (options.length && k < n) warnings.push({ code: 'DAYS_REDUCED', asked: n, used: k, why: `${n} days do not fit your training days without more than ${cfg.maxConsecutiveDays} in a row` });
     }
     // The owner can fix the days himself (offsets from today, 0..6); the rest still applies.
     if (Array.isArray(input.trainDays)) {
