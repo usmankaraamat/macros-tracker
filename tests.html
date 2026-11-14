@@ -2048,6 +2048,39 @@ group('gaugeGeometry — scale, states and arcs');
   check('pace tick is a short line across the dial', pt.x1 !== pt.x2 || pt.y1 !== pt.y2);
   check('degenerate corridor does not throw or produce NaN', !/NaN/.test(JSON.stringify(C.gaugeGeometry({ floor:0, ceil:0, intake:0 }))));
 })();
+// ---- meals: repeated labels and the estimate threshold ----
+group('mealRows — repeated time-of-day labels, estimate threshold');
+(function(){
+  const at = (h, m) => `2026-11-12T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00.000Z`;
+  const e = (name, iso, kcal, extra) => Object.assign({ name, grams:100, kcal, p:5, c:10, f:2, source:'USDA', weighed:true, eatenAt:iso, at:iso }, extra);
+  // two dinners (UTC 15:xx and 16:xx are 20:xx and 21:xx in Pakistan)
+  const two = C.mealRows([
+    e('vermicelli', at(15,5), 281, {partOf:'vermicelli', source:'AI est', weighed:false}), e('Milk, whole', at(15,6), 67),
+    e('Rice, white, cooked, as ingredient', at(16,11), 650), e('Chicken, broilers or fryers, breast, meat only, cooked, stewed', at(16,12), 257),
+    e('Yogurt, plain, low fat', at(16,12), 41), e('Candy, hard', at(16,13), 59)
+  ]);
+  check('two dinners are named from their main foods', two.length === 2 && two[0].name === 'Vermicelli' && two[1].name === 'White rice and chicken breast', two.map(r => r.name).join(' | '));
+  check('the second food joins only at a quarter of the meal', two[0].kind === 'foods' && !/ and /.test(two[0].name));
+  const three = C.mealRows([e('Tea', at(11,0), 50), e('Nuts', at(12,30), 300), e('Biscuit, plain', at(13,40), 150)]);
+  check('three snacks all get food names', three.length === 3 && three.every(r => r.kind === 'foods') && three.map(r => r.name).join('|') === 'Tea|Nuts|Biscuit', three.map(r => r.name).join('|'));
+  const uniq = C.mealRows([e('Tea', at(11,0), 50), e('Rice', at(15,0), 500)]);
+  check('a label that is unique on the day is left alone', uniq[0].name === 'Snack' && uniq[1].name === 'Dinner' && uniq.every(r => r.kind === 'time'), uniq.map(r => r.name).join('|'));
+  const dish = C.mealRows([e('Rice', at(15,0), 500, {partOf:'Biryani'}), e('Tea', at(11,0), 50), e('Cake', at(12,0), 200)]);
+  check('a dish name still wins when labels repeat', dish[0].name === 'Biryani' && dish[0].kind === 'dish' && dish[1].kind === 'foods');
+  const tpl = C.mealRows([e('A', at(15,0), 100), e('B', at(15,1), 100), e('C', at(17,0), 300), e('D', at(18,0), 200), e('E', at(18,50), 200)], {templates:[{name:'My AB', items:[{name:'A'},{name:'B'}]}]});
+  check('a matched usual still wins when labels repeat', tpl[0].name === 'My AB' && tpl[0].kind === 'usual');
+
+  // estimate: >= 25% of the meal's kcal from AI estimates or unweighed dish components
+  const base = (estKcal, weighedKcal) => C.mealRows([
+    e('Rice', at(9,0), weighedKcal), e('dal', at(9,1), estKcal, {partOf:'dal', source:'AI est', weighed:false})])[0];
+  check('a small estimated extra in a weighed meal carries no tag', base(20, 980).estimate === false);
+  check('a meal that is mostly an estimated dish is tagged', base(900, 100).estimate === true);
+  check('exactly 25% is tagged', base(250, 750).estimate === true);
+  check('just under 25% is not', base(249, 751).estimate === false);
+  check('an unweighed plain food does not count', C.mealRows([e('Milk', at(9,0), 500, {weighed:false})])[0].estimate === false);
+  check('a dish component that was not weighed counts, whatever its source', C.mealRows([e('x', at(9,0), 400, {partOf:'d', weighed:false}), e('y', at(9,1), 100)])[0].estimate === true);
+})();
+
 
 // ---- summary ----
 const sum = document.getElementById('summary');

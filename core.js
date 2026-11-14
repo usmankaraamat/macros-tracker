@@ -302,7 +302,7 @@
       name: t && t.name, names: ((t && t.items) || []).map(x => normMealText(x && x.name)).filter(Boolean)
     })).filter(t => t.name && t.names.length);
     const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
-    return groupMeals(entries, o).map(g => {
+    const rows = groupMeals(entries, o).map(g => {
       const es = g.idx.map(i => entries[i]);
       const sum = k => es.reduce((a, e) => a + (+e[k] || 0), 0);
       const kcal = sum('kcal');
@@ -334,12 +334,32 @@
       else if (minutes != null) { name = mealTimeLabel(minutes); kind = 'time'; }
       else if (es.length === 1) { name = cap(shortFoodName(es[0].name)); kind = 'food'; }
       else { name = 'Meal'; kind = 'meal'; }
+      // The one or two foods carrying the most kcal (a dish counts as one food). The second joins
+      // only when it carries at least a quarter of the meal, so "rice and chicken" but not
+      // "rice and a spoon of yoghurt".
+      const byFood = {};
+      es.forEach(e => {
+        const label = e.partOf ? String(e.partOf).trim() : shortFoodName(e.name);
+        const k = label.toLowerCase();
+        (byFood[k] = byFood[k] || { label, kcal: 0 }).kcal += (+e.kcal || 0);
+      });
+      const top = Object.keys(byFood).map(k => byFood[k]).sort((a, b) => b.kcal - a.kcal);
+      const main = top.slice(0, top.length > 1 && top[1].kcal * 4 >= kcal ? 2 : 1).map(x => cap(x.label.toLowerCase()));
+      // Estimated entries: AI estimates, and components of a dish that was not weighed.
+      const estKcal = es.reduce((a, e) => a + ((e.source === 'AI est' || (e.partOf && e.weighed === false)) ? (+e.kcal || 0) : 0), 0);
       return {
         idx: g.idx, ms: g.ms, minutes, time, name, kind, usual: !!usual, summary,
         kcal, p: sum('p'), c: sum('c'), f: sum('f'),
-        estimate: es.some(e => e.source === 'AI est' || (e.partOf && e.weighed === false))
+        mainFoods: main.length === 2 ? main[0] + ' and ' + main[1].toLowerCase() : (main[0] || ''),
+        estimate: kcal > 0 && estKcal * 4 >= kcal
       };
     });
+    // A time-of-day label that would appear twice on one day says nothing: name those meals from
+    // what was eaten instead. A dish name or a matched usual has already won and is left alone.
+    const seen = {};
+    rows.forEach(r => { if (r.kind === 'time') seen[r.name] = (seen[r.name] || 0) + 1; });
+    rows.forEach(r => { if (r.kind === 'time' && seen[r.name] > 1 && r.mainFoods) { r.name = r.mainFoods; r.kind = 'foods'; } });
+    return rows;
   }
 
   // ---- Gauge geometry: the Today arc, computed from the real numbers ----------
