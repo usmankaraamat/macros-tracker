@@ -2019,6 +2019,36 @@ group('shortFoodName — database names to readable ones');
   check('non-string input does not throw', C.shortFoodName(null) === '' && C.shortFoodName(undefined) === '');
 })();
 
+// ---- gaugeGeometry: the Today arc from real numbers ----
+group('gaugeGeometry — scale, states and arcs');
+(function(){
+  const g = C.gaugeGeometry({ floor:2900, ceil:3500, intake:3399 });
+  check('scale maximum is ceiling x 1.15', approx(g.max, 4025, 0.01), String(g.max));
+  check('corridor fractions come from the real floor and ceiling', approx(g.fFloor, 2900/4025, 1e-9) && approx(g.fCeil, 3500/4025, 1e-9));
+  check('inside the corridor', g.state === 'inside' && approx(g.fIntake, 3399/4025, 1e-9));
+  check('below the floor', C.gaugeGeometry({ floor:2900, ceil:3500, intake:1200 }).state === 'under');
+  check('exactly at the ceiling is still inside', C.gaugeGeometry({ floor:2900, ceil:3500, intake:3500 }).state === 'inside');
+  check('over the ceiling', C.gaugeGeometry({ floor:2900, ceil:3500, intake:3600 }).state === 'over');
+  check('nothing logged is empty with no progress arc', C.gaugeGeometry({ floor:2900, ceil:3500, intake:0 }).state === 'empty' && C.gaugeGeometry({ floor:2900, ceil:3500, intake:0 }).progress === '');
+  const big = C.gaugeGeometry({ floor:2900, ceil:3500, intake:5000 });
+  check('scale grows past 1.15 x ceiling when intake exceeds it, and the fill stays on the dial', big.max > 4025 && big.fIntake < 1 && big.fCeil < g.fCeil, `max ${big.max}`);
+  // geometry: the arc starts at the left end and the zone starts where the floor is
+  const startPt = C.gaugePoint(g, 0), endPt = C.gaugePoint(g, 1);
+  check('0 kcal is the left end of the dial, the maximum the right end', approx(startPt[0], 50, 1e-6) && approx(startPt[1], 170, 1e-6) && approx(endPt[0], 310, 1e-6) && approx(endPt[1], 170, 1e-6));
+  const top = C.gaugePoint(g, 0.5);
+  check('half scale is the top of the dial', approx(top[0], 180, 1e-6) && approx(top[1], 40, 1e-6));
+  check('progress path starts at the left end', g.progress.indexOf('M50 170') === 0, g.progress);
+  const zp = C.gaugePoint(g, g.fFloor);
+  check('zone path starts at the floor point', g.zone.indexOf(`M${Math.round(zp[0]*100)/100} ${Math.round(zp[1]*100)/100}`) === 0, g.zone);
+  check('a dial arc never needs the large-arc flag', /A130 130 0 0 1/.test(g.track) && /A130 130 0 0 1/.test(g.progress));
+  check('arc between two values is empty when they are equal or reversed', C.gaugeArc(g, 100, 100) === '' && C.gaugeArc(g, 200, 100) === '');
+  check('floor and ceiling labels get separate anchors when close together',
+    (function(){ const n = C.gaugeGeometry({ floor:2990, ceil:3010, intake:3000 }); return n.labels.floor.anchor === 'end' && n.labels.ceil.anchor === 'start'; })());
+  const pt = C.gaugePaceTick(g, 2000);
+  check('pace tick is a short line across the dial', pt.x1 !== pt.x2 || pt.y1 !== pt.y2);
+  check('degenerate corridor does not throw or produce NaN', !/NaN/.test(JSON.stringify(C.gaugeGeometry({ floor:0, ceil:0, intake:0 }))));
+})();
+
 // ---- summary ----
 const sum = document.getElementById('summary');
 sum.className = failed === 0 ? 'allpass' : 'anyfail';

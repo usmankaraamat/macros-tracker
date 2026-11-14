@@ -342,6 +342,55 @@
     });
   }
 
+  // ---- Gauge geometry: the Today arc, computed from the real numbers ----------
+  // A half-circle dial, 0 kcal at the left end, the scale maximum at the right. The scale
+  // maximum is the ceiling x 1.15 so a breach is always visible past the corridor, and it grows
+  // when intake passes that (x 1.04) so the fill never runs off the end. Pure: the caller draws.
+  //   o = {floor, ceil, intake, cx, cy, r}   (cx, cy, r default to the 360x190 viewBox)
+  const GAUGE_HEADROOM = 1.15;
+  function gaugeGeometry(o) {
+    const floor = +o.floor || 0, ceil = +o.ceil || 0, intake = Math.max(0, +o.intake || 0);
+    const cx = o.cx == null ? 180 : +o.cx, cy = o.cy == null ? 170 : +o.cy, r = o.r == null ? 130 : +o.r;
+    const max = Math.max(ceil * GAUGE_HEADROOM, intake * 1.04, 1);
+    const geo = { cx, cy, r, max, floor, ceil, intake };
+    geo.fFloor = gaugeFrac(geo, floor); geo.fCeil = gaugeFrac(geo, ceil); geo.fIntake = gaugeFrac(geo, intake);
+    geo.state = intake < 1 ? 'empty' : intake < floor ? 'under' : intake <= ceil ? 'inside' : 'over';
+    geo.track = gaugeArc(geo, 0, max);
+    geo.zone = gaugeArc(geo, floor, ceil);
+    geo.progress = gaugeArc(geo, 0, intake);
+    // The floor and ceiling ticks cross the band; their numbers sit just outside it. When the
+    // two labels would collide (a narrow corridor) the floor's runs left and the ceiling's right.
+    const tick = v => { const f = gaugeFrac(geo, v), a = gaugePoint(geo, f, r - 15), b = gaugePoint(geo, f, r + 15); return { x1: a[0], y1: a[1], x2: b[0], y2: b[1] }; };
+    const lab = v => { const p = gaugePoint(geo, gaugeFrac(geo, v), r + 24); return { x: p[0], y: p[1] + 4, anchor: p[0] < cx - 12 ? 'end' : p[0] > cx + 12 ? 'start' : 'middle' }; };
+    geo.ticks = { floor: tick(floor), ceil: tick(ceil) };
+    geo.labels = { floor: lab(floor), ceil: lab(ceil) };
+    if (Math.hypot(geo.labels.floor.x - geo.labels.ceil.x, geo.labels.floor.y - geo.labels.ceil.y) < 56) {
+      geo.labels.floor.anchor = 'end'; geo.labels.ceil.anchor = 'start';
+      geo.labels.floor.x -= 4; geo.labels.ceil.x += 4;
+    }
+    return geo;
+  }
+  function gaugeFrac(geo, kcal) { return Math.max(0, Math.min(1, (+kcal || 0) / geo.max)); }
+  // Point on the dial at fraction f (0 = left end, 1 = right end), at radius `rad`.
+  function gaugePoint(geo, f, rad) {
+    const a = Math.PI * (1 - f), rr = rad == null ? geo.r : rad;
+    return [geo.cx + rr * Math.cos(a), geo.cy - rr * Math.sin(a)];
+  }
+  const gaugeR2 = n => Math.round(n * 100) / 100;
+  // SVG path along the dial from kcal v0 to v1 ('' when there is nothing to draw). The dial is a
+  // half circle, so no arc here ever exceeds 180 degrees and the large-arc flag is always 0.
+  function gaugeArc(geo, v0, v1) {
+    const f0 = gaugeFrac(geo, v0), f1 = gaugeFrac(geo, v1);
+    if (!(f1 > f0)) return '';
+    const p0 = gaugePoint(geo, f0), p1 = gaugePoint(geo, f1);
+    return `M${gaugeR2(p0[0])} ${gaugeR2(p0[1])} A${geo.r} ${geo.r} 0 0 1 ${gaugeR2(p1[0])} ${gaugeR2(p1[1])}`;
+  }
+  // The pace tick: a short radial line across the dial at where the meal plan says you should be.
+  function gaugePaceTick(geo, kcal) {
+    const f = gaugeFrac(geo, kcal), a = gaugePoint(geo, f, geo.r - 12), b = gaugePoint(geo, f, geo.r + 12);
+    return { x1: gaugeR2(a[0]), y1: gaugeR2(a[1]), x2: gaugeR2(b[0]), y2: gaugeR2(b[1]) };
+  }
+
   // A day that reports zero fat AND zero carbs against real calories did not measure
   // them — it is a kcal/protein-only import. Averaging those zeros in reports fat and
   // carbs as if they had been observed, which is how 21 imported days can quietly
@@ -2843,7 +2892,7 @@
   };
 
   return {
-    nutrientsFrom, resolvePTarget, capGrams, computeEntry, mineRepeats, groupMeals, mealRows, mealTimeLabel, shortFoodName, MEAL_GAP_MIN, macrosComplete,
+    nutrientsFrom, resolvePTarget, capGrams, computeEntry, mineRepeats, gaugeGeometry, gaugeFrac, gaugePoint, gaugeArc, gaugePaceTick, GAUGE_HEADROOM, groupMeals, mealRows, mealTimeLabel, shortFoodName, MEAL_GAP_MIN, macrosComplete,
     corridorDrift, DRIFT_MIN_DAYS, singularise,
     completeMacros, macroKcal, KCAL_PER_G,
     solveFridge, budgetCombos, scoreFood, rankFoods, defaultSelection, proteinFix, weightTrend, robustWeightTrend,
