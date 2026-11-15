@@ -422,5 +422,63 @@ function validWeek(w, sessions, n, label) {
   ok(all.days.filter(d => d.train).length === 4, 'default (all seven days) still plans four days');
 }
 
+// ---- App glue: settings form, days-since rows, swap ------------------------------------
+{
+  const d = P.appSettings(null);
+  ok(d.ok, 'app settings: nothing stored is valid', d.errors);
+  eq(d.settings.priorities, ['chest', 'lats', 'sideDelts'], 'app settings: default priorities');
+  eq(d.settings.availableWeekdays, ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], 'app settings: default weekdays Mon to Fri');
+  ok(d.config.restMode === 'lighter' && d.config.sessionMinutes === 75 && d.config.daysPerWeek.preferred === 4,
+     'app settings: lighter, 75 min, 4 days', d.config);
+  eq(d.config.availableWeekdays, ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], 'app settings: engine config gets the weekdays');
+  const order = P.appSettings({ availableWeekdays: ['Fri', 'Mon'] });
+  eq(order.settings.availableWeekdays, ['Mon', 'Fri'], 'app settings: weekdays are put in week order');
+  const bad = (s, re, name) => { const r = P.appSettings(s); ok(!r.ok && r.errors.some(x => re.test(x)), name, r.errors); };
+  bad({ priorities: ['chest', 'chest'] }, /once/, 'app settings: a duplicate priority is refused');
+  bad({ priorities: ['quads'] }, /cannot be a priority/, 'app settings: a leg muscle is refused as a priority');
+  bad({ priorities: [] }, /at least one/, 'app settings: no priority is refused');
+  bad({ priorities: ['chest', 'lats', 'sideDelts', 'biceps'] }, /at most three/, 'app settings: four priorities are refused');
+  bad({ daysPerWeek: 6 }, /3, 4 or 5/, 'app settings: 6 days a week is refused');
+  bad({ availableWeekdays: [] }, /at least one weekday/, 'app settings: no weekdays is refused');
+  bad({ availableWeekdays: ['Mon', 'Tue'] }, /at least 3/, 'app settings: two weekdays for 3+ days is refused');
+  bad({ sessionMinutes: 10 }, /20 to 240/, 'app settings: a 10-minute session is refused');
+  bad({ restMode: 'nap' }, /rest day is due/, 'app settings: an unknown rest mode is refused');
+  ok(P.appSettings({ priorities: ['lats', '', null] }).settings.priorities.length === 1, 'app settings: blank priority slots are dropped');
+
+  const h = history(T);
+  const t = P.planToday({ sessions: h, catalogue: CAT, today: T, config: d.config });
+  const rows = P.daysSinceRows(t.state, d.config);
+  eq(rows.slice(0, 4).map(r => r.label), ['Chest', 'Lats', 'Side delts', 'Legs'], 'days since: priorities in order, then legs');
+  ok(rows.every(r => ['bad', 'warn', 'ok', 'info'].indexOf(r.tone) >= 0 && r.width > 0 && r.width <= 1), 'days since: tones and widths are in range', rows);
+  const chest = t.state.muscles.chest;
+  ok(rows[0].days === chest.daysSince, 'days since: chest row reads the week state', { row: rows[0], state: chest.daysSince });
+  const legsRow = rows[3];
+  const legMax = Math.max(t.state.muscles.quads.daysSince, t.state.muscles.hamstrings.daysSince);
+  ok(legsRow.days === legMax, 'days since: legs is the later of quads and hamstrings', { row: legsRow, legMax });
+  ok(rows.slice(4).every(r => r.behind >= 1), 'days since: extra rows are muscles behind their aim', rows.slice(4));
+  const empty = P.planToday({ sessions: [], catalogue: CAT, today: T, config: d.config });
+  const er = P.daysSinceRows(empty.state, d.config);
+  ok(er[0].days === null && er[0].tone === 'info' && er[0].width === 1, 'days since: never trained reads as overdue', er[0]);
+
+  // The first weekday after T whose session has an upper-body lift (T itself is legs only).
+  let item = null;
+  for (let i = 0; i < 5 && !item; i++) {
+    const tt = P.planToday({ sessions: h, catalogue: CAT, today: add(T, i), config: d.config });
+    item = tt.session.items.filter(x => x.block !== 'legs')[0] || null;
+    if (item) Object.assign(t, tt);
+  }
+  ok(!!item, 'swap: there is an upper-body item to swap');
+  if (item) {
+    const alts = P.alternatives(item.id, { index: t.index, state: t.state, readiness: t.readiness, config: d.config, model: t.model }, 3);
+    ok(alts.length > 0, 'swap: the item has alternatives', alts);
+    const s = P.swapItem(item, alts[0].id, { state: t.state, config: d.config });
+    ok(s.id === alts[0].id && s.sets === item.sets && s.prescription.rirCap === item.prescription.rirCap && s.muscle === item.muscle,
+       'swap: same sets, cap and muscle, new lift', s);
+    ok(s.swappedFrom.id === item.id && /swapped in for/.test(s.reasonText), 'swap: remembers what it replaced', s.reasonText);
+    ok(item.id !== s.id, 'swap: the original item is not mutated');
+    ok(P.swapItem(item, 'no-such-lift', { state: t.state, config: d.config }) === null, 'swap: an unknown lift returns null');
+  }
+}
+
 console.log(`planner tests: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

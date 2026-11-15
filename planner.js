@@ -1206,7 +1206,85 @@
              note: 'Outcomes on trained days only. Small groups: read as a direction, not a finding.' };
   }
 
+  // =====================================================================================
+  // 13. App glue (pure): the Settings form's values, the card's "days since" rows, a swap
+  // =====================================================================================
+  // What the app stores in targets.planner. The engine's own defaults differ on purpose
+  // (restMode 'rest', all seven weekdays); the app passes these explicitly.
+  const APP_DEFAULTS = { priorities: ['chest', 'lats', 'sideDelts'], daysPerWeek: 4,
+    availableWeekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], restMode: 'lighter', sessionMinutes: 75 };
+  // Muscles the Settings form offers as priorities. Leg muscles are not offered in this pass.
+  const PRIORITY_CHOICES = ['chest', 'lats', 'upperBack', 'frontDelts', 'sideDelts', 'rearDelts', 'triceps', 'biceps'];
+  // stored: the targets.planner object (or nothing). Returns {ok, errors, settings, config}:
+  // settings = the friendly values with app defaults filled in; config = the engine config
+  // after validateConfig. A bad value is reported, never silently replaced.
+  function appSettings(stored) {
+    const s = Object.assign({}, APP_DEFAULTS, isObj(stored) ? stored : {});
+    s.priorities = Array.isArray(s.priorities) ? s.priorities.filter(p => p != null && p !== '') : [];
+    s.availableWeekdays = Array.isArray(s.availableWeekdays) ? WEEKDAY.filter(d => s.availableWeekdays.indexOf(d) >= 0) : [];
+    s.daysPerWeek = +s.daysPerWeek;
+    s.sessionMinutes = +s.sessionMinutes;
+    const e = [];
+    if (!s.priorities.length) e.push('Pick at least one priority muscle.');
+    if (s.priorities.length > 3) e.push('Pick at most three priority muscles.');
+    s.priorities.forEach(p => { if (PRIORITY_CHOICES.indexOf(p) < 0) e.push(`${LABEL[p] || p} cannot be a priority here.`); });
+    if (new Set(s.priorities).size !== s.priorities.length) e.push('Each priority muscle can be picked once.');
+    if (!(Number.isInteger(s.daysPerWeek) && s.daysPerWeek >= 3 && s.daysPerWeek <= 5)) e.push('Days per week must be 3, 4 or 5.');
+    if (!s.availableWeekdays.length) e.push('Tick at least one weekday you can train on.');
+    else if (Number.isInteger(s.daysPerWeek) && s.availableWeekdays.length < Math.min(3, s.daysPerWeek)) e.push(`Tick at least ${Math.min(3, s.daysPerWeek)} weekdays.`);
+    const v = validateConfig({ priorities: s.priorities, daysPerWeek: { min: 3, max: 5, preferred: s.daysPerWeek },
+      availableWeekdays: s.availableWeekdays, restMode: s.restMode, sessionMinutes: s.sessionMinutes });
+    // The engine's own checks still run; its messages are reworded where the form has a field.
+    const own = e.length;
+    v.errors.forEach(x => {
+      if (/^sessionMinutes/.test(x)) e.push('Session length must be 20 to 240 minutes.');
+      else if (/^restMode/.test(x)) e.push('Choose what to do when a rest day is due.');
+      else if (!own || !/priorit|daysPerWeek|availableWeekdays/.test(x)) e.push(x);
+    });
+    return { ok: e.length === 0, errors: e, settings: s, config: v.config };
+  }
+  // The card's "days since trained" list: the priority muscles in order, legs (the later of
+  // quads and hamstrings), then any other scheduled muscle behind its aim. tone: 'bad' not yet
+  // recovered, 'warn' recovered but recent, 'ok' 4 to 10 days, 'info' longer (overdue).
+  // width is the bar length, 21+ days = full.
+  function daysSinceRows(state, config) {
+    const cfg = resolveConfig(config);
+    const rows = [], seen = {};
+    const row = (label, days, minGap, behind) => {
+      const tone = days == null ? 'info' : days < minGap ? 'bad' : days < 4 ? 'warn' : days <= 10 ? 'ok' : 'info';
+      rows.push({ label: label, days: days, tone: tone, width: days == null ? 1 : Math.max(0.04, Math.min(1, days / 21)), behind: behind });
+    };
+    cfg.priorities.forEach(p => {
+      const m = state.muscles[p.muscle]; if (!m) return;
+      seen[p.muscle] = 1;
+      row(m.label, m.daysSince, m.minGap, m.deficit);
+    });
+    const legs = LEG_MUSCLES.map(g => state.muscles[g]);
+    const legDays = legs.some(m => m.daysSince == null) ? null : Math.max.apply(null, legs.map(m => m.daysSince));
+    LEG_MUSCLES.forEach(g => { seen[g] = 1; });
+    row('Legs', legDays, cfg.legBlockGapDays, r1(legs.reduce((a, m) => a + m.deficit, 0)));
+    MUSCLES.forEach(g => {
+      const m = state.muscles[g];
+      if (seen[g] || m.kind === 'none' || !(m.deficit >= 1)) return;
+      row(m.label, m.daysSince, m.minGap, m.deficit);
+    });
+    return rows;
+  }
+  // Replace one item of a generated session with another lift for the same day: same sets,
+  // same block and same effort cap, the load and reps prescribed for the new lift.
+  function swapItem(item, altId, ctx) {
+    const cfg = resolveConfig(ctx.config);
+    const l = ctx.state.lifts[altId];
+    if (!l) return null;
+    const rx = prescribe(l, cfg, item.prescription.rirCap, item.sets, item.block === 'legs');
+    return Object.assign({}, item, { id: l.id, name: l.name, pattern: l.info.pattern, movement: l.info.movement,
+      equipment: l.info.equipment, prescription: rx, swappedFrom: { id: item.id, name: item.name },
+      reasonText: `swapped in for ${item.name}; ` + liftReasonText(l, item.muscle, null) });
+  }
+
   return {
+    APP_DEFAULTS: APP_DEFAULTS, PRIORITY_CHOICES: PRIORITY_CHOICES, appSettings: appSettings,
+    daysSinceRows: daysSinceRows, swapItem: swapItem, weekday: weekday,
     DEFAULT_CONFIG: DEFAULT_CONFIG, validateConfig: validateConfig, resolveConfig: resolveConfig,
     describeLift: describeLift, inferEquipment: inferEquipment, movementOf: movementOf,
     normalizeSessions: normalizeSessions, weightSeries: weightSeries, buildIndex: buildIndex, liftState: liftState,
