@@ -2220,3 +2220,51 @@ details.meal > summary::before { margin-right: 0; }
 
 /* The gauge number: Archivo, condensed along its width axis as in the mock-up. */
 .gauge-card .cor-val { font-weight: 800; font-stretch: 88%; letter-spacing: -.02em; }
+
+/* ---- Readiness strip and card (coach.js), scoped to #tabLift so Today is untouched, from specs/mockups/readiness-examples.html ---- */
+#tabLift .rd { margin-bottom: var(--sp-3); }
+#tabLift button.rd-strip {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--tap); margin: 0;
+  padding: 12px 14px; border-radius: 14px; text-align: left; font: inherit; letter-spacing: 0;
+  background: var(--c-card); border: 1px solid var(--c-line); color: var(--c-ink);
+}
+#tabLift button.rd-strip:hover:not(:disabled), #tabLift button.rd-strip:active:not(:disabled) { background: var(--c-card); filter: brightness(1.15); }
+#tabLift .rd-strip b { font-family: var(--display); font-size: var(--fs-3); font-weight: 700; }
+#tabLift .rd-strip span { margin-left: auto; font-size: var(--fs-2); font-weight: 500; opacity: .8; white-space: nowrap; }
+#tabLift .rd-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--c-mut); }
+#tabLift button.rd-strip.rd-ok, #tabLift button.rd-strip.rd-ok:hover:not(:disabled), #tabLift button.rd-strip.rd-ok:active:not(:disabled), #tabLift .rc.rd-ok { background: #0f2a1c; border-color: #1f5137; }
+#tabLift button.rd-strip.rd-warn, #tabLift button.rd-strip.rd-warn:hover:not(:disabled), #tabLift button.rd-strip.rd-warn:active:not(:disabled), #tabLift .rc.rd-warn { background: #2c2208; border-color: #5a4514; }
+#tabLift button.rd-strip.rd-info, #tabLift button.rd-strip.rd-info:hover:not(:disabled), #tabLift button.rd-strip.rd-info:active:not(:disabled), #tabLift .rc.rd-info { background: #10233a; border-color: #23466e; }
+#tabLift button.rd-strip.rd-bad, #tabLift button.rd-strip.rd-bad:hover:not(:disabled), #tabLift button.rd-strip.rd-bad:active:not(:disabled), #tabLift .rc.rd-bad { background: #34141a; border-color: #6a2630; }
+#tabLift button.rd-strip.rd-off, #tabLift button.rd-strip.rd-off:hover:not(:disabled), #tabLift button.rd-strip.rd-off:active:not(:disabled), #tabLift .rc.rd-off { background: var(--c-card); border-color: var(--c-line); }
+#tabLift .rd-ok .rd-dot { background: var(--c-ok); }   #tabLift .rd-ok b { color: #b9f3d3; }
+#tabLift .rd-warn .rd-dot { background: var(--c-warn); } #tabLift .rd-warn b { color: #ffe1a3; }
+#tabLift .rd-info .rd-dot { background: #7fb6f0; }     #tabLift .rd-info b { color: #cfe5ff; }
+#tabLift .rd-bad .rd-dot { background: var(--c-bad); }  #tabLift .rd-bad b { color: #ffc9cd; }
+#tabLift .rd .rc { margin-top: var(--sp-2); border-radius: 18px; padding: 16px; border-width: 1px; border-style: solid; color: var(--c-ink); }
+#tabLift .rd .lab { display: flex; justify-content: space-between; font-size: var(--fs-1); font-weight: 500; opacity: .75; }
+#tabLift .rd .say { font-size: var(--fs-2); line-height: 1.4; margin-top: 6px; color: #e3e9e4; }
+#tabLift .rd .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+#tabLift .rd .facts div { background: rgba(255,255,255,.07); border-radius: 10px; padding: 8px 10px; font-size: var(--fs-1); color: #cdd6cf; overflow-wrap: anywhere; }
+#tabLift .rd .facts b { display: block; font-family: var(--display); font-size: var(--fs-4); font-weight: 700; color: var(--c-ink); }
+#tabLift .rd .sub { font-size: var(--fs-1); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; opacity: .7; margin: 16px 0 8px; }
+#tabLift .rd .mus { display: grid; grid-template-columns: auto 1fr auto; gap: 5px 10px; align-items: center; font-size: var(--fs-1); }
+#tabLift .rd .mus > span:nth-child(3n) { font-family: var(--mono); color: var(--c-mut); text-align: right; }
+#tabLift .rd-bar { height: 6px; border-radius: 6px; background: rgba(255,255,255,.1); display: block; position: relative; overflow: hidden; }
+#tabLift .rd-bar::after { content: ""; position: absolute; inset: 0; width: var(--w); border-radius: 6px; background: var(--c-mut); }
+#tabLift .rd-bar.bad::after { background: var(--c-bad); } #tabLift .rd-bar.warn::after { background: var(--c-warn); }
+#tabLift .rd-bar.ok::after { background: var(--c-ok); }   #tabLift .rd-bar.info::after { background: #7fb6f0; }
+#tabLift .rd .chg { list-style: none; padding: 0; margin: 0; font-size: var(--fs-2); }
+#tabLift .rd .chg li { padding: 6px 0; border-top: 1px solid rgba(255,255,255,.09); display: flex; gap: 8px; overflow-wrap: anywhere; }
+#tabLift .rd .chg li b { font-family: var(--mono); font-size: var(--fs-1); font-weight: 600; padding: 2px 6px; border-radius: 6px; background: rgba(255,255,255,.1); align-self: flex-start; white-space: nowrap; }
+#tabLift .rd .btns { display: flex; gap: 8px; margin-top: 14px; }
+#tabLift .rd .btns button { flex: 1; min-height: var(--tap); }
+#tabLift .rd-feel { display: flex; gap: 8px; }
+#tabLift .rd-feel button { flex: 1; min-height: 40px; }
+#tabLift .rd-mins { margin-top: 8px; font-size: var(--fs-1); color: var(--c-mut); }
+#tabLift .xc-swap { margin-top: var(--sp-2); }
+#tabLift .xc-swap > summary { min-height: 32px; font-size: var(--fs-1); color: var(--c-mut); cursor: pointer; }
+#tabLift .xc-swap-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+#tabLift .xc.xc-done .xc-n::after { content: "✓"; color: var(--c-ok); font-weight: 700; }
+#tabLift .xc-gen .xc-h { align-items: flex-start; }
+#tabLift .xc-gen .xc-t { flex: 0 1 52%; white-space: normal; text-align: right; }

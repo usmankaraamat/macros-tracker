@@ -47,6 +47,20 @@ const WEEKDAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 function weekdayMon(ds){ const p=ds.split('-').map(Number); return (new Date(Date.UTC(p[0],p[1]-1,p[2])).getUTCDay()+6)%7; }
 function splitForDate(ds){ return TRAIN.split[weekdayMon(ds)] || 'Rest'; }
 function isTrainingDay(ds){ const s=splitForDate(ds); return !!s && s.trim().toLowerCase()!=='rest'; }
+// Session planner settings (planner.js), stored raw as targets.planner so they sync with the
+// rest of the bundle. null = the app defaults. A stored value that no longer validates (an
+// older device, a hand-edited backup) falls back to the defaults rather than breaking Lift.
+let PLANNER_SETTINGS = null;
+function plannerSettings(){
+  const r = LedgerPlanner.appSettings(PLANNER_SETTINGS);
+  return r.ok ? r : Object.assign(LedgerPlanner.appSettings(null), { fallback: true, storedErrors: r.errors });
+}
+// Is this a day he trains on, for the morning greeting? The old weekly split wins when it names
+// any training day; when it is all "Rest" (unused), the planner's weekdays decide instead.
+function greetingTrainingDay(ds){
+  if (TRAIN.split.some(s => LedgerCore.isTrainingSplit(s))) return isTrainingDay(ds);
+  return plannerSettings().settings.availableWeekdays.indexOf(WEEKDAYS[weekdayMon(ds)]) >= 0;
+}
 // Today's corridor offset: cycled by day type when enabled, else the flat goal offset.
 function effectiveOffset(){
   if (TRAIN.cycle && GOAL.mode!=='off') return isTrainingDay(ACTIVE_DATE) ? (+TRAIN.trainOffset||0) : (+TRAIN.restOffset||0);
@@ -112,13 +126,14 @@ function loadTargets(){
                         // Absent in blobs written before auto-switch existed — default it ON
                         // rather than silently shipping the feature disabled.
                         autoLift: tn.autoLift !== false }; } }
+            if (t.planner && typeof t.planner === 'object') PLANNER_SETTINGS = t.planner;
     const pn = JSON.parse(localStorage.getItem('ledger_pen')||'null');
     // pn.oilK / pn.oilF may still be present from before the oil tax was dropped; ignored.
     if (pn){ INFLATE = 1 + (+pn.k||0)/100; DEDUCT = 1 - (+pn.p||0)/100; }
   } catch(e){}
 }
 function saveTargets(){
-  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,trendStart:TREND_START,goalTargets:GOAL_TARGETS,goalTargetDate:GOAL_TARGET_DATE,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN,ternDefaults:TERN_DEFAULTS})); } catch(e){}
+  try { localStorage.setItem('ledger_targets', JSON.stringify({floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,trendStart:TREND_START,goalTargets:GOAL_TARGETS,goalTargetDate:GOAL_TARGET_DATE,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN,planner:PLANNER_SETTINGS,ternDefaults:TERN_DEFAULTS})); } catch(e){}
   stampTargets(); scheduleSync();              // a genuine local edit — wins LWW until someone edits later
 }
 function savePens(){

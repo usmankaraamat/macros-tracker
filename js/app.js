@@ -37,9 +37,10 @@ function organiseSettingsPanel(){
   const detailBy = prefix => tail.find(el => el.tagName === 'DETAILS' &&
     el.querySelector(':scope > summary')?.textContent.trim().startsWith(prefix));
   const training = detailBy('Training schedule');
+  const planner = detailBy('Workout planner');
   const penalties = detailBy('How estimates are adjusted');
   const keyHelp = detailBy('Where to get personal API keys');
-  const elsewhere = new Set([training, penalties, keyHelp].filter(Boolean));
+  const elsewhere = new Set([training, planner, penalties, keyHelp].filter(Boolean));
   const goal = tail.filter(el => !elsewhere.has(el));
   const backup = document.querySelector('#todayOnly > details');
 
@@ -70,7 +71,7 @@ function organiseSettingsPanel(){
     guide,
     group('Calories & goals', 'Choose a goal or set your own daily range.', goal, false),
     group('Body profile', 'Helps estimate how many calories you burn.', body, false),
-    group('Training', 'Optional schedule for workout features.', [training], false),
+    group('Training', 'Optional schedule for workout features.', [training, planner], false),
     group('Food logging & AI', 'Included searches, estimates, and optional API keys.', [...api, penalties, keyHelp], false),
     group('Account & sync', 'Use the same data on your devices.', sync, false),
     group('Review & privacy', 'Send an idea and choose whether to share anonymous counts.', review, false),
@@ -516,7 +517,7 @@ function fillTargetInputs(){
   document.getElementById('penK').value   = Math.round((INFLATE-1)*100);
   document.getElementById('penP').value   = Math.round((1-DEDUCT)*100);
   resetMacroFill();          // the boxes now show saved state, none of it inferred
-  fillMealPlan(); fillTrain();
+  fillMealPlan(); fillTrain(); fillPlanner();
 }
 
 // ---- Auto-completing the macro split --------------------------------------
@@ -712,6 +713,47 @@ document.getElementById('saveTrain').onclick = ()=>{
   }
   setStatus(st, msg, 'good');
 };
+// Workout planner settings (planner.js). The form is read into the friendly shape stored as
+// targets.planner and checked by LedgerPlanner.appSettings (which runs validateConfig); a bad
+// value is refused with its message and nothing is saved.
+function fillPlanner(){
+  const sel = document.getElementById('plPrio1'); if (!sel) return;
+  const ps = plannerSettings().settings;
+  const opts = (blank) => (blank ? '<option value="">none</option>' : '') + LedgerPlanner.PRIORITY_CHOICES
+    .map(g => `<option value="${g}">${escapeHtml(LedgerCore.MUSCLE_LABEL[g])}</option>`).join('');
+  ['plPrio1','plPrio2','plPrio3'].forEach((id, i) => {
+    const el = document.getElementById(id);
+    el.innerHTML = opts(i > 0);
+    el.value = ps.priorities[i] || '';
+  });
+  document.getElementById('plDays').value = String(ps.daysPerWeek);
+  document.getElementById('plMinutes').value = ps.sessionMinutes;
+  document.getElementById('plRestMode').value = ps.restMode;
+  document.getElementById('plWeekdays').innerHTML = WEEKDAYS.map(d =>
+    `<label class="pill"><input type="checkbox" data-plday="${d}" hidden${ps.availableWeekdays.indexOf(d) >= 0 ? ' checked' : ''}> ${d}</label>`).join('');
+}
+function readPlannerForm(){
+  return {
+    priorities: ['plPrio1','plPrio2','plPrio3'].map(id => document.getElementById(id).value).filter(Boolean),
+    daysPerWeek: +document.getElementById('plDays').value,
+    availableWeekdays: Array.from(document.querySelectorAll('[data-plday]')).filter(cb => cb.checked).map(cb => cb.dataset.plday),
+    restMode: document.getElementById('plRestMode').value,
+    sessionMinutes: +document.getElementById('plMinutes').value
+  };
+}
+document.getElementById('savePlanner').onclick = ()=>{
+  const st = document.getElementById('plannerStatus');
+  const r = LedgerPlanner.appSettings(readPlannerForm());
+  if (!r.ok){ setStatus(st, 'Not saved. ' + r.errors.join(' '), 'bad'); return; }
+  PLANNER_SETTINGS = r.settings;
+  saveTargets(); fillPlanner(); render();
+  const s = r.settings;
+  setStatus(st, `Saved · ${s.priorities.map(g => LedgerCore.MUSCLE_LABEL[g]).join(' > ')} · ${s.daysPerWeek} days a week on ${s.availableWeekdays.join(', ')} · ${s.sessionMinutes} min.`, 'good');
+};
+document.getElementById('resetPlanner').onclick = ()=>{
+  PLANNER_SETTINGS = null; saveTargets(); fillPlanner(); render();
+  setStatus(document.getElementById('plannerStatus'), 'Planner defaults restored: chest > lats > side delts, 4 days a week, Monday to Friday, lighter session instead of rest, 75 min.', 'good');
+};
 document.getElementById('savePens').onclick = ()=>{
   const st = document.getElementById('penStatus');
   const k = +document.getElementById('penK').value, p = +document.getElementById('penP').value;
@@ -749,10 +791,11 @@ document.getElementById('exportBtn').onclick = async ()=>{
   allDays(true).forEach(d => { days[d.date] = d.ledger; });
   days[VIEW_DATE] = ledger;                       // the on-screen day's live state wins
   const payload = { exported: dateStr(), version: 3, schema:DATA_SCHEMA_VERSION,
-    targets: {floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,trendStart:TREND_START,goalTargets:GOAL_TARGETS,goalTargetDate:GOAL_TARGET_DATE,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN,ternDefaults:TERN_DEFAULTS},
+    targets: {floor:FLOOR_M,ceil:CEIL_M,pCfg:P_CFG,p:Math.round(P_TARGET),cCap:C_CAP,fCap:F_CAP,maint:MAINT,profile:PROFILE,trendStart:TREND_START,goalTargets:GOAL_TARGETS,goalTargetDate:GOAL_TARGET_DATE,goal:GOAL,mealPlan:MEAL_PLAN,train:TRAIN,planner:PLANNER_SETTINGS,ternDefaults:TERN_DEFAULTS},
     pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100)},
     weights: weightsMap(), measures: measureMap(), mMeta: measureMeta(), templates: templates(),
     supps: supps(), suppLog: suppLog(),
+    nudges: nudgeLog(), nMeta: nudgeLogMeta(),
     workouts: allWorkouts(), wkMeta: workoutMeta(), exercises: exerciseCatalog(),
     tombstones:entryTombstones(), clears:dayClears(),
     days, date: ACTIVE_DATE, ledger, totals: totals() };   // date/ledger kept for v1 compat
@@ -823,6 +866,8 @@ document.getElementById('importFile').onchange = (ev)=>{
           else if (+data.targets.fMax) F_CAP={mode:'g', val:+data.targets.fMax};
           if (Array.isArray(data.targets.ternDefaults)) TERN_DEFAULTS=data.targets.ternDefaults.slice(0,3)
             .filter(x=>x&&typeof x.name==='string'&&x.base&&typeof x.base==='object');
+          // Planner settings come back only when they still validate.
+          if (data.targets.planner && LedgerPlanner.appSettings(data.targets.planner).ok) PLANNER_SETTINGS = data.targets.planner;
           saveTargets();
           if(typeof resetTernToDefaults==='function')resetTernToDefaults();
         }
@@ -856,6 +901,13 @@ document.getElementById('importFile').onchange = (ev)=>{
           const meta = suppLogMeta(); const now = new Date().toISOString();
           Object.keys(data.suppLog).forEach(d=>{ if(!meta[d]) meta[d]=now; });
           saveSuppLog(map, meta);
+        }
+        // Planner nudge records: per day, local wins on a clash, like the dose log.
+        if (data.nudges && typeof data.nudges === 'object'){
+          const map = Object.assign({}, data.nudges, nudgeLog());
+          const meta = nudgeLogMeta(); const now = new Date().toISOString();
+          Object.keys(data.nudges).forEach(d=>{ if(!meta[d]) meta[d]=(data.nMeta&&data.nMeta[d])||now; });
+          saveNudgeLog(map, meta);
         }
         // Training sessions restore per-day, same as the food ledger: a day already on
         // this device wins, so a restore fills gaps rather than overwriting newer work.

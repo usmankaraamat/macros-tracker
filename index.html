@@ -248,6 +248,32 @@
     </div>
   </details>
 
+  <!-- The session planner (planner.js) reads these. Stored in the targets bundle, so they sync. -->
+  <details>
+    <summary>Workout planner</summary>
+    <div style="margin-top:10px">
+      <div class="tactical">Lift → Log today uses these to say whether to train and to write today's session from your own lifts. Rules only, no AI.</div>
+      <div class="targets-grid" style="margin-top:10px">
+        <div><label for="plPrio1">First priority muscle</label><select id="plPrio1"></select></div>
+        <div><label for="plPrio2">Second priority (optional)</label><select id="plPrio2"></select></div>
+        <div><label for="plPrio3">Third priority (optional)</label><select id="plPrio3"></select></div>
+        <div><label for="plDays">Days a week</label><select id="plDays"><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
+        <div><label for="plMinutes">Session length (minutes)</label><input type="number" id="plMinutes" min="20" max="240" step="5" inputmode="numeric"></div>
+        <div><label for="plRestMode">When a rest day is due</label><select id="plRestMode">
+          <option value="lighter">Suggest a lighter session</option>
+          <option value="rest">Tell me to rest</option>
+        </select></div>
+      </div>
+      <label id="plWeekdaysLabel" style="margin-top:10px">Days you can train on</label>
+      <div class="pill-row" id="plWeekdays" role="group" aria-labelledby="plWeekdaysLabel"></div>
+      <div class="footer-actions">
+        <button type="button" class="ghost" id="resetPlanner">Reset to defaults</button>
+        <button type="button" id="savePlanner">Save planner</button>
+      </div>
+      <div class="tactical" id="plannerStatus" hidden></div>
+    </div>
+  </details>
+
   <details>
     <summary>How estimates are adjusted</summary>
     <div class="targets-grid" style="margin-top:10px">
@@ -606,7 +632,9 @@
 
   <!-- ---------------------------- LOG TODAY ---------------------------- -->
   <div id="liftViewLog" role="tabpanel" aria-labelledby="liftTabLog">
-    <!-- READINESS CARD: would be inserted here. Not built; the design is undecided. -->
+    <!-- Readiness: a one-line strip (the answer), expanding to the full card. Rules only, from
+         planner.js; drawn by coach.js. -->
+    <section class="rd" id="liftReadiness" aria-label="Readiness" hidden></section>
 
     <!-- Free text in, sets out. Parsed by the grammar in core.js, not by a model. -->
     <section class="panel lift-logger">
@@ -841,6 +869,7 @@
 </div>
 
 <script src="core.js"></script>
+<script src="planner.js"></script>
 <script src="js/storage.js"></script>
 <script src="js/icons.js"></script>
 <script src="js/state.js"></script>
@@ -852,6 +881,7 @@
 <script src="js/plan.js"></script>
 <script src="js/trends.js"></script>
 <script src="js/lift.js"></script>
+<script src="js/coach.js"></script>
 <script src="js/logs.js"></script>
 <script src="js/sync.js"></script>
 <script src="js/analytics.js"></script>

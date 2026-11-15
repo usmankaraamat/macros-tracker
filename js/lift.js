@@ -478,7 +478,12 @@ function renderLiftSession(all, W){
   const el = document.getElementById('liftSession');
   const exs = w.exercises || [];
   const planned = [];
-  liftPlanDay().forEach((s, si) => (s.exercises||[]).forEach((x, xi) => {
+  // The planner's session (coach.js) replaces the calendar rows when it is today's list: by
+  // default when the calendar has nothing for the day, or after "Use this plan".
+  const coach = typeof coachPlanFor === 'function' && typeof LedgerPlanner !== 'undefined' ? coachPlanFor(VIEW_DATE) : null;
+  const coachOn = coachListActive(coach);
+  if (coachOn) coachPlannedRows(coach).forEach(r => planned.push(r));
+  else liftPlanDay().forEach((s, si) => (s.exercises||[]).forEach((x, xi) => {
     const n = planLiftName(x.name);
     const full = String(x.name||''), bare = full.replace(/\s*[—(].*$/, '').trim() || full.trim();
     planned.push({ si, xi, x, id: n.id, log: n.log, bare, note: full.slice(bare.length).replace(/^[\s—-]+/, '') });
@@ -501,7 +506,8 @@ function renderLiftSession(all, W){
   });
   exs.forEach((e, i) => { if (!used.has(i)) cards.push({ p: null, i }); });
 
-  const kindTag = p => `<span class="tag">${p.x.kind === '--' ? 'drill' : p.x.kind === 'C' ? 'comp' : 'iso'}</span>`;
+  const kindTag = p => (p.gen && p.gen.block === 'legs' ? '<span class="tag mine">leg block</span>' : '')
+    + `<span class="tag">${p.x.kind === '--' ? 'drill' : p.x.kind === 'C' ? 'comp' : 'iso'}</span>`;
   const card = ({ p, i }) => {
     const ex = i >= 0 ? exs[i] : null;
     if (ex && i === liftEditIdx) return renderLiftExEditor(ex, i);
@@ -511,12 +517,13 @@ function renderLiftSession(all, W){
     const name = p ? p.bare : ex.name;
     const right = p ? (p.x.target || '') : (m.bestE1RM ? `${m.bestE1RM.toFixed(1)} e1RM` : `${sets.length} set${sets.length===1?'':'s'}`);
     const last = (p && p.x.kind === '--') ? '' : planLastTop(p ? p.id : ex.id);
-    const todo = p ? Math.max(0, Math.min(12, planSetCount(p.x.target) - working)) : 0;
+    const todo = p ? Math.max(0, Math.min(12, (p.sets != null ? p.sets : planSetCount(p.x.target)) - working)) : 0;
     const chips = sets.map((s,si)=>
       `<button type="button" class="set-chip done${s.warmup?' warm':''}" data-set="${i}.${si}" title="Tap to toggle warm-up">${SET_TXT(s)}${s.warmup?' <span class="wu">wu</span>':''}</button>`
     ).join('') + Array.from({length: todo}, (_, k)=> `<span class="set-chip plan">set ${working + k + 1}</span>`).join('');
     const head = `<div class="xc-h"><b class="xc-n">${escapeHtml(name)}${p ? kindTag(p) : ''}</b><i class="xc-t">${escapeHtml(right)}</i></div>`
       + (p && p.note ? `<div class="xc-note">${escapeHtml(p.note)}</div>` : '')
+      + (p && p.gen ? `<div class="xc-note">${escapeHtml(p.gen.reasonText)}</div>` : '')
       + (last ? `<div class="xc-last">${escapeHtml(last)}</div>` : '');
     // A planned card is one tap to put that exercise into the logger above.
     const top = p ? `<button type="button" class="xc-add" data-plan="${p.si}:${p.xi}" title="Add ${escapeAttr(p.log)} to the logger">${head}</button>` : head;
@@ -536,10 +543,16 @@ function renderLiftSession(all, W){
         </div>
       </details>` : '';
     const done = p && todo === 0 && working > 0;
-    return `<article class="xc${p ? ' xc-planned' : ''}${done ? ' xc-done' : ''}">${top}
-      ${chips ? `<div class="xc-sets">${chips}</div>` : ''}${ex ? fatigueLine(ex) : ''}${more}</article>`;
+    const swap = p && p.gen && !working ? coachSwapHTML(coach, p.gen, p.xi) : '';
+    return `<article class="xc${p ? ' xc-planned' : ''}${p && p.gen ? ' xc-gen' : ''}${done ? ' xc-done' : ''}">${top}
+      ${chips ? `<div class="xc-sets">${chips}</div>` : ''}${ex ? fatigueLine(ex) : ''}${swap}${more}</article>`;
   };
-  el.innerHTML = cards.map(card).join('');
+  // The generated session says how long it should take and what did not fit.
+  const genHead = coachOn ? `<div class="tactical lift-session-read">Planned session · about ${coach.session.minutes} min`
+    + (coach.session.legBlock ? ' · leg block first' : '')
+    + (coach.session.dropped.length ? ` · dropped for time: ${coach.session.dropped.map(d => escapeHtml(d.name)).join(', ')}` : '') + '</div>' : '';
+  el.innerHTML = genHead + cards.map(card).join('');
+  if (coachOn) bindCoachSwaps(el, coach);
 
   if (exs.length){
     const perf=LedgerCore.sessionPerformance(w,Object.keys(all).map(d=>all[d]),{weights:W});
@@ -593,7 +606,7 @@ function renderLiftSession(all, W){
   el.querySelectorAll('[data-plan]').forEach(b=>{
     b.onclick = ()=>{
       const [si, xi] = b.dataset.plan.split(':').map(Number);
-      const p = planned.filter(q => q.si === si && q.xi === xi)[0];
+      const p = planned.filter(q => q.si === si && q.xi === xi)[0];   // si -1 = a generated row
       if (p) insertLiftName(p.log);
     };
   });
@@ -1254,6 +1267,7 @@ function renderLift(){
   setLiftPreviewData(all, W, rows);
   applyLiftSubTab();
   renderLiftPlan(); refreshLiftPlan();
+  coachPlan = null; renderCoach();          // the planner's readiness strip (coach.js)
   renderLiftChips(all); renderLiftPicker(all); renderLiftSession(all, W); renderLiftPending();
   renderLiftPreview();
   renderLiftTrends(rows); renderLiftCatalog(); renderLiftHistory(all, W);

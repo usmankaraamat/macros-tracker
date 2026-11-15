@@ -114,6 +114,11 @@ async function syncNow(){
       {days: suppLog(), meta: suppLogMeta()},
       {days: (remote && remote.suppLog) || {}, meta: (remote && remote.sMeta) || {}});
     saveSuppLog(sm.days, sm.meta);
+    // Planner nudge records: one record per day, the same per-day LWW merge.
+    const nm = LedgerCore.mergeSyncStates(
+      {days: nudgeLog(), meta: nudgeLogMeta()},
+      {days: (remote && remote.nudges) || {}, meta: (remote && remote.nMeta) || {}});
+    saveNudgeLog(nm.days, nm.meta);
     // Training sessions are one object per day — the same shape the per-day LWW merge
     // already handles, so logging legs on the phone and arms on the PC is safe.
     const km = LedgerCore.mergeWorkoutStates(
@@ -132,12 +137,13 @@ async function syncNow(){
     }
     migrateLocalData(); initFoods(); load(); updateDayLabel(); render();
     const state = { v:1, days: merged.days, meta: merged.meta,
-      targets: {floor:FLOOR_M, ceil:CEIL_M, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP, maint:MAINT, profile:PROFILE, trendStart:TREND_START, goalTargets:GOAL_TARGETS, goalTargetDate:GOAL_TARGET_DATE, goal:GOAL, mealPlan:MEAL_PLAN, train:TRAIN, ternDefaults:TERN_DEFAULTS},
+      targets: {floor:FLOOR_M, ceil:CEIL_M, pCfg:P_CFG, cCap:C_CAP, fCap:F_CAP, maint:MAINT, profile:PROFILE, trendStart:TREND_START, goalTargets:GOAL_TARGETS, goalTargetDate:GOAL_TARGET_DATE, goal:GOAL, mealPlan:MEAL_PLAN, train:TRAIN, planner:PLANNER_SETTINGS, ternDefaults:TERN_DEFAULTS},
       pen: {k:Math.round((INFLATE-1)*100), p:Math.round((1-DEDUCT)*100)},
       tUpdated: targetsStamp(),
       templates: templates(), tplUpdated: tplStamp(),
       supps: supps(), suppsUpdated: suppsStamp(),
       suppLog: sm.days, sMeta: sm.meta,
+      nudges: nm.days, nMeta: nm.meta,
       workouts: km.days, wkMeta: km.meta,
       exercises: exerciseCatalog(), exUpdated: catalogStamp(),
       tombstones:merged.tombstones||{}, clears:merged.clears||{}, schema:DATA_SCHEMA_VERSION,

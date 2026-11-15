@@ -751,7 +751,8 @@ function maybeShowBrief(){
     const yb=dayBounds()(days[0].date);
     const yMark = yt.kcal>yb.ceil?'over ceiling':(yt.kcal>=yb.floor?'in corridor ✓':'under floor');
     let msg='Good morning. ';
-    msg += isTrainingDay(ACTIVE_DATE) ? `${escapeHtml(splitForDate(ACTIVE_DATE))} day (${TRAIN.start}). ` : `Rest day. `;
+    msg += isTrainingDay(ACTIVE_DATE) ? `${escapeHtml(splitForDate(ACTIVE_DATE))} day (${TRAIN.start}). `
+      : greetingTrainingDay(ACTIVE_DATE) ? `Training day (${TRAIN.start}). ` : `Rest day. `;
     msg += CORRIDOR_AUTO
       ? `Target <b>${FLOOR}–${CEIL}</b> (TDEE ${CORRIDOR_AUTO.tdee.toLocaleString()}). `
       : `Target <b>${FLOOR}–${CEIL}</b>. `;
