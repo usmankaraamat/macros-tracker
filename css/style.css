@@ -2268,3 +2268,11 @@ details.meal > summary::before { margin-right: 0; }
 #tabLift .xc.xc-done .xc-n::after { content: "✓"; color: var(--c-ok); font-weight: 700; }
 #tabLift .xc-gen .xc-h { align-items: flex-start; }
 #tabLift .xc-gen .xc-t { flex: 0 1 52%; white-space: normal; text-align: right; }
+#tabLift .lift-week { margin-top: var(--sp-3); }
+#tabLift .lift-week > summary { min-height: var(--tap); font-weight: 600; cursor: pointer; }
+#tabLift .wk-list { list-style: none; padding: 0; margin: 0; font-size: var(--fs-2); }
+#tabLift .wk-list li { display: grid; grid-template-columns: 92px 1fr; gap: 8px; padding: 8px 0; border-top: 1px solid var(--c-line); overflow-wrap: anywhere; }
+#tabLift .wk-list li b { font-weight: 600; }
+#tabLift .wk-list li i { font-style: normal; color: var(--c-mut); }
+#tabLift .wk-list li.wk-rest span { color: var(--c-mut); }
+#tabLift .lift-week .rd-mins { margin-top: 8px; font-size: var(--fs-1); color: var(--c-mut); }

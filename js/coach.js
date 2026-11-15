@@ -205,3 +205,36 @@ function bindCoach(el, c){
     };
   });
 }
+
+// ---- This week: the next seven days from planWeek -------------------------------------
+// Collapsed under today's session. planWeek simulates several day patterns (tens to hundreds
+// of ms), so it runs only while the list is open, and again on each Lift render while open.
+function renderCoachWeek(){
+  const box = document.getElementById('liftWeek'), body = document.getElementById('liftWeekBody');
+  if (!box || !body) return;
+  if (typeof LedgerPlanner === 'undefined'){ box.hidden = true; return; }
+  box.hidden = false;
+  if (!box._bound){ box._bound = true; box.addEventListener('toggle', () => { if (box.open) renderCoachWeek(); }); }
+  if (!box.open){ body.innerHTML = ''; return; }
+  const ps = plannerSettings(), day = coachDay(VIEW_DATE);
+  let w;
+  try{
+    const input = {};
+    if (day.feel) input.feel = day.feel;
+    const intake = yesterdayIntake(VIEW_DATE);
+    if (intake) input.intake = intake;
+    w = LedgerPlanner.planWeek({ workouts: allWorkouts(), catalogue: exerciseCatalog(), weights: weightSeries(),
+      today: VIEW_DATE, config: ps.config, daysPerWeek: ps.settings.daysPerWeek, readinessInput: input });
+  }catch(e){ console.warn('planWeek failed', e); body.innerHTML = '<div class="rd-mins">The week could not be planned.</div>'; return; }
+  const rows = w.days.map(d => {
+    const label = escapeHtml(coachDateLabel(d.date));
+    if (!d.train) return `<li class="wk-rest"><b>${label}</b><span>rest</span></li>`;
+    const its = d.session.items.map(it => `${escapeHtml(it.name)} ${it.sets}×${it.prescription.reps}${it.block === 'legs' ? ' (legs)' : ''}`).join(' · ');
+    return `<li><b>${label}</b><span>${its || 'light day'} <i>· ${d.session.minutes} min</i></span></li>`;
+  }).join('');
+  const sum = ['chest', 'lats', 'sideDelts', 'quads', 'hamstrings'].filter(g => w.summary[g])
+    .map(g => `${escapeHtml(LedgerCore.MUSCLE_LABEL[g])} ${w.summary[g].planned}/${w.summary[g].aim}`).join(' · ');
+  const warn = (w.warnings||[]).filter(x => x.code === 'DAYS_REDUCED').map(x => `<div class="rd-mins">${escapeHtml(x.why)}; planned ${x.used}.</div>`).join('');
+  body.innerHTML = `<ul class="wk-list">${rows}</ul><div class="rd-mins">Planned sets: ${sum}</div>${warn}
+    <div class="rd-mins">Recomputed from what you actually log; a missed or extra day re-plans the rest.</div>`;
+}

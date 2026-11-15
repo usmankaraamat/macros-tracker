@@ -1285,7 +1285,7 @@ function renderLift(){
   setLiftPreviewData(all, W, rows);
   applyLiftSubTab();
   renderLiftPlan(); refreshLiftPlan();
-  coachPlan = null; renderCoach();          // the planner's readiness strip (coach.js)
+  coachPlan = null; renderCoach(); renderCoachWeek();   // the planner's strip and week list (coach.js)
   renderLiftChips(all); renderLiftPicker(all); renderLiftSession(all, W); renderLiftPending();
   renderLiftPreview();
   renderLiftTrends(rows); renderLiftCatalog(); renderLiftHistory(all, W);
