@@ -78,6 +78,11 @@
     timing: { warmupMin: 8, workSec: 45, restSec: { compound: 150, isolation: 90 }, changeoverSec: 60 },
     availableWeekdays: WEEKDAY.slice(),             // weekdays he can train on, e.g. ['Mon','Tue','Wed','Thu','Fri']
     restMode: 'rest',                               // 'rest' or 'lighter' (never says "rest")
+    // How "sets done this week" is counted. null: the 7 days before today (rolling). A weekday
+    // ('Mon'): sets since the most recent such day, so each calendar week starts at zero and a
+    // heavy end to last week does not count against this week's aim. Recovery is still guarded
+    // by the lift and muscle windows, which look back across the week boundary.
+    weekStart: null,
     readiness: {
       recentDays: 7,            // window for the share of exercises taken to failure
       failureShareHigh: 0.6,    // this share of rated exercises at RIR 0 = a fatigue signal
@@ -161,6 +166,7 @@
     if (!Array.isArray(c.availableWeekdays) || !c.availableWeekdays.length || c.availableWeekdays.some(d => WEEKDAY.indexOf(d) < 0))
       e.push('availableWeekdays must be a non-empty list of ' + WEEKDAY.join(', '));
     if (['rest', 'lighter'].indexOf(c.restMode) < 0) e.push('restMode must be "rest" or "lighter"');
+    if (c.weekStart != null && WEEKDAY.indexOf(c.weekStart) < 0) e.push('weekStart must be null or one of ' + WEEKDAY.join(', '));
     const s = c.setsPerLift;
     if (!(s.min >= 1) || !(s.min <= s.max) || s.max > 8) e.push('setsPerLift needs 1 <= min <= max <= 8');
     if (!(c.maxLiftsPerSession >= 1 && c.maxLiftsPerSession <= 12)) e.push('maxLiftsPerSession must be 1..12');
@@ -484,8 +490,13 @@
   function weekState(index, config, model) {
     const cfg = resolveConfig(config);
     const today = index.today;
-    const range = { from: addDays(today, -7), to: addDays(today, -1) };
-    const done = C.weeklyVolumeByMuscle(index.sessions, index.catalogue, range);
+    let range = { from: addDays(today, -7), to: addDays(today, -1) };
+    if (cfg.weekStart) {
+      const back = ((WEEKDAY.indexOf(weekday(today)) - WEEKDAY.indexOf(cfg.weekStart)) % 7 + 7) % 7;
+      range = { from: addDays(today, -back), to: addDays(today, -1) };
+    }
+    // Monday with a Monday week start: nothing done yet this week.
+    const done = range.from > range.to ? {} : C.weeklyVolumeByMuscle(index.sessions, index.catalogue, range);
     const freq = C.muscleFrequency(index.sessions, index.catalogue);
     const muscles = {};
     MUSCLES.forEach(g => {
@@ -508,7 +519,7 @@
     return { today: today, range: range, muscles: muscles, lifts: lifts, untaggedSets: r1(done.__untagged || 0),
              consecutive: consecutive, lastSessionDate: lastSession ? lastSession.date : null,
              daysSinceLast: lastSession ? dnum(today) - dnum(lastSession.date) : null,
-             sessionsLast7: index.sessions.filter(s => s.date >= range.from).length };
+             sessionsLast7: index.sessions.filter(s => s.date >= addDays(today, -7)).length };
   }
 
   // =====================================================================================
@@ -867,6 +878,11 @@
     const minutesNow = () => cfg.timing.warmupMin + items.reduce((s, it) => s + itemMinutes(it, cfg), 0);
     if (!lighter && minutesNow() < 0.6 * cfg.sessionMinutes)
       fill(g => state.muscles[g].kind === 'priority' ? Math.min(state.muscles[g].target.max, state.muscles[g].target.aim + 2 * cfg.volumeStep) : state.muscles[g].target.aim, 'PRIORITY_TOP_UP');
+    // (b3) Still short (the priority muscles were trained yesterday, say): recovered
+    // maintenance muscles may go up to two volume steps past their floor (never past max),
+    // with lifts he already knows. A short day then trains what is ready instead of ending.
+    if (!lighter && minutesNow() < 0.6 * cfg.sessionMinutes)
+      fill(g => state.muscles[g].kind === 'maintenance' ? Math.min(state.muscles[g].target.max, state.muscles[g].target.aim + 2 * cfg.volumeStep) : 0, 'SHORT_DAY_TOP_UP');
 
     // (c) Order: leg block, then compounds, then isolations; inside each, by value.
     const rank = it => it.block === 'legs' ? 0 : it.pattern === 'compound' ? 1 : 2;
@@ -1247,8 +1263,9 @@
     if (!(Number.isInteger(s.daysPerWeek) && s.daysPerWeek >= 3 && s.daysPerWeek <= 5)) e.push('Days per week must be 3, 4 or 5.');
     if (!s.availableWeekdays.length) e.push('Tick at least one weekday you can train on.');
     else if (Number.isInteger(s.daysPerWeek) && s.availableWeekdays.length < Math.min(3, s.daysPerWeek)) e.push(`Tick at least ${Math.min(3, s.daysPerWeek)} weekdays.`);
+    // His weeks run Monday to Friday, so the weekly aim is counted per calendar week.
     const v = validateConfig({ priorities: s.priorities, daysPerWeek: { min: 3, max: 5, preferred: s.daysPerWeek },
-      availableWeekdays: s.availableWeekdays, restMode: s.restMode, sessionMinutes: s.sessionMinutes });
+      availableWeekdays: s.availableWeekdays, restMode: s.restMode, sessionMinutes: s.sessionMinutes, weekStart: 'Mon' });
     // The engine's own checks still run; its messages are reworded where the form has a field.
     const own = e.length;
     v.errors.forEach(x => {

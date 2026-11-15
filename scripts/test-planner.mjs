@@ -497,5 +497,65 @@ function validWeek(w, sessions, n, label) {
   ok(P.linkAlias(CAT, 'no-such-id', name) === null && P.linkAlias(CAT, top.id, '  ') === null, 'link: unknown id or empty name returns null');
 }
 
+// ---- Calendar-week counting (weekStart) and short-day top-up ----------------------------
+{
+  const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  ok(!P.validateConfig({ weekStart: 'Xyz' }).ok && P.validateConfig({ weekStart: 'Mon' }).ok, 'weekStart: validated');
+  // A heavy chest end to the previous week (Thu and Fri before Monday T).
+  const h = history(T).filter(s => s.date < add(T, -4)).concat([
+    sess(add(T, -4), ['bench-press', 'incline-dumbbell-press', 'machine-chest-fly', 'lat-pulldown'], { reps: [10, 9, 8, 8] }),
+    sess(add(T, -3), ['machine-chest-fly', 'never-done-press', 'cable-lateral-raise'])]);
+  const cfgOf = (ws, min) => P.resolveConfig({ availableWeekdays: WD, restMode: 'lighter', weekStart: ws, sessionMinutes: min || 75 });
+  const stateOn = (day, ws) => { const ix = P.buildIndex(h, CAT, day, {}); return P.weekState(ix, cfgOf(ws), null); };
+  const monCal = stateOn(T, 'Mon'), monRoll = stateOn(T, null);
+  ok(monRoll.muscles.chest.done >= 10, 'weekStart null: Monday counts last week\'s chest sets', monRoll.muscles.chest.done);
+  ok(Object.keys(monCal.muscles).every(g => monCal.muscles[g].done === 0), 'weekStart Mon: nothing is done yet on Monday');
+  ok(monCal.muscles.chest.deficit === 14, 'weekStart Mon: Monday chest deficit is the whole aim', monCal.muscles.chest.deficit);
+  ok(monCal.muscles.chest.daysSince === monRoll.muscles.chest.daysSince, 'weekStart Mon: days since a muscle still looks across the week boundary');
+  const wedCal = stateOn(add(T, 2), 'Mon');
+  ok(wedCal.range.from === T && wedCal.range.to === add(T, 1), 'weekStart Mon: Wednesday counts Monday and Tuesday only', wedCal.range);
+  const plan = (ws, min) => P.planWeek({ sessions: h, catalogue: CAT, today: T, config: cfgOf(ws, min), daysPerWeek: 4 });
+  const roll = plan(null), cal = plan('Mon'), cal90 = plan('Mon', 90);
+  const chestOf = w => (w.summary.chest || { planned: 0 }).planned;
+  ok(chestOf(cal) >= chestOf(roll) + 3, 'weekStart Mon: a week after a heavy chest week plans clearly more chest', { roll: chestOf(roll), cal: chestOf(cal) });
+  ok(chestOf(cal90) >= 12, 'weekStart Mon: with time for it, chest reaches its minimum of 12', chestOf(cal90));
+  [roll, cal, cal90].forEach((w, k) => {
+    ok(w.days.every(d => !d.train || WD.indexOf(d.weekday) >= 0), `weekStart plan ${k}: weekdays only`);
+    // Lift window: no planned lift repeats inside its own earliest-repeat window.
+    const last = {};
+    h.forEach(s => s.exercises.forEach(x => { last[x.id] = s.date; }));
+    let bad = null;
+    w.days.filter(d => d.train).forEach(d => d.session.items.forEach(it => {
+      const prev = last[it.id];
+      const gap = prev ? (Date.parse(d.date) - Date.parse(prev)) / 864e5 : 99;
+      if (gap < it.window.earliest) bad = bad || { id: it.id, date: d.date, gap, earliest: it.window.earliest };
+      last[it.id] = d.date;
+    }));
+    ok(!bad, `weekStart plan ${k}: no lift repeats inside its window`, bad);
+    let inARow = 0, worst = 0;
+    w.days.forEach(d => { inARow = d.train ? inARow + 1 : 0; worst = Math.max(worst, inARow); });
+    ok(worst <= 2, `weekStart plan ${k}: never more than 2 days in a row`, worst);
+  });
+  // Short day, built directly: every priority and leg muscle trained yesterday (not
+  // recovered), every maintenance muscle recovered and already at its floor of 4.
+  const t = P.planToday({ sessions: history(T), catalogue: CAT, today: T, config: { weekStart: 'Mon' } });
+  const st = JSON.parse(JSON.stringify(t.state));
+  Object.keys(st.muscles).forEach(g => {
+    const m = st.muscles[g];
+    if (m.kind === 'priority' || m.kind === 'legs') { m.daysSince = 0; }
+    else if (m.kind === 'maintenance') { m.daysSince = 4; m.done = m.target.aim; m.deficit = 0; }
+  });
+  const c3 = P.resolveConfig({ weekStart: 'Mon' });
+  const rd = { answer: 'train', modifiers: { rirExtra: 0, setsDelta: 0, avoid: {}, lighter: false } };
+  const short = P.generateSession({ index: t.index, state: st, readiness: rd, config: c3, model: t.model });
+  const tops = short.items.filter(it => it.reasons.some(r => r.code === 'SHORT_DAY_TOP_UP'));
+  ok(tops.length > 0, 'short day: recovered maintenance muscles top it up', short.items.map(i => i.id + ':' + i.reasons[0].code));
+  ok(short.items.every(it => st.muscles[it.muscle].kind === 'maintenance'), 'short day: nothing unrecovered is added', short.items.map(i => i.muscle));
+  ok(Object.keys(short.muscles).every(g => st.muscles[g].kind !== 'maintenance' || st.muscles[g].done + short.muscles[g] <= st.muscles[g].target.max + 4),
+     'short day: top-up stays near the band', short.muscles);
+  const lighterShort = P.generateSession({ index: t.index, state: st, readiness: Object.assign({}, rd, { modifiers: Object.assign({}, rd.modifiers, { lighter: true }) }), config: c3, model: t.model });
+  ok(!lighterShort.items.some(it => it.reasons.some(r => r.code === 'SHORT_DAY_TOP_UP')), 'short day: a lighter session is never topped up');
+}
+
 console.log(`planner tests: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
