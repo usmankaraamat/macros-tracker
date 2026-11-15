@@ -3,7 +3,17 @@
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const C = require('../core.js');
-const P = require('../planner.js');
+const RAW = require('../planner.js');
+// Engine fixtures were written for chest > lats > side delts. The engine's new default adds
+// forearms (and the catalogue below has no forearm lift), so fixtures state their priorities and
+// the new defaults are tested through RAW.
+const LEGACY_PRIORITIES = ['chest', 'lats', 'sideDelts'];
+const wrapCfg = c => (c && c.__resolved) ? c : Object.assign({ priorities: LEGACY_PRIORITIES }, c || {});
+const P = Object.assign({}, RAW, {
+  resolveConfig: c => RAW.resolveConfig(wrapCfg(c)),
+  planToday: i => RAW.planToday(Object.assign({}, i, { config: wrapCfg(i.config) })),
+  planWeek: i => RAW.planWeek(Object.assign({}, i, { config: wrapCfg(i.config) }))
+});
 
 let passed = 0, failed = 0;
 function ok(cond, name, info) {
@@ -115,13 +125,13 @@ function ready(sessions, today, input, c) {
   ok(r.reasons.some(x => x.code === 'CLEAR'), 'train carries CLEAR code');
   ok(r.facts.length >= 4 && r.facts.every(f => f.code && f.label), 'train has four or more labelled facts', r.facts);
 
-  // Same, but everything to failure in the last week -> pull back.
+  // REMOVED RULE (step 1): "most recent exercises at RIR 0" used to pull back. He logs one RIR for
+  // the hardest set only, so RIR 0 everywhere is normal and must not change the answer.
   const hf = history(T, { until: add(T, -3) }).map(s => s.date >= add(T, -7) ? sess(s.date, s.exercises.map(x => x.id), { rir: 0 }) : s);
   const pf = ready(hf, T).r;
-  eq(pf.answer, 'pull_back', 'pull_back: lifts to failure');
-  ok(pf.reasons.some(x => x.code === 'FAILURE_SHARE_HIGH'), 'pull_back reason FAILURE_SHARE_HIGH');
-  ok(pf.modifiers.rirExtra === cfg.pullBackRirExtra, 'pull_back raises the RIR cap');
-  ok(pf.facts[0].code === 'TO_FAILURE', 'pull_back leads with the failure fact', pf.facts[0]);
+  eq(pf.answer, 'train', 'RIR 0 on every lift no longer pulls back');
+  ok(!pf.reasons.some(x => x.code === 'FAILURE_SHARE_HIGH') && !pf.facts.some(f => f.code === 'TO_FAILURE'), 'no failure-share reason or fact exists');
+  ok(pf.modifiers.rirExtra === 0, 'RIR 0 everywhere leaves the RIR cap alone');
 
   // Low intake yesterday -> pull back with its code.
   const li = ready(h, T, { intake: { kcal: 1500, floor: 2500 } }).r;
@@ -143,14 +153,24 @@ function ready(sessions, today, input, c) {
   ok(pw.answer === 'swap' && pw.reasons.some(x => x.code === 'PLANNED_IN_WINDOW'), 'swap: planned lift inside its window', pw.reasons);
   eq(pw.modifiers.avoid['lateral-raise'], 'IN_WINDOW', 'planned lift in window is avoided');
 
-  // Two days in a row already -> rest.
-  const hr = history(T, { until: add(T, -3) }).concat([sess(add(T, -2), A), sess(add(T, -1), B)]);
-  const rs = ready(hr, T).r;
-  eq(rs.answer, 'rest', 'rest: two consecutive days already');
-  ok(rs.reasons.some(x => x.code === 'CONSECUTIVE_LIMIT'), 'rest reason CONSECUTIVE_LIMIT');
+  // REMOVED RULES (step 1): CONSECUTIVE_LIMIT (rest) and SECOND_DAY_IN_A_ROW (pull back). Days in a
+  // row are a fact on the card and nothing else.
+  const hc = history(T, { until: add(T, -4) }).concat([sess(add(T, -3), A), sess(add(T, -2), B), sess(add(T, -1), Cc)]);
+  const cs = ready(hc, T);
+  ok(cs.state.consecutive === 3 && !cs.r.reasons.some(x => x.code === 'CONSECUTIVE_LIMIT' || x.code === 'SECOND_DAY_IN_A_ROW'), 'days in a row fire no rule', cs.r.reasons);
+  ok(cs.r.facts.some(f => f.code === 'IN_A_ROW' && f.value === 4), 'days in a row stay on the card as a fact', cs.r.facts);
+  eq(P.resolveConfig({}).maxConsecutiveDays, 7, 'maxConsecutiveDays defaults to 7 (kept for compatibility)');
+
+  // Rest still comes from real signals: feel low plus two fatigue signals (rep drop-off on two lifts
+  // in the last session, and low intake).
+  const hr = history(T, { until: add(T, -3) }).concat([sess(add(T, -1), A, { reps: [10, 6, 5] })]);
+  const rin = { feel: 'low', intake: { kcal: 1000, floor: 2500 } };
+  const rs = ready(hr, T, rin).r;
+  eq(rs.answer, 'rest', 'rest: low feel with drop-off and low intake');
+  ok(rs.reasons.some(x => x.code === 'LOW_FEEL_AND_FATIGUE'), 'rest reason LOW_FEEL_AND_FATIGUE');
 
   // restMode 'lighter' never says rest.
-  const lt = ready(hr, T, {}, { restMode: 'lighter' }).r;
+  const lt = ready(hr, T, rin, { restMode: 'lighter' }).r;
   ok(lt.answer === 'pull_back' && lt.lighter && lt.reasons.some(x => x.code === 'LIGHTER_INSTEAD_OF_REST'), 'restMode lighter turns rest into a lighter session', lt);
   ok(['train', 'pull_back', 'swap', 'rest'].indexOf(lt.answer) >= 0, 'answer is one of the four');
 }
@@ -193,10 +213,11 @@ function today(sessions, day, c, input) {
   ok(loose.items.length >= tight.items.length, 'a bigger budget keeps at least as much');
 
   // Rest answer gives an empty session; lighter gives fewer sets, more RIR.
-  const hr = history(T, { until: add(T, -3) }).concat([sess(add(T, -2), A), sess(add(T, -1), B)]);
-  const r = today(hr, T);
+  const hr = history(T, { until: add(T, -3) }).concat([sess(add(T, -1), A, { reps: [10, 6, 5] })]);
+  const rin = { feel: 'low', intake: { kcal: 1000, floor: 2500 } };
+  const r = today(hr, T, {}, rin);
   ok(r.session.rest && r.session.items.length === 0, 'rest answer -> no session');
-  const lt = today(hr, T, { restMode: 'lighter' });
+  const lt = today(hr, T, { restMode: 'lighter' }, rin);
   ok(!lt.session.rest && lt.session.lighter && lt.session.items.length <= 4 && !lt.session.legBlock, 'lighter session is short, no leg block', lt.session.items.map(i => i.id));
 
   // Every item carries a reason code and a reason sentence.
@@ -266,8 +287,9 @@ function validWeek(w, sessions, n, label) {
 
   // Asked for 5 days right after two days in a row: today must be rest, plan stays valid.
   const tired = h.concat([sess(add(T, -2), A), sess(add(T, -1), B)]);
+  // (Changed in step 1: two days in a row no longer force rest, so today is a session.)
   const w5 = plan(tired, T, 5);
-  ok(!w5.days[0].train, 'after two consecutive days, today is not a training day');
+  ok(w5.days[0].train, 'after two consecutive days, today is still a training day');
   validWeek(w5, tired, w5.daysPerWeek, '5-day week after two in a row');
 
   // A missed day re-plans: plan today, skip it, plan tomorrow from what happened.
@@ -403,8 +425,10 @@ function validWeek(w, sessions, n, label) {
   });
   const five = plan(h, T, 5, c);
   ok(five.days.filter(d => d.train).every(d => WD.indexOf(d.weekday) >= 0), '5 asked, weekdays only: still no weekend session');
-  ok(five.daysPerWeek === 4 && five.warnings.some(x => x.code === 'DAYS_REDUCED'),
-     '5 weekdays with a 2-in-a-row limit is reduced to 4, with a warning', { n: five.daysPerWeek, w: five.warnings });
+  // (Changed in step 1: the old 2-in-a-row cap reduced this to 4 with a warning.)
+  ok(five.daysPerWeek === 5 && !five.warnings.some(x => x.code === 'DAYS_REDUCED'),
+     'Monday to Friday with 5 asked plans 5, no reduction', { n: five.daysPerWeek, w: five.warnings });
+  ok(five.days.filter(d => d.train).map(d => d.weekday).join() === 'Mon,Tue,Wed,Thu,Fri', 'the five days are Monday to Friday', five.days.map(d => d.weekday + d.train));
   const allFive = plan(h, T, 5, { availableWeekdays: WD, maxConsecutiveDays: 5 });
   ok(allFive.daysPerWeek === 5, 'raising the in-a-row limit allows all five weekdays', allFive.daysPerWeek);
   const sat = add(T, 5);
@@ -424,20 +448,28 @@ function validWeek(w, sessions, n, label) {
 
 // ---- App glue: settings form, days-since rows, swap ------------------------------------
 {
-  const d = P.appSettings(null);
+  const d = RAW.appSettings(null);
   ok(d.ok, 'app settings: nothing stored is valid', d.errors);
-  eq(d.settings.priorities, ['chest', 'lats', 'sideDelts'], 'app settings: default priorities');
+  eq(d.settings.priorities, ['chest', 'sideDelts', 'lats', 'forearms'], 'app settings: default priorities');
   eq(d.settings.availableWeekdays, ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], 'app settings: default weekdays Mon to Fri');
-  ok(d.config.restMode === 'lighter' && d.config.sessionMinutes === 75 && d.config.daysPerWeek.preferred === 4,
-     'app settings: lighter, 75 min, 4 days', d.config);
+  ok(d.config.restMode === 'lighter' && d.config.sessionMinutes === 90 && d.config.daysPerWeek.preferred === 5,
+     'app settings: lighter, 90 min, 5 days', d.config);
+  eq(d.config.priorities.map(p => p.weight), [1.5, 1.4, 1.3, 1.2], 'app settings: priority weights 1.5, 1.4, 1.3, 1.2');
+  ok(d.config.legWeight === 1 && d.config.maintenanceWeight === 1, 'other muscles weigh 1.0');
+  eq(RAW.SESSION_LENGTHS, [60, 75, 90, 120], 'session lengths 60 / 75 / 90 / 120');
+  // Yesterday's stored shape still loads: 3 priorities, 75 minutes, 4 days.
+  const old = RAW.appSettings({ priorities: ['chest', 'lats', 'sideDelts'], daysPerWeek: 4, availableWeekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], restMode: 'lighter', sessionMinutes: 75 });
+  ok(old.ok && old.settings.priorities.length === 3 && old.config.sessionMinutes === 75, 'a stored 3-priority, 75-minute setting still loads', old.errors);
+  eq(old.config.priorities.map(p => p.weight), [1.5, 1.4, 1.3], 'a stored 3-priority list gets the first three weights');
+  ok(RAW.appSettings({ priorities: ['chest', 'sideDelts', 'lats', 'forearms'] }).ok, 'four priorities are accepted, forearms among them');
   eq(d.config.availableWeekdays, ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], 'app settings: engine config gets the weekdays');
   const order = P.appSettings({ availableWeekdays: ['Fri', 'Mon'] });
   eq(order.settings.availableWeekdays, ['Mon', 'Fri'], 'app settings: weekdays are put in week order');
-  const bad = (s, re, name) => { const r = P.appSettings(s); ok(!r.ok && r.errors.some(x => re.test(x)), name, r.errors); };
+  const bad = (s, re, name) => { const r = RAW.appSettings(s); ok(!r.ok && r.errors.some(x => re.test(x)), name, r.errors); };
   bad({ priorities: ['chest', 'chest'] }, /once/, 'app settings: a duplicate priority is refused');
   bad({ priorities: ['quads'] }, /cannot be a priority/, 'app settings: a leg muscle is refused as a priority');
   bad({ priorities: [] }, /at least one/, 'app settings: no priority is refused');
-  bad({ priorities: ['chest', 'lats', 'sideDelts', 'biceps'] }, /at most three/, 'app settings: four priorities are refused');
+  bad({ priorities: ['chest', 'lats', 'sideDelts', 'biceps', 'triceps'] }, /at most four/, 'app settings: five priorities are refused');
   bad({ daysPerWeek: 6 }, /3, 4 or 5/, 'app settings: 6 days a week is refused');
   bad({ availableWeekdays: [] }, /at least one weekday/, 'app settings: no weekdays is refused');
   bad({ availableWeekdays: ['Mon', 'Tue'] }, /at least 3/, 'app settings: two weekdays for 3+ days is refused');
@@ -448,14 +480,14 @@ function validWeek(w, sessions, n, label) {
   const h = history(T);
   const t = P.planToday({ sessions: h, catalogue: CAT, today: T, config: d.config });
   const rows = P.daysSinceRows(t.state, d.config);
-  eq(rows.slice(0, 4).map(r => r.label), ['Chest', 'Lats', 'Side delts', 'Legs'], 'days since: priorities in order, then legs');
+  eq(rows.slice(0, 5).map(r => r.label), ['Chest', 'Side delts', 'Lats', 'Forearms', 'Legs'], 'days since: priorities in order, then legs');
   ok(rows.every(r => ['bad', 'warn', 'ok', 'info'].indexOf(r.tone) >= 0 && r.width > 0 && r.width <= 1), 'days since: tones and widths are in range', rows);
   const chest = t.state.muscles.chest;
   ok(rows[0].days === chest.daysSince, 'days since: chest row reads the week state', { row: rows[0], state: chest.daysSince });
-  const legsRow = rows[3];
+  const legsRow = rows[4];
   const legMax = Math.max(t.state.muscles.quads.daysSince, t.state.muscles.hamstrings.daysSince);
   ok(legsRow.days === legMax, 'days since: legs is the later of quads and hamstrings', { row: legsRow, legMax });
-  ok(rows.slice(4).every(r => r.behind >= 1), 'days since: extra rows are muscles behind their aim', rows.slice(4));
+  ok(rows.slice(5).every(r => r.behind >= 1), 'days since: extra rows are muscles behind their aim', rows.slice(4));
   const empty = P.planToday({ sessions: [], catalogue: CAT, today: T, config: d.config });
   const er = P.daysSinceRows(empty.state, d.config);
   ok(er[0].days === null && er[0].tone === 'info' && er[0].width === 1, 'days since: never trained reads as overdue', er[0]);
@@ -534,7 +566,7 @@ function validWeek(w, sessions, n, label) {
     ok(!bad, `weekStart plan ${k}: no lift repeats inside its window`, bad);
     let inARow = 0, worst = 0;
     w.days.forEach(d => { inARow = d.train ? inARow + 1 : 0; worst = Math.max(worst, inARow); });
-    ok(worst <= 2, `weekStart plan ${k}: never more than 2 days in a row`, worst);
+    ok(worst <= 5, `weekStart plan ${k}: no run beyond the five weekdays`, worst);
   });
   // Short day, built directly: every priority and leg muscle trained yesterday (not
   // recovered), every maintenance muscle recovered and already at its floor of 4.
@@ -555,6 +587,95 @@ function validWeek(w, sessions, n, label) {
      'short day: top-up stays near the band', short.muscles);
   const lighterShort = P.generateSession({ index: t.index, state: st, readiness: Object.assign({}, rd, { modifiers: Object.assign({}, rd.modifiers, { lighter: true }) }), config: c3, model: t.model });
   ok(!lighterShort.items.some(it => it.reasons.some(r => r.code === 'SHORT_DAY_TOP_UP')), 'short day: a lighter session is never topped up');
+}
+
+// ---- Step 1: test openers, rising reps, five consecutive days --------------------------
+{
+  const mk = (date, id, sets, rir) => ({ date, deload: false, exercises: [{ id, name: id, rir, sets: sets.map(([kg, reps]) => ({ kg, reps })) }] });
+  // 40x2 then 30x10,10,9: the first set is a test opener (2 < half of 10) and is not a working set.
+  const ix = RAW.buildIndex([mk('2026-02-20', 'bench-press', [[40, 2], [30, 10], [30, 10], [30, 9]], 0)], CAT, T);
+  eq(ix.byLift['bench-press'][0].sets.map(s => s.reps), [10, 10, 9], 'a first set under half of set 2 is dropped from the history');
+  const st = RAW.liftState(ix, 'bench-press', P.resolveConfig({}));
+  ok(st.lastTop && st.lastTop.kg === 30, 'the test opener is never the top set', st.lastTop);
+  ok(st.dropoff.applicable && st.dropoff.rawDropoff === 0.1, 'drop-off is measured from the first real set (10 to 9)', st.dropoff);
+  // Exactly half is a working set.
+  const ix2 = RAW.buildIndex([mk('2026-02-20', 'bench-press', [[30, 5], [30, 10], [30, 9]], 1)], CAT, T);
+  eq(ix2.byLift['bench-press'][0].sets.length, 3, 'a first set of exactly half set 2 is kept');
+  // Rising reps (11, 12, 13) is a cold first set, not fatigue.
+  const ix3 = RAW.buildIndex([mk('2026-02-20', 'bench-press', [[30, 11], [30, 12], [30, 13]], 2)], CAT, T);
+  const st3 = RAW.liftState(ix3, 'bench-press', P.resolveConfig({}));
+  ok(st3.dropoff.rawDropoff <= 0, 'rising reps do not read as drop-off', st3.dropoff);
+  // A last session full of test openers and a real 10, 9, 8 drop of 20 percent: no drop-off signal.
+  const hd = history(T, { until: add(T, -3) }).concat([{ date: add(T, -1), deload: false, exercises: A.map(id => ({ id, name: id, rir: 0,
+    sets: [{ kg: 80, reps: 2 }, { kg: 30, reps: 10 }, { kg: 30, reps: 9 }, { kg: 30, reps: 8 }] })) }]);
+  const rd = ready(hd, T).r;
+  ok(!rd.reasons.some(x => x.code === 'REP_DROPOFF'), 'openers do not create a rep drop-off signal', rd.reasons.map(x => x.code));
+  // Prescription ignores the opener: 30 kg, not 80 kg.
+  const rx = RAW.prescribe(RAW.liftState(RAW.buildIndex(hd, CAT, T), 'bench-press', P.resolveConfig({})), P.resolveConfig({}), 2, 3, false);
+  ok(rx.kg != null && rx.kg <= 32.5, 'prescription ignores a test opener', rx);
+  // Without the rule a 6 -> 3 drop would fire it: real drop-off still counts.
+  const hz = history(T, { until: add(T, -3) }).concat([{ date: add(T, -1), deload: false, exercises: A.map(id => ({ id, name: id, rir: 1,
+    sets: [{ kg: 30, reps: 10 }, { kg: 30, reps: 6 }, { kg: 30, reps: 5 }] })) }]);
+  ok(ready(hz, T).r.reasons.some(x => x.code === 'REP_DROPOFF'), 'a real 10 to 5 drop-off still pulls back');
+
+  // Five consecutive weekdays: a week planned Monday to Friday, days in a row never reduce it.
+  const WD5 = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  const w = P.planWeek({ sessions: history(T, { until: add(T, -2) }), catalogue: CAT, today: T, config: { availableWeekdays: WD5 }, daysPerWeek: 5 });
+  eq(w.days.filter(d => d.train).map(d => d.weekday), WD5, 'five days asked, Monday to Friday available: five days planned');
+  ok(w.days.filter(d => d.train).every(d => d.readiness.answer !== 'rest'), 'no rest answer inside the five-day run', w.days.map(d => d.train && d.readiness.answer));
+  eq(w.warnings, [], 'no reduction warning');
+}
+
+// ---- Step 1: calendar names resolve to the lift he has logged ---------------------------
+{
+  const ex = (id, name, aliases) => ({ id, name, aliases: aliases || [] });
+  const CATN = [
+    ex('incline-barbell-press', 'Incline Barbell Press'),
+    ex('incline-barbell-press-smith-machine', 'Incline Barbell Press (Smith Machine)'),
+    ex('squat', 'Squat'),
+    ex('smith-machine-squat', 'Smith Machine Squat'),
+    ex('dumbbell-lateral-raise', 'Dumbbell Lateral Raise'),
+    ex('seated-lateral-raises-dumbbell', 'Seated Lateral Raises (Dumbbell)'),
+    ex('standing-lateral-raise-dumbbell', 'Standing Lateral Raise (Dumbbell)'),
+    ex('overhead-triceps-extension-cable', 'Overhead Triceps Extension (Cable)'),
+    ex('triceps-overhead-extension-single-hand', 'Triceps Overhead Extension (Single Hand)'),
+    ex('bench-press', 'Bench press', ['bench']),
+    ex('incline-bench-press', 'Incline bench press', ['incline bench', 'incline barbell press'])   // seed alias, not his choice
+  ];
+  const day = (date, ids) => ({ date, exercises: ids.map(id => ({ id, sets: [{ kg: 20, reps: 10 }] })) });
+  const wk = [];
+  const log = (id, n, startOff) => { for (let i = 0; i < n; i++) wk.push(day(add('2026-01-01', startOff + i * 3), [id])); };
+  log('incline-barbell-press-smith-machine', 5, 0);
+  log('smith-machine-squat', 4, 1);
+  log('seated-lateral-raises-dumbbell', 6, 2);
+  log('standing-lateral-raise-dumbbell', 3, 20);
+  log('triceps-overhead-extension-single-hand', 6, 40);
+  log('overhead-triceps-extension-cable', 1, 70);
+  log('bench-press', 3, 5);
+  const H = RAW.liftHistory(wk);
+  eq(H['seated-lateral-raises-dumbbell'].sessions, 6, 'liftHistory counts sessions per lift');
+  const res = n => RAW.resolveCalendarName(n, CATN, H);
+  eq(res('Incline Barbell Press (Smith)').id, 'incline-barbell-press-smith-machine', 'Incline Barbell Press (Smith) -> the Smith lift he logged');
+  ok(res('Incline Barbell Press (Smith)').auto && res('Incline Barbell Press (Smith)').hasHistory, 'an automatic redirect is flagged and has history');
+  ok(res('Incline Barbell Press').id === 'incline-barbell-press-smith-machine' || res('Incline Barbell Press (Smith)').id === 'incline-barbell-press-smith-machine', 'a seeded alias does not count as an owner link');
+  eq(res('Squat (Smith or free bar)').id, 'smith-machine-squat', 'Squat (Smith or free bar) -> Smith Machine Squat');
+  eq(res('DB Lateral Raises').id, 'seated-lateral-raises-dumbbell', 'DB Lateral Raises -> the dumbbell raise with the most sessions');
+  eq(res('Overhead Triceps Extension').id, 'overhead-triceps-extension-cable', 'a near-exact match that has history is kept, even with 1 session');
+  eq(res('Bench').id, 'bench-press', 'a match with history is left alone');
+  // Tie on sessions goes to the most recently logged.
+  const tie = wk.concat([day('2026-05-01', ['standing-lateral-raise-dumbbell']), day('2026-05-02', ['standing-lateral-raise-dumbbell']), day('2026-05-03', ['standing-lateral-raise-dumbbell'])]);
+  eq(RAW.resolveCalendarName('DB Lateral Raises', CATN, RAW.liftHistory(tie)).id, 'standing-lateral-raise-dumbbell', 'a 6-6 tie goes to the lift logged most recently');
+  // A lift with no history anywhere stays on its own match and gets the link control.
+  const none = RAW.resolveCalendarName('Squat', CATN, {});
+  ok(none.id === 'squat' && !none.hasHistory && !none.auto, 'no history anywhere: stays on the catalogue match, hasHistory false');
+  ok(!RAW.resolveCalendarName('Cable Crunch Special', CATN, H).matched, 'an unknown name stays unmatched');
+  // An owner link always wins over automatic matching.
+  const linked = RAW.linkAlias(CATN, 'standing-lateral-raise-dumbbell', 'DB Lateral Raises');
+  const lr = RAW.resolveCalendarName('DB Lateral Raises', linked, H);
+  ok(lr.id === 'standing-lateral-raise-dumbbell' && lr.linked && !lr.auto, 'a link he made wins over the history rule', lr);
+  const linkedEmpty = RAW.linkAlias(CATN, 'incline-barbell-press', 'Incline Barbell Press (Smith)');
+  eq(RAW.resolveCalendarName('Incline Barbell Press (Smith)', linkedEmpty, H).id, 'incline-barbell-press', 'a link to a lift with no history still wins');
+  eq(RAW.resolveCalendarName('x', CATN, null).matched, false, 'resolveCalendarName tolerates no history');
 }
 
 console.log(`planner tests: ${passed} passed, ${failed} failed`);

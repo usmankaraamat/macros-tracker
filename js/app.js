@@ -721,20 +721,26 @@ function fillPlanner(){
   const ps = plannerSettings().settings;
   const opts = (blank) => (blank ? '<option value="">none</option>' : '') + LedgerPlanner.PRIORITY_CHOICES
     .map(g => `<option value="${g}">${escapeHtml(LedgerCore.MUSCLE_LABEL[g])}</option>`).join('');
-  ['plPrio1','plPrio2','plPrio3'].forEach((id, i) => {
+  ['plPrio1','plPrio2','plPrio3','plPrio4'].forEach((id, i) => {
     const el = document.getElementById(id);
     el.innerHTML = opts(i > 0);
     el.value = ps.priorities[i] || '';
   });
   document.getElementById('plDays').value = String(ps.daysPerWeek);
-  document.getElementById('plMinutes').value = ps.sessionMinutes;
+  const pm = document.getElementById('plMinutes');
+  // A length saved earlier that is not one of the four choices stays selectable, so it is not lost.
+  if (!Array.from(pm.options).some(o => +o.value === ps.sessionMinutes)){
+    const o = document.createElement('option'); o.value = String(ps.sessionMinutes); o.textContent = String(ps.sessionMinutes);
+    pm.appendChild(o);
+  }
+  pm.value = String(ps.sessionMinutes);
   document.getElementById('plRestMode').value = ps.restMode;
   document.getElementById('plWeekdays').innerHTML = WEEKDAYS.map(d =>
     `<label class="pill"><input type="checkbox" data-plday="${d}" hidden${ps.availableWeekdays.indexOf(d) >= 0 ? ' checked' : ''}> ${d}</label>`).join('');
 }
 function readPlannerForm(){
   return {
-    priorities: ['plPrio1','plPrio2','plPrio3'].map(id => document.getElementById(id).value).filter(Boolean),
+    priorities: ['plPrio1','plPrio2','plPrio3','plPrio4'].map(id => document.getElementById(id).value).filter(Boolean),
     daysPerWeek: +document.getElementById('plDays').value,
     availableWeekdays: Array.from(document.querySelectorAll('[data-plday]')).filter(cb => cb.checked).map(cb => cb.dataset.plday),
     restMode: document.getElementById('plRestMode').value,
@@ -752,7 +758,7 @@ document.getElementById('savePlanner').onclick = ()=>{
 };
 document.getElementById('resetPlanner').onclick = ()=>{
   PLANNER_SETTINGS = null; saveTargets(); fillPlanner(); render();
-  setStatus(document.getElementById('plannerStatus'), 'Planner defaults restored: chest > lats > side delts, 4 days a week, Monday to Friday, lighter session instead of rest, 75 min.', 'good');
+  setStatus(document.getElementById('plannerStatus'), 'Planner defaults restored: chest > side delts > lats > forearms, 5 days a week, Monday to Friday, lighter session instead of rest, 90 min.', 'good');
 };
 document.getElementById('savePens').onclick = ()=>{
   const st = document.getElementById('penStatus');

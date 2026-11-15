@@ -11,13 +11,15 @@ const P = require('../planner.js');
 
 const file = process.argv[2];
 if (!file) { console.error('usage: node scripts/planner-backtest.mjs <export.json> [today]'); process.exit(2); }
-const TODAY = process.argv[3] || '2026-11-15';
+const TODAY = process.argv[3] || '2026-11-16';
 const d = JSON.parse(fs.readFileSync(file, 'utf8'));
 const sessions = P.normalizeSessions(d.workouts || {});
 const catalogue = d.exercises || [];
 const weights = d.weights || {};
-const PRIOS = ['chest', 'lats', 'sideDelts'];
-const config = P.resolveConfig({ priorities: PRIOS });
+// The app's own defaults: chest > side delts > lats > forearms, Monday to Friday, 90 min.
+const app = P.appSettings(null);
+const PRIOS = app.settings.priorities;
+const config = P.resolveConfig(app.config);
 const L = C.MUSCLE_LABEL;
 const pct = x => x == null ? '  -' : String(Math.round(x * 100)).padStart(3) + '%';
 const pad = (s, n) => String(s).padEnd(n);
@@ -150,11 +152,11 @@ const ky = kcalOn(P.addDays(TODAY, -1));
   w.days.forEach(day => {
     if (!day.train) { console.log(`${day.date} ${day.weekday}  rest`); return; }
     const s = day.session;
-    console.log(`${day.date} ${day.weekday}  ${s.minutes} min, readiness ${day.readiness.answer}${s.dropped.length ? `, dropped for time: ${s.dropped.map(x => x.name).join(', ')}` : ''}${(s.notes || []).length ? ' (' + s.notes.map(n => n.code).join(', ') + ')' : ''}`);
+    console.log(`${day.date} ${day.weekday}  ${s.minutes} min, readiness ${day.readiness.answer} [${day.readiness.codes.join(',')}]${s.dropped.length ? `, dropped for time: ${s.dropped.map(x => x.name).join(', ')}` : ''}${(s.notes || []).length ? ' (' + s.notes.map(n => n.code).join(', ') + ')' : ''}`);
     s.items.forEach(it => console.log(`     ${it.block ? '[legs] ' : ''}${pad(it.name, 40)} ${it.prescription.text}`));
   });
   console.log('  muscle       planned  aim   days  lifts');
-  ['chest', 'lats', 'sideDelts', 'upperBack', 'rearDelts', 'triceps', 'biceps', 'quads', 'hamstrings'].forEach(g => {
+  ['chest', 'sideDelts', 'lats', 'forearms', 'upperBack', 'rearDelts', 'triceps', 'biceps', 'quads', 'hamstrings'].forEach(g => {
     const x = w.summary[g]; if (!x) return;
     console.log(`  ${pad(L[g], 12)} ${lpad(x.planned.toFixed(1), 7)} ${lpad(x.aim, 4)} ${lpad(x.days, 6)} ${lpad(x.lifts, 6)}`);
   });

@@ -49,8 +49,9 @@
   // Every number is documented with its source in specs/08b-session-planner.md.
   // =====================================================================================
   const DEFAULT_CONFIG = {
-    // Ordered, highest first. Plain strings get weights 3, 2.5, 2, 1.75, 1.5 by position.
-    priorities: ['chest', 'lats', 'sideDelts'],
+    // Ordered, highest first. Plain strings get weights 1.5, 1.4, 1.3, 1.2 by position (every
+    // other muscle weighs 1.0).
+    priorities: ['chest', 'sideDelts', 'lats', 'forearms'],
     daysPerWeek: { min: 3, max: 5, preferred: 4 },
     weeklySets: {
       priority: { min: 12, aim: 14, max: 20 },     // hard sets per week, involvement-weighted
@@ -62,15 +63,15 @@
     maintenanceMuscles: ['chest', 'frontDelts', 'sideDelts', 'rearDelts', 'triceps', 'biceps',
       'lats', 'upperBack', 'quads', 'hamstrings', 'glutes'],
     maintenanceWeight: 1,
-    legWeight: 1.5,
+    legWeight: 1,
     perSessionMuscleCap: 8,                         // fractional hard sets for one muscle in one session
     liftWindow: { earliest: 3, idealMin: 4, idealMax: 8 },   // days between two sessions of the same lift
     muscleMinGapDays: 2,                            // days between two sessions that hit a muscle hard
     legBlockGapDays: 3,                             // days between two leg blocks
     rirCap: { compound: 2, isolation: 1, legs: 2 },
     pullBackRirExtra: 1,
-    maxConsecutiveDays: 2,
-    sessionMinutes: 75,
+    maxConsecutiveDays: 7,                          // kept for compatibility; days in a row are no longer a rule
+    sessionMinutes: 90,
     repRange: { compound: [6, 10], isolation: [10, 15], legs: [8, 12] },
     setsPerLift: { min: 2, max: 4, legBlock: [2, 3] },
     maxLiftsPerSession: 7,
@@ -84,9 +85,6 @@
     // by the lift and muscle windows, which look back across the week boundary.
     weekStart: null,
     readiness: {
-      recentDays: 7,            // window for the share of exercises taken to failure
-      failureShareHigh: 0.6,    // this share of rated exercises at RIR 0 = a fatigue signal
-      failureMinRated: 4,       // fewer rated exercises than this = no failure signal
       dropoffHigh: 0.30,        // core.fatigueIndex 'high' flag: >30% raw rep drop at one load
       dropoffHighCount: 2,      // lifts in the last session over the drop-off line
       regressingCount: 2,       // regressing lifts (done in the last 14 days) = a fatigue signal
@@ -99,7 +97,7 @@
     stallRotateDays: 21,        // no new best for this long (and 3+ sessions) = rotate the lift out
     stapleWindowDays: 56        // "recent" for how familiar a lift is
   };
-  const PRIORITY_WEIGHTS = [3, 2.5, 2, 1.75, 1.5, 1.25];
+  const PRIORITY_WEIGHTS = [1.5, 1.4, 1.3, 1.2, 1.1, 1.05];
 
   function isObj(x) { return x && typeof x === 'object' && !Array.isArray(x); }
   function deepMerge(base, over) {
@@ -262,12 +260,32 @@
     return Object.keys(weights || {}).filter(d => +weights[d] > 0).sort().map(d => ({ date: d, kg: +weights[d] }));
   }
 
+  // A test opener: he often opens with a load he cannot hold (40x2, then lighter sets). A first
+  // set with reps under half of set 2 is a test, not a working set. Dropped from every count.
+  function dropOpener(sets) {
+    const s = sets || [];
+    return s.length >= 2 && +s[1].reps > 0 && +s[0].reps < 0.5 * +s[1].reps ? s.slice(1) : s;
+  }
+  // Rep drop-off for one exercise's working sets: the first set is cold when reps rise, so the
+  // reference is the better of the first two sets. Null when the sets are not at one load.
+  function dropoffOf(sets, rir) {
+    const w = dropOpener(sets);
+    const f = C.fatigueIndex(w, { rir: rir });
+    if (!f.applicable) return null;
+    const reps = w.map(x => +x.reps);
+    const ref = Math.max(reps[0], reps[1]);
+    const raw = ref > 0 ? (ref - reps[reps.length - 1]) / ref : 0;
+    return { applicable: true, rawDropoff: Math.round(raw * 1000) / 1000, from: ref, to: reps[reps.length - 1],
+             flag: raw > 0.30 ? 'high' : raw >= 0.20 ? 'elevated' : 'ok' };
+  }
+
   // Everything the planner reads about the past, as of the START of `today`. Sessions on
   // or after today are ignored, so a backtest can ask "what would it have said that morning".
   function buildIndex(sessions, catalogue, today, opts) {
     const o = opts || {};
     // Sorted by date (then planned after real), so the caller's order never matters.
-    const all = (sessions || []).filter(s => s && s.date < today).slice()
+    const all = (sessions || []).filter(s => s && s.date < today).map(s => Object.assign({}, s, {
+      exercises: (s.exercises || []).map(x => Object.assign({}, x, { sets: dropOpener(x.sets) })) })).slice()
       .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.planned ? 1 : 0) - (b.planned ? 1 : 0));
     const cat = (catalogue && catalogue.length ? catalogue : C.SEED_EXERCISES);
     const byId = {}, info = {}, byLift = {}, lastDate = {}, firstDate = {};
@@ -313,7 +331,7 @@
     const recent = real.filter(h => h.date >= recentFrom).length;
     let dropoff = null, lastTop = null, lastRir = null;
     if (lastReal) {
-      dropoff = C.fatigueIndex(lastReal.sets, { rir: lastReal.rir });
+      dropoff = dropoffOf(lastReal.sets, lastReal.rir) || { applicable: false };
       const bw = C.weightAt(index.weights, lastReal.date);
       const top = topSetOf(lastReal.sets, bw);
       if (top) lastTop = { kg: +top.kg || 0, reps: +top.reps, bw: !!top.bw, date: lastReal.date };
@@ -531,27 +549,17 @@
   // =====================================================================================
   function fatigueSignals(index, state, cfg) {
     const R = cfg.readiness;
-    const from = addDays(index.today, -R.recentDays);
-    let rated = 0, failed = 0;
-    index.sessions.filter(s => s.date >= from && !s.planned).forEach(s => s.exercises.forEach(x => {
-      if (x.rir != null && isFinite(+x.rir)) { rated++; if (+x.rir <= 0) failed++; }
-    }));
     const last = index.sessions.filter(s => !s.planned).slice(-1)[0];
     const drops = [];
     if (last && last.date >= addDays(index.today, -3)) last.exercises.forEach(x => {
-      const f = C.fatigueIndex(x.sets, { rir: x.rir });
-      if (f.applicable && f.rawDropoff > R.dropoffHigh) {
-        const reps = x.sets.map(s => +s.reps);
-        drops.push({ id: x.id, name: x.name, from: reps[0], to: reps[reps.length - 1], dropoff: f.rawDropoff });
-      }
+      const f = dropoffOf(x.sets, x.rir);
+      if (f && f.rawDropoff > R.dropoffHigh) drops.push({ id: x.id, name: x.name, from: f.from, to: f.to, dropoff: f.rawDropoff });
     });
     drops.sort((a, b) => b.dropoff - a.dropoff || (a.id < b.id ? -1 : 1));
     const regressing = Object.keys(state.lifts).map(id => state.lifts[id])
       .filter(l => l.verdict === 'regressing' && l.daysSince != null && l.daysSince <= 14)
       .sort((a, b) => a.id < b.id ? -1 : 1);
-    return { rated: rated, failed: failed, failureShare: rated ? failed / rated : null,
-             failureHigh: rated >= R.failureMinRated && failed / rated >= R.failureShareHigh,
-             drops: drops, dropoffHigh: drops.length >= R.dropoffHighCount,
+    return { drops: drops, dropoffHigh: drops.length >= R.dropoffHighCount,
              regressing: regressing, lastDate: last ? last.date : null };
   }
   function topPriority(state, cfg) {
@@ -576,14 +584,13 @@
     const wouldBe = state.consecutive + 1;
     const lowIntake = !!(inp.intake && inp.intake.kcal > 0 && inp.intake.floor > 0 && inp.intake.kcal < inp.intake.floor * R.lowIntakeRatio);
     const feelLow = inp.feel === 'low';
-    const nSignals = [sig.failureHigh, sig.dropoffHigh, sig.regressing.length >= R.regressingCount, lowIntake].filter(Boolean).length;
+    const nSignals = [sig.dropoffHigh, sig.regressing.length >= R.regressingCount, lowIntake].filter(Boolean).length;
 
     // A weekday he does not train on is never a session, whatever restMode says.
     const dayOff = cfg.availableWeekdays.indexOf(weekday(index.today)) < 0;
     if (dayOff) add('NOT_A_TRAINING_DAY', 'rest', { weekday: weekday(index.today) });
 
     // Rest rules
-    if (state.consecutive >= cfg.maxConsecutiveDays) add('CONSECUTIVE_LIMIT', 'rest', { inARow: wouldBe, max: cfg.maxConsecutiveDays });
     if (feelLow && nSignals >= 2) add('LOW_FEEL_AND_FATIGUE', 'rest', { signals: nSignals });
     if (sig.regressing.length >= R.restRegressingCount && sig.dropoffHigh) add('REGRESSING_AND_DROPOFF', 'rest', { regressing: sig.regressing.length, drops: sig.drops.length });
 
@@ -598,8 +605,6 @@
       add('PRIORITY_NOT_RECOVERED', 'swap', { muscle: top.muscle, daysSince: top.daysSince, minGap: top.minGap });
 
     // Pull-back rules
-    if (wouldBe === cfg.maxConsecutiveDays && cfg.maxConsecutiveDays > 1) add('SECOND_DAY_IN_A_ROW', 'pull_back', { inARow: wouldBe });
-    if (sig.failureHigh) add('FAILURE_SHARE_HIGH', 'pull_back', { failed: sig.failed, rated: sig.rated });
     if (sig.dropoffHigh) add('REP_DROPOFF', 'pull_back', { lifts: sig.drops.slice(0, 3) });
     if (sig.regressing.length >= R.regressingCount) add('LIFTS_REGRESSING', 'pull_back', { lifts: sig.regressing.map(l => ({ id: l.id, name: l.name })) });
     if (feelLow) add('FEEL_LOW', 'pull_back', {});
@@ -628,9 +633,7 @@
     const fact = (code, value, label) => { if (!facts.some(f => f.code === code)) facts.push({ code: code, value: value, label: label }); };
     const legDays = Math.min.apply(null, LEG_MUSCLES.map(g => state.muscles[g].daysSince == null ? 999 : state.muscles[g].daysSince));
     reasons.forEach(r => {
-      if (r.code === 'CONSECUTIVE_LIMIT' || r.code === 'SECOND_DAY_IN_A_ROW') fact('IN_A_ROW', wouldBe, `would be day ${wouldBe} in a row`);
       if (r.code === 'REP_DROPOFF' || r.code === 'REGRESSING_AND_DROPOFF') { const d = sig.drops[0]; if (d) fact('WORST_DROPOFF', d, `${d.from} → ${d.to} reps, ${d.name}`); }
-      if (r.code === 'FAILURE_SHARE_HIGH') fact('TO_FAILURE', { failed: sig.failed, rated: sig.rated }, `${sig.failed} of ${sig.rated} lifts to failure`);
       if (r.code === 'PRIORITY_NOT_RECOVERED') fact('DAYS_SINCE_PRIORITY', top.daysSince, `${plural(top.daysSince, 'day')} since ${LABEL[top.muscle].toLowerCase()}`);
       if (r.code === 'PLANNED_IN_WINDOW') { const l = r.data.lifts[0]; fact('DAYS_SINCE_PLANNED_LIFT', l.daysSince, `${plural(l.daysSince, 'day')} since ${l.name}`); }
       if (r.code === 'LIFTS_REGRESSING' || r.code === 'REGRESSING_AND_DROPOFF') fact('REGRESSING', sig.regressing.length, `${plural(sig.regressing.length, 'lift')} regressing`);
@@ -640,7 +643,7 @@
     if (state.daysSinceLast != null) fact('DAYS_SINCE_LAST', state.daysSinceLast, `${plural(state.daysSinceLast, 'day')} since last session`);
     if (top && top.daysSince != null) fact('DAYS_SINCE_PRIORITY', top.daysSince, `${plural(top.daysSince, 'day')} since ${LABEL[top.muscle].toLowerCase()}`);
     fact('DAYS_SINCE_LEGS', legDays === 999 ? null : legDays, legDays === 999 ? 'no leg work logged' : `${plural(legDays, 'day')} since legs`);
-    if (sig.rated) fact('TO_FAILURE', { failed: sig.failed, rated: sig.rated }, `${sig.failed} of ${sig.rated} lifts to failure`);
+    // A fact only: days in a row never change the answer by themselves.
     fact('IN_A_ROW', wouldBe, wouldBe === 1 ? 'first day after a rest day' : `would be day ${wouldBe} in a row`);
 
     const first = reasons.filter(r => r.answer === answer || (lighter && r.answer === 'rest'))[0] || reasons[0];
@@ -649,8 +652,7 @@
              sentence: readinessSentence(answer, first, reasons, state, sig, cfg, lighter),
              reasons: reasons, facts: facts, modifiers: modifiers,
              signals: { consecutive: state.consecutive, daysSinceLast: state.daysSinceLast,
-                        failureShare: sig.failureShare == null ? null : r1(sig.failureShare * 100) / 100,
-                        failed: sig.failed, rated: sig.rated, dropoffs: sig.drops,
+                        dropoffs: sig.drops,
                         regressing: sig.regressing.map(l => l.id), feel: inp.feel || null, lowIntake: lowIntake,
                         topPriority: top ? top.muscle : null } };
   }
@@ -659,7 +661,6 @@
     const code = r && r.code;
     if (answer === 'rest') {
       if (code === 'NOT_A_TRAINING_DAY') return `${DAY_NAME[r.data.weekday]} is not one of your training days.`;
-      if (code === 'CONSECUTIVE_LIMIT') return `This would be day ${r.data.inARow} in a row. Take today off.`;
       if (code === 'LOW_FEEL_AND_FATIGUE') return 'You feel low and your last sessions show fatigue. Take today off.';
       return `${plural(sig.regressing.length, 'lift')} regressing and reps fell off set to set. Take today off.`;
     }
@@ -670,8 +671,6 @@
     }
     if (answer === 'pull_back') {
       const why = {
-        SECOND_DAY_IN_A_ROW: 'Second day in a row.',
-        FAILURE_SHARE_HIGH: `${sig.failed} of your last ${sig.rated} lifts went to failure.`,
         REP_DROPOFF: sig.drops[0] ? `${sig.drops[0].name} fell from ${sig.drops[0].from} to ${sig.drops[0].to} reps.` : 'Reps fell off set to set.',
         LIFTS_REGRESSING: `${plural(sig.regressing.length, 'lift')} regressing.`,
         FEEL_LOW: 'You feel low.',
@@ -753,7 +752,8 @@
     const top = l.lastTop;
     const atTop = l.lastSets.filter(s => (+s.kg || 0) === top.kg && !!s.bw === top.bw).map(s => +s.reps);
     const minAtTop = atTop.length ? Math.min.apply(null, atTop) : top.reps;
-    const firstAtTop = atTop.length ? atTop[0] : top.reps;
+    // The first set is often cold (reps rise 11, 12, 13), so the reference is the better of sets 1 and 2.
+    const firstAtTop = atTop.length ? (atTop.length > 1 ? Math.max(atTop[0], atTop[1]) : atTop[0]) : top.reps;
     const lastRir = l.lastRir != null ? l.lastRir : 0;
     const repsAtCap = firstAtTop + lastRir - rirCap;
     let kg = top.kg, reps, rule;
@@ -1086,8 +1086,8 @@
         .filter(l => l.info.primary === g && l.lastDate && l.lastDate >= from);
       let sess = 0, highDrop = 0;
       lifts.forEach(l => (index.byLift[l.id] || []).filter(h => !h.planned && h.date >= from).forEach(h => {
-        const f = C.fatigueIndex(h.sets, { rir: h.rir });
-        if (!f.applicable) return;
+        const f = dropoffOf(h.sets, h.rir);
+        if (!f) return;
         sess++; if (f.flag === 'high') highDrop++;
       }));
       const reg = lifts.filter(l => l.verdict === 'regressing').length;
@@ -1160,9 +1160,77 @@
     return catalogue.map(c => {
       if (!c || c.id !== id) return c;
       const aliases = (c.aliases || []).slice();
-      if (C.normalizeName(c.name) !== q && !aliases.some(a => C.normalizeName(a) === q)) aliases.push(bare);
+      const has = t => aliases.some(a => C.normalizeName(a) === C.normalizeName(t));
+      if (C.normalizeName(c.name) !== q) { if (!has(bare)) aliases.push(bare); }
+      else {
+        // The bare wording is already this lift's own name, so it could never record the choice:
+        // keep the bracket ("Incline Barbell Press (Smith)") as the alias instead.
+        const wide = String(calendarName || '').replace(/\s*—.*$/, '').replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (C.normalizeName(wide) !== q && !has(wide)) aliases.push(wide);
+      }
       return Object.assign({}, c, { aliases: aliases });
     });
+  }
+
+  // Which calendar names resolve to which lift, preferring a lift he has actually logged.
+  // history: {id: {sessions, last}} from liftHistory(). Order of precedence:
+  //   1. a link the owner made (the calendar wording saved as an alias on a lift) always wins;
+  //   2. a catalogue match that has logged sessions is kept;
+  //   3. a catalogue match with NO logged sessions gives way to a candidate that has history and
+  //      scores AUTO_LINK_MIN or more in linkCandidates: most sessions wins, ties go to the lift
+  //      logged most recently. The bare name and the name with its bracket kept are both tried,
+  //      so "Incline Barbell Press (Smith)" can find the Smith machine lift.
+  const AUTO_LINK_MIN = 80;
+  function liftHistory(workouts) {
+    const list = Array.isArray(workouts) ? workouts : Object.keys(workouts || {}).map(k => workouts[k]);
+    const out = {};
+    list.forEach(w => {
+      if (!w || !w.date || !Array.isArray(w.exercises)) return;
+      w.exercises.forEach(x => {
+        if (!x || !x.id || !C.workingSetCount(x)) return;
+        const h = out[x.id] = out[x.id] || { sessions: 0, last: null };
+        h.sessions++;
+        if (!h.last || w.date > h.last) h.last = w.date;
+      });
+    });
+    return out;
+  }
+  function seedAliases(id) {
+    const s = (C.SEED_EXERCISES || []).filter(x => x && x.id === id)[0];
+    return s ? (s.aliases || []).map(C.normalizeName) : [];
+  }
+  function resolveCalendarName(name, catalogue, history) {
+    const hist = history || {};
+    const has = id => !!(hist[id] && hist[id].sessions > 0);
+    const full = String(name || '');
+    const bare = full.replace(/\s*[—(].*$/, '').trim() || full.trim();
+    const q = C.normalizeName(bare);
+    const byHistory = (a, b) => ((hist[b.id] || {}).sessions || 0) - ((hist[a.id] || {}).sessions || 0)
+      || (((hist[b.id] || {}).last || '') < ((hist[a.id] || {}).last || '') ? -1 : ((hist[b.id] || {}).last || '') > ((hist[a.id] || {}).last || '') ? 1 : 0)
+      || (a.id < b.id ? -1 : 1);
+    const out = (ex, extra) => Object.assign({ exercise: ex, id: ex ? ex.id : C.exerciseId(bare), log: ex ? ex.name : bare,
+      matched: !!ex, hasHistory: ex ? has(ex.id) : false, linked: false, auto: false }, extra);
+    const unwrapped = full.replace(/\s*—.*$/, '').replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
+    // The wording with its bracket kept is the more specific link, so it is looked up first.
+    const variants = [C.normalizeName(unwrapped), q].filter((v, i, a) => v && a.indexOf(v) === i);
+    for (let i = 0; i < variants.length; i++) {
+      // An alias the app seeded ("incline barbell press" on Incline bench press) is not a choice he
+      // made; only the other aliases count as his links.
+      const linked = (catalogue || []).filter(ex => ex && ex.id && C.normalizeName(ex.name) !== variants[i]
+        && (ex.aliases || []).some(a => C.normalizeName(a) === variants[i] && seedAliases(ex.id).indexOf(variants[i]) < 0)).sort(byHistory);
+      if (linked.length) return out(linked[0], { linked: true });
+    }
+    const m = C.matchExercise(bare, catalogue);
+    if (!m) return out(null);
+    if (has(m.exercise.id)) return out(m.exercise);
+    const found = {};
+    [bare, unwrapped].forEach(v => linkCandidates(v, catalogue, { minScore: AUTO_LINK_MIN, limit: 100 }).forEach(c => {
+      if (c.id !== m.exercise.id && has(c.id) && (!found[c.id] || c.score > found[c.id].score)) found[c.id] = c;
+    }));
+    const cands = Object.keys(found).map(id => ({ id: id, ex: (catalogue || []).filter(x => x && x.id === id)[0] })).filter(c => c.ex);
+    if (!cands.length) return out(m.exercise);
+    cands.sort((a, b) => byHistory(a, b));
+    return out(cands[0].ex, { auto: true, from: m.exercise.id });
   }
 
   // =====================================================================================
@@ -1216,7 +1284,7 @@
       const followed = rec.advised.answer === 'rest' ? !trained
         : !trained ? null
           : (muscleOverlap != null && muscleOverlap >= 0.5) && (rec.advised.answer !== 'pull_back' || (capOk != null && capOk >= 0.5));
-      const drops = s ? s.exercises.map(x => C.fatigueIndex(x.sets, { rir: x.rir })).filter(f => f.applicable).map(f => f.rawDropoff) : [];
+      const drops = s ? s.exercises.map(x => dropoffOf(x.sets, x.rir)).filter(f => f).map(f => f.rawDropoff) : [];
       const pr = prByDate[rec.date] || { n: 0, pr: 0 };
       return Object.assign({}, rec, { actual: { trained: trained, lifts: ids, muscles: actMus, rirAtLeast1Share: capOk },
         answerFollowed: answerFollowed, liftOverlap: liftOverlap, muscleOverlap: muscleOverlap, followed: followed,
@@ -1242,10 +1310,11 @@
   // =====================================================================================
   // What the app stores in targets.planner. The engine's own defaults differ on purpose
   // (restMode 'rest', all seven weekdays); the app passes these explicitly.
-  const APP_DEFAULTS = { priorities: ['chest', 'lats', 'sideDelts'], daysPerWeek: 4,
-    availableWeekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], restMode: 'lighter', sessionMinutes: 75 };
+  const APP_DEFAULTS = { priorities: ['chest', 'sideDelts', 'lats', 'forearms'], daysPerWeek: 5,
+    availableWeekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], restMode: 'lighter', sessionMinutes: 90 };
+  const SESSION_LENGTHS = [60, 75, 90, 120];
   // Muscles the Settings form offers as priorities. Leg muscles are not offered in this pass.
-  const PRIORITY_CHOICES = ['chest', 'lats', 'upperBack', 'frontDelts', 'sideDelts', 'rearDelts', 'triceps', 'biceps'];
+  const PRIORITY_CHOICES = ['chest', 'lats', 'upperBack', 'frontDelts', 'sideDelts', 'rearDelts', 'triceps', 'biceps', 'forearms'];
   // stored: the targets.planner object (or nothing). Returns {ok, errors, settings, config}:
   // settings = the friendly values with app defaults filled in; config = the engine config
   // after validateConfig. A bad value is reported, never silently replaced.
@@ -1257,7 +1326,7 @@
     s.sessionMinutes = +s.sessionMinutes;
     const e = [];
     if (!s.priorities.length) e.push('Pick at least one priority muscle.');
-    if (s.priorities.length > 3) e.push('Pick at most three priority muscles.');
+    if (s.priorities.length > 4) e.push('Pick at most four priority muscles.');
     s.priorities.forEach(p => { if (PRIORITY_CHOICES.indexOf(p) < 0) e.push(`${LABEL[p] || p} cannot be a priority here.`); });
     if (new Set(s.priorities).size !== s.priorities.length) e.push('Each priority muscle can be picked once.');
     if (!(Number.isInteger(s.daysPerWeek) && s.daysPerWeek >= 3 && s.daysPerWeek <= 5)) e.push('Days per week must be 3, 4 or 5.');
@@ -1315,7 +1384,7 @@
   }
 
   return {
-    APP_DEFAULTS: APP_DEFAULTS, PRIORITY_CHOICES: PRIORITY_CHOICES, appSettings: appSettings,
+    APP_DEFAULTS: APP_DEFAULTS, SESSION_LENGTHS: SESSION_LENGTHS, PRIORITY_CHOICES: PRIORITY_CHOICES, appSettings: appSettings,
     daysSinceRows: daysSinceRows, swapItem: swapItem, weekday: weekday,
     DEFAULT_CONFIG: DEFAULT_CONFIG, validateConfig: validateConfig, resolveConfig: resolveConfig,
     describeLift: describeLift, inferEquipment: inferEquipment, movementOf: movementOf,
@@ -1325,7 +1394,7 @@
     targetFor: targetFor, weekState: weekState, readiness: readiness, generateSession: generateSession,
     prescribe: prescribe, planChanges: planChanges, planToday: planToday,
     chooseTrainingDays: chooseTrainingDays, planWeek: planWeek, alternatives: alternatives,
-    adjustVolume: adjustVolume, linkCandidates: linkCandidates, linkAlias: linkAlias, nudgeRecord: nudgeRecord, scoreNudges: scoreNudges,
+    adjustVolume: adjustVolume, linkCandidates: linkCandidates, linkAlias: linkAlias, resolveCalendarName: resolveCalendarName, liftHistory: liftHistory, AUTO_LINK_MIN: AUTO_LINK_MIN, nudgeRecord: nudgeRecord, scoreNudges: scoreNudges,
     addDays: addDays, LEG_MUSCLES: LEG_MUSCLES
   };
 });

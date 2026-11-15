@@ -486,7 +486,7 @@ function renderLiftSession(all, W){
   else liftPlanDay().forEach((s, si) => (s.exercises||[]).forEach((x, xi) => {
     const n = planLiftName(x.name);
     const full = String(x.name||''), bare = full.replace(/\s*[—(].*$/, '').trim() || full.trim();
-    planned.push({ si, xi, x, id: n.id, log: n.log, bare, matched: n.matched, note: full.slice(bare.length).replace(/^[\s—-]+/, '') });
+    planned.push({ si, xi, x, id: n.id, log: n.log, bare, matched: n.matched, hasHistory: n.hasHistory, note: full.slice(bare.length).replace(/^[\s—-]+/, '') });
   }));
   if (!exs.length && !planned.length){
     el.innerHTML = '<div class="empty">Nothing logged for this day.</div>';
@@ -544,9 +544,10 @@ function renderLiftSession(all, W){
       </details>` : '';
     const done = p && todo === 0 && working > 0;
     const swap = p && p.gen && !working ? coachSwapHTML(coach, p.gen, p.xi) : '';
-    // A calendar name with no confident catalogue match: offer the top three lifts to link it
-    // to (planner.js linkCandidates). The choice becomes an alias, so the row ticks off.
-    const link = p && !p.gen && !p.matched && p.x.kind !== '--' ? liftLinkHTML(p) : '';
+    // A calendar row whose lift has no logged sessions (no match, or a match he never logged):
+    // offer the top three lifts to link it to (planner.js linkCandidates). The choice becomes an
+    // alias, which always wins over automatic matching, so the row ticks off.
+    const link = p && !p.gen && !p.hasHistory && p.x.kind !== '--' ? liftLinkHTML(p) : '';
     return `<article class="xc${p ? ' xc-planned' : ''}${p && p.gen ? ' xc-gen' : ''}${done ? ' xc-done' : ''}">${top}
       ${chips ? `<div class="xc-sets">${chips}</div>` : ''}${ex ? fatigueLine(ex) : ''}${swap}${link}${more}</article>`;
   };
@@ -561,7 +562,7 @@ function renderLiftSession(all, W){
       const cat = LedgerPlanner.linkAlias(exerciseCatalog(), b.dataset.link, b.dataset.cal);
       if (!cat) return;
       saveCatalog(cat); haptic(); render();
-      toast(`“${b.dataset.cal}” now logs as ${b.dataset.name}`);
+      toast(`“${b.dataset.bare}” now logs as ${b.dataset.name}`);
     };
   });
 
@@ -1181,17 +1182,26 @@ async function refreshLiftPlan(force){
 }
 // "Barbell RDL — FIRST, free bar" → "Barbell RDL": the calendar's coaching notes are not
 // part of the lift's name, and leaving them in would start a new trend line.
+// A calendar name resolves to a catalogue lift he has logged when one scores well, and an
+// owner's "link to…" always wins (planner.js resolveCalendarName). The history map is rebuilt
+// on each Lift render (renderLift clears it).
+let liftHistoryCache = null;
 function planLiftName(name){
   const bare = String(name||'').replace(/\s*[—(].*$/, '').trim() || String(name||'').trim();
-  const m = LedgerCore.matchExercise(bare, exerciseCatalog());
-  return { log: m ? m.exercise.name : bare, id: m ? m.exercise.id : LedgerCore.exerciseId(bare), matched: !!m };
+  if (typeof LedgerPlanner === 'undefined'){
+    const m = LedgerCore.matchExercise(bare, exerciseCatalog());
+    return { log: m ? m.exercise.name : bare, id: m ? m.exercise.id : LedgerCore.exerciseId(bare), matched: !!m, hasHistory: false };
+  }
+  if (!liftHistoryCache) liftHistoryCache = LedgerPlanner.liftHistory(allWorkouts());
+  const r = LedgerPlanner.resolveCalendarName(name, exerciseCatalog(), liftHistoryCache);
+  return { log: r.log, id: r.id, matched: r.matched, hasHistory: r.hasHistory };
 }
 function liftLinkHTML(p){
   if (typeof LedgerPlanner === 'undefined') return '';
-  const c = LedgerPlanner.linkCandidates(p.bare, exerciseCatalog(), { limit: 3 });
+  const c = LedgerPlanner.linkCandidates(p.bare, exerciseCatalog(), { limit: 4 }).filter(x => x.id !== p.id).slice(0, 3);
   if (!c.length) return '';
   return `<details class="xc-swap"><summary>link to…</summary><div class="xc-swap-opts">${c.map(x =>
-    `<button type="button" class="sm ghost" data-link="${escapeAttr(x.id)}" data-cal="${escapeAttr(p.bare)}" data-name="${escapeAttr(x.name)}">${escapeHtml(x.name)}</button>`).join('')}</div></details>`;
+    `<button type="button" class="sm ghost" data-link="${escapeAttr(x.id)}" data-cal="${escapeAttr(p.x.name || p.bare)}" data-bare="${escapeAttr(p.bare)}" data-name="${escapeAttr(x.name)}">${escapeHtml(x.name)}</button>`).join('')}</div></details>`;
 }
 function planLastTop(id){
   const all = (liftPreviewData && liftPreviewData.all) || allWorkouts();
@@ -1285,7 +1295,7 @@ function renderLift(){
   setLiftPreviewData(all, W, rows);
   applyLiftSubTab();
   renderLiftPlan(); refreshLiftPlan();
-  coachPlan = null; renderCoach(); renderCoachWeek();   // the planner's strip and week list (coach.js)
+  coachPlan = null; liftHistoryCache = null; renderCoach(); renderCoachWeek();   // the planner's strip and week list (coach.js)
   renderLiftChips(all); renderLiftPicker(all); renderLiftSession(all, W); renderLiftPending();
   renderLiftPreview();
   renderLiftTrends(rows); renderLiftCatalog(); renderLiftHistory(all, W);
