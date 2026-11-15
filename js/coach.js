@@ -148,7 +148,9 @@ function renderCoach(){
       `<button type="button" class="sm${c.day.feel === v ? '' : ' ghost'}" data-feel="${v}" aria-pressed="${c.day.feel === v}">${t}</button>`).join('')}</div>`;
   let plan = '';
   if (hasSession){
-    const nameOf = id => (c.state.lifts[id] && c.state.lifts[id].name) || id;
+    // A calendar lift the catalogue does not know is named as the calendar wrote it.
+    const calName = id => { let n = null; liftPlanDay().forEach(sx => (sx.exercises||[]).forEach(x => { if (!n && planLiftName(x.name).id === id) n = planLiftName(x.name).log; })); return n; };
+    const nameOf = id => (c.state.lifts[id] && c.state.lifts[id].name) || calName(id) || id;
     const li = c.calendarIds.length
       ? c.changes.map(x => x.kind === 'skip' ? `<li><b>skip</b>${escapeHtml(nameOf(x.id))}</li>`
           : x.kind === 'add' ? `<li><b>add</b>${escapeHtml(x.name)} ${escapeHtml(x.text)}${x.block === 'legs' ? ' · leg block' : ''}</li>`

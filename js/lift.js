@@ -486,7 +486,7 @@ function renderLiftSession(all, W){
   else liftPlanDay().forEach((s, si) => (s.exercises||[]).forEach((x, xi) => {
     const n = planLiftName(x.name);
     const full = String(x.name||''), bare = full.replace(/\s*[—(].*$/, '').trim() || full.trim();
-    planned.push({ si, xi, x, id: n.id, log: n.log, bare, note: full.slice(bare.length).replace(/^[\s—-]+/, '') });
+    planned.push({ si, xi, x, id: n.id, log: n.log, bare, matched: n.matched, note: full.slice(bare.length).replace(/^[\s—-]+/, '') });
   }));
   if (!exs.length && !planned.length){
     el.innerHTML = '<div class="empty">Nothing logged for this day.</div>';
@@ -544,8 +544,11 @@ function renderLiftSession(all, W){
       </details>` : '';
     const done = p && todo === 0 && working > 0;
     const swap = p && p.gen && !working ? coachSwapHTML(coach, p.gen, p.xi) : '';
+    // A calendar name with no confident catalogue match: offer the top three lifts to link it
+    // to (planner.js linkCandidates). The choice becomes an alias, so the row ticks off.
+    const link = p && !p.gen && !p.matched && p.x.kind !== '--' ? liftLinkHTML(p) : '';
     return `<article class="xc${p ? ' xc-planned' : ''}${p && p.gen ? ' xc-gen' : ''}${done ? ' xc-done' : ''}">${top}
-      ${chips ? `<div class="xc-sets">${chips}</div>` : ''}${ex ? fatigueLine(ex) : ''}${swap}${more}</article>`;
+      ${chips ? `<div class="xc-sets">${chips}</div>` : ''}${ex ? fatigueLine(ex) : ''}${swap}${link}${more}</article>`;
   };
   // The generated session says how long it should take and what did not fit.
   const genHead = coachOn ? `<div class="tactical lift-session-read">Planned session · about ${coach.session.minutes} min`
@@ -553,6 +556,14 @@ function renderLiftSession(all, W){
     + (coach.session.dropped.length ? ` · dropped for time: ${coach.session.dropped.map(d => escapeHtml(d.name)).join(', ')}` : '') + '</div>' : '';
   el.innerHTML = genHead + cards.map(card).join('');
   if (coachOn) bindCoachSwaps(el, coach);
+  el.querySelectorAll('[data-link]').forEach(b=>{
+    b.onclick = ()=>{
+      const cat = LedgerPlanner.linkAlias(exerciseCatalog(), b.dataset.link, b.dataset.cal);
+      if (!cat) return;
+      saveCatalog(cat); haptic(); render();
+      toast(`“${b.dataset.cal}” now logs as ${b.dataset.name}`);
+    };
+  });
 
   if (exs.length){
     const perf=LedgerCore.sessionPerformance(w,Object.keys(all).map(d=>all[d]),{weights:W});
@@ -1173,7 +1184,14 @@ async function refreshLiftPlan(force){
 function planLiftName(name){
   const bare = String(name||'').replace(/\s*[—(].*$/, '').trim() || String(name||'').trim();
   const m = LedgerCore.matchExercise(bare, exerciseCatalog());
-  return { log: m ? m.exercise.name : bare, id: m ? m.exercise.id : LedgerCore.exerciseId(bare) };
+  return { log: m ? m.exercise.name : bare, id: m ? m.exercise.id : LedgerCore.exerciseId(bare), matched: !!m };
+}
+function liftLinkHTML(p){
+  if (typeof LedgerPlanner === 'undefined') return '';
+  const c = LedgerPlanner.linkCandidates(p.bare, exerciseCatalog(), { limit: 3 });
+  if (!c.length) return '';
+  return `<details class="xc-swap"><summary>link to…</summary><div class="xc-swap-opts">${c.map(x =>
+    `<button type="button" class="sm ghost" data-link="${escapeAttr(x.id)}" data-cal="${escapeAttr(p.bare)}" data-name="${escapeAttr(x.name)}">${escapeHtml(x.name)}</button>`).join('')}</div></details>`;
 }
 function planLastTop(id){
   const all = (liftPreviewData && liftPreviewData.all) || allWorkouts();

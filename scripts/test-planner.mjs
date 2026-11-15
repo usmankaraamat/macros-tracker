@@ -480,5 +480,22 @@ function validWeek(w, sessions, n, label) {
   }
 }
 
+// ---- Calendar link: alias saved on the chosen lift -------------------------------------
+{
+  const name = 'Barbell RDL — FIRST, free bar';
+  ok(C.matchExercise('Barbell RDL', CAT) === null, 'link: the calendar name does not match before linking');
+  const top = P.linkCandidates(name, CAT)[0];
+  const cat2 = P.linkAlias(CAT, top.id, name);
+  ok(cat2 && cat2 !== CAT, 'link: a new catalogue comes back');
+  const rec = cat2.find(c => c.id === top.id);
+  ok(rec.aliases.indexOf('Barbell RDL') >= 0, 'link: the bare calendar name is the alias, notes dropped', rec.aliases);
+  ok(CAT.find(c => c.id === top.id).aliases.indexOf('Barbell RDL') < 0, 'link: the input catalogue is untouched');
+  const m = C.matchExercise('Barbell RDL', cat2);
+  ok(m && m.exercise.id === top.id, 'link: after linking, the calendar name matches that lift', m && m.exercise.id);
+  const again = P.linkAlias(cat2, top.id, 'barbell rdl');
+  ok(again.find(c => c.id === top.id).aliases.length === rec.aliases.length, 'link: linking the same wording twice adds nothing');
+  ok(P.linkAlias(CAT, 'no-such-id', name) === null && P.linkAlias(CAT, top.id, '  ') === null, 'link: unknown id or empty name returns null');
+}
+
 console.log(`planner tests: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

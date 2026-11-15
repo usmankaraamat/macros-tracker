@@ -1134,6 +1134,21 @@
     return out.slice(0, o.limit || 5);
   }
 
+  // The calendar's wording saved as an alias on the chosen catalogue lift, so the next
+  // matchExercise finds it. Returns a new catalogue; the input is untouched. Notes after "—"
+  // or "(" are dropped, as linkCandidates does. Unknown id or empty name: null.
+  function linkAlias(catalogue, id, calendarName) {
+    const bare = String(calendarName || '').replace(/\s*[—(].*$/, '').trim() || String(calendarName || '').trim();
+    if (!bare || !(catalogue || []).some(c => c && c.id === id)) return null;
+    const q = C.normalizeName(bare);
+    return catalogue.map(c => {
+      if (!c || c.id !== id) return c;
+      const aliases = (c.aliases || []).slice();
+      if (C.normalizeName(c.name) !== q && !aliases.some(a => C.normalizeName(a) === q)) aliases.push(bare);
+      return Object.assign({}, c, { aliases: aliases });
+    });
+  }
+
   // =====================================================================================
   // 12. Nudge log
   // A record per day: what was advised, then what was done. Plain data, safe to export.
@@ -1293,7 +1308,7 @@
     targetFor: targetFor, weekState: weekState, readiness: readiness, generateSession: generateSession,
     prescribe: prescribe, planChanges: planChanges, planToday: planToday,
     chooseTrainingDays: chooseTrainingDays, planWeek: planWeek, alternatives: alternatives,
-    adjustVolume: adjustVolume, linkCandidates: linkCandidates, nudgeRecord: nudgeRecord, scoreNudges: scoreNudges,
+    adjustVolume: adjustVolume, linkCandidates: linkCandidates, linkAlias: linkAlias, nudgeRecord: nudgeRecord, scoreNudges: scoreNudges,
     addDays: addDays, LEG_MUSCLES: LEG_MUSCLES
   };
 });
