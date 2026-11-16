@@ -45,6 +45,12 @@ function coachCalendarIds(){
   liftPlanDay().forEach(s => (s.exercises||[]).forEach(x => { if (x.kind !== '--') ids.push(planLiftName(x.name).id); }));
   return ids;
 }
+// Every lift in the calendar's coming sessions (the template): the planner prefers them on a tie.
+function coachTemplateIds(){
+  const c = liftPlanCache(), ids = [];
+  if (c && !c.unavailable) (c.sessions||[]).forEach(s => (s.exercises||[]).forEach(x => { if (x.kind !== '--') ids.push(planLiftName(x.name).id); }));
+  return ids;
+}
 function coachPlanFor(date){
   const ps = plannerSettings(), day = coachDay(date), cal = coachCalendarIds();
   const key = JSON.stringify([date, ps.settings, day.feel, day.swaps, cal]);
@@ -56,7 +62,7 @@ function coachPlanFor(date){
     const intake = yesterdayIntake(date);
     if (intake) input.intake = intake;
     out = LedgerPlanner.planToday({ workouts: allWorkouts(), catalogue: exerciseCatalog(), weights: weightSeries(),
-      today: date, config: ps.config, readinessInput: input });
+      today: date, config: ps.config, readinessInput: input, template: coachTemplateIds() });
   }catch(e){ console.warn('planner failed', e); coachPlan = { key, failed: true, date }; return coachPlan; }
   const ctx = { index: out.index, state: out.state, readiness: out.readiness, config: ps.config, model: out.model };
   out.items = out.session.items.map(it => {
@@ -110,7 +116,13 @@ function bindCoachSwaps(el, c){
   });
 }
 
-const COACH_TONE = { train: 'ok', pull_back: 'warn', swap: 'info', rest: 'bad' };
+// The rule notes on one generated lift (knee, back, bone, load held), in plain words.
+function coachNotes(c, id){
+  const it = (c.items||[]).filter(x => x.id === id)[0];
+  const n = it && it.notes ? it.notes : [];
+  return n.length ? ` <span class="ink-dim">(${n.map(escapeHtml).join('; ')})</span>` : '';
+}
+const COACH_TONE ={ train: 'ok', pull_back: 'warn', swap: 'info', rest: 'bad' };
 const COACH_FEEL = [['low', 'Low'], ['ok', 'OK'], ['good', 'Good']];
 function coachDateLabel(iso){
   const d = new Date(iso + 'T00:00:00Z');
@@ -153,9 +165,9 @@ function renderCoach(){
     const nameOf = id => (c.state.lifts[id] && c.state.lifts[id].name) || calName(id) || id;
     const li = c.calendarIds.length
       ? c.changes.map(x => x.kind === 'skip' ? `<li><b>skip</b>${escapeHtml(nameOf(x.id))}</li>`
-          : x.kind === 'add' ? `<li><b>add</b>${escapeHtml(x.name)} ${escapeHtml(x.text)}${x.block === 'legs' ? ' · leg block' : ''}</li>`
+          : x.kind === 'add' ? `<li><b>add</b>${escapeHtml(x.name)} ${escapeHtml(x.text)}${x.block === 'legs' ? ' · lower lift' : ''}${coachNotes(c, x.id)}</li>`
           : `<li><b>cap</b>${escapeHtml(x.text)}</li>`).join('') || '<li>No changes: the calendar plan matches.</li>'
-      : c.items.map(it => `<li><b>${it.block === 'legs' ? 'legs' : 'add'}</b>${escapeHtml(it.name)} ${escapeHtml(it.prescription.text)}</li>`).join('');
+      : c.items.map(it => `<li><b>${it.block === 'legs' ? 'lower' : 'add'}</b>${escapeHtml(it.name)} ${escapeHtml(it.prescription.text)}${coachNotes(c, it.id)}</li>`).join('');
     const dropped = c.session.dropped.length ? ` · dropped for time: ${c.session.dropped.map(d => escapeHtml(d.name)).join(', ')}` : '';
     const choice = coachChoice(c.date);
     plan = `<div class="sub">${c.calendarIds.length ? 'Changes to today’s plan' : 'Today’s session'}</div>
@@ -224,12 +236,12 @@ function renderCoachWeek(){
     const intake = yesterdayIntake(VIEW_DATE);
     if (intake) input.intake = intake;
     w = LedgerPlanner.planWeek({ workouts: allWorkouts(), catalogue: exerciseCatalog(), weights: weightSeries(),
-      today: VIEW_DATE, config: ps.config, daysPerWeek: ps.settings.daysPerWeek, readinessInput: input });
+      today: VIEW_DATE, config: ps.config, daysPerWeek: ps.settings.daysPerWeek, readinessInput: input, template: coachTemplateIds() });
   }catch(e){ console.warn('planWeek failed', e); body.innerHTML = '<div class="rd-mins">The week could not be planned.</div>'; return; }
   const rows = w.days.map(d => {
     const label = escapeHtml(coachDateLabel(d.date));
     if (!d.train) return `<li class="wk-rest"><b>${label}</b><span>rest</span></li>`;
-    const its = d.session.items.map(it => `${escapeHtml(it.name)} ${it.sets}×${it.prescription.reps}${it.block === 'legs' ? ' (legs)' : ''}`).join(' · ');
+    const its = d.session.items.map(it => `${escapeHtml(it.name)} ${it.sets}×${it.prescription.reps}${it.block === 'legs' ? ' (lower)' : ''}`).join(' · ');
     return `<li><b>${label}</b><span>${its || 'light day'} <i>· ${d.session.minutes} min</i></span></li>`;
   }).join('');
   const sum = ['chest', 'lats', 'sideDelts', 'quads', 'hamstrings'].filter(g => w.summary[g])

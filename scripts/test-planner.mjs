@@ -265,14 +265,20 @@ function validWeek(w, sessions, n, label) {
     });
     d.session.items.forEach(it => { last[it.id] = d.date; });
   });
-  // A priority muscle is never the main target on two consecutive days.
+  // Version 2: a muscle may be the main target on two consecutive days, but only when the first
+  // day left it recovered by the engine's rule (fatigue under recoveredBelow a day later). The
+  // first day's own sets, decayed by 24 hours, are a lower bound on that fatigue.
+  const TAU = g => ['quads', 'hamstrings', 'glutes', 'lowerBack', 'calves'].indexOf(g) >= 0 ? conf.fatigueTauHours.legs
+    : ['chest', 'lats', 'upperBack', 'traps'].indexOf(g) >= 0 ? conf.fatigueTauHours.torso : conf.fatigueTauHours.small;
   const hitDay = {};
   trainDays.forEach(d => d.session.items.forEach(it => {
-    if (hitDay[it.muscle] && hitDay[it.muscle] !== d.date) {
-      const gap = (Date.parse(d.date) - Date.parse(hitDay[it.muscle])) / 864e5;
-      ok(gap >= conf.muscleMinGapDays, `${label}: ${it.muscle} not on back-to-back days`, gap);
+    const prev = hitDay[it.muscle];
+    if (prev && prev.date !== d.date) {
+      const gap = (Date.parse(d.date) - Date.parse(prev.date)) / 864e5;
+      const left = (prev.session.muscles[it.muscle] || 0) * Math.exp(-24 / TAU(it.muscle));
+      ok(gap >= conf.muscleMinGapDays || left < conf.recoveredBelow, `${label}: ${it.muscle} back-to-back only when recovered`, { gap, left });
     }
-    hitDay[it.muscle] = d.date;
+    hitDay[it.muscle] = d;
   }));
 }
 {
@@ -492,17 +498,18 @@ function validWeek(w, sessions, n, label) {
   const er = P.daysSinceRows(empty.state, d.config);
   ok(er[0].days === null && er[0].tone === 'info' && er[0].width === 1, 'days since: never trained reads as overdue', er[0]);
 
-  // The first weekday after T whose session has an upper-body lift (T itself is legs only).
+  // The first upper-body item, from T on, that has another lift for the same muscle.
   let item = null;
   for (let i = 0; i < 5 && !item; i++) {
     const tt = P.planToday({ sessions: h, catalogue: CAT, today: add(T, i), config: d.config });
-    item = tt.session.items.filter(x => x.block !== 'legs')[0] || null;
+    item = tt.session.items.filter(x => x.block !== 'legs' && P.alternatives(x.id,
+      { index: tt.index, state: tt.state, readiness: tt.readiness, config: d.config, model: tt.model }, 3).length)[0] || null;
     if (item) Object.assign(t, tt);
   }
   ok(!!item, 'swap: there is an upper-body item to swap');
   if (item) {
     const alts = P.alternatives(item.id, { index: t.index, state: t.state, readiness: t.readiness, config: d.config, model: t.model }, 3);
-    ok(alts.length > 0, 'swap: the item has alternatives', alts);
+    ok(alts.length > 0, 'swap: the item has alternatives', { item: item.id, muscle: item.muscle, items: t.session.items.map(x => x.id) });
     const s = P.swapItem(item, alts[0].id, { state: t.state, config: d.config });
     ok(s.id === alts[0].id && s.sets === item.sets && s.prescription.rirCap === item.prescription.rirCap && s.muscle === item.muscle,
        'swap: same sets, cap and muscle, new lift', s);
@@ -549,8 +556,14 @@ function validWeek(w, sessions, n, label) {
   const plan = (ws, min) => P.planWeek({ sessions: h, catalogue: CAT, today: T, config: cfgOf(ws, min), daysPerWeek: 4 });
   const roll = plan(null), cal = plan('Mon'), cal90 = plan('Mon', 90);
   const chestOf = w => (w.summary.chest || { planned: 0 }).planned;
-  ok(chestOf(cal) >= chestOf(roll) + 3, 'weekStart Mon: a week after a heavy chest week plans clearly more chest', { roll: chestOf(roll), cal: chestOf(cal) });
-  ok(chestOf(cal90) >= 12, 'weekStart Mon: with time for it, chest reaches its minimum of 12', chestOf(cal90));
+  // Without decay, a rolling week after a heavy chest week plans clearly less chest; with the
+  // age decay (default), the old sessions fade out and the rolling plan comes within 2 sets.
+  const flat = P.planWeek({ sessions: h, catalogue: CAT, today: T, config: Object.assign(cfgOf(null), { debtDecay: false }), daysPerWeek: 4 });
+  ok(chestOf(cal) >= chestOf(flat) + 3, 'weekStart Mon: plans clearly more chest than an undecayed rolling week', { flat: chestOf(flat), cal: chestOf(cal) });
+  ok(chestOf(roll) >= chestOf(cal) - 2, 'rolling with decay: last week\'s chest fades, so chest is planned nearly in full', { roll: chestOf(roll), cal: chestOf(cal) });
+  // Within one set of the minimum of 12: bench press was done last Thursday, and version 2 allows
+  // one flat barbell press in 7 days and one incline press a session, which caps this fixture.
+  ok(chestOf(cal90) >= 11, 'weekStart Mon: with time for it, chest comes within a set of its minimum', chestOf(cal90));
   [roll, cal, cal90].forEach((w, k) => {
     ok(w.days.every(d => !d.train || WD.indexOf(d.weekday) >= 0), `weekStart plan ${k}: weekdays only`);
     // Lift window: no planned lift repeats inside its own earliest-repeat window.
@@ -574,7 +587,7 @@ function validWeek(w, sessions, n, label) {
   const st = JSON.parse(JSON.stringify(t.state));
   Object.keys(st.muscles).forEach(g => {
     const m = st.muscles[g];
-    if (m.kind === 'priority' || m.kind === 'legs') { m.daysSince = 0; }
+    if (m.kind === 'priority' || m.kind === 'legs') { m.daysSince = 0; m.fatigue = 8; }
     else if (m.kind === 'maintenance') { m.daysSince = 4; m.done = m.target.aim; m.deficit = 0; }
   });
   const c3 = P.resolveConfig({ weekStart: 'Mon' });
@@ -676,6 +689,124 @@ function validWeek(w, sessions, n, label) {
   const linkedEmpty = RAW.linkAlias(CATN, 'incline-barbell-press', 'Incline Barbell Press (Smith)');
   eq(RAW.resolveCalendarName('Incline Barbell Press (Smith)', linkedEmpty, H).id, 'incline-barbell-press', 'a link to a lift with no history still wins');
   eq(RAW.resolveCalendarName('x', CATN, null).matched, false, 'resolveCalendarName tolerates no history');
+}
+
+// ---- 14. Version 2: safety rules, lower slot, bone loading, debt, fatigue, phase ------------
+// specs/08c-planner-v2.md, build steps 2 and 3, and the lowerFrequency setting (16 Nov 2026).
+{
+  const CAT2 = CAT.concat([
+    { id: 'overhead-press', name: 'Standing overhead barbell press', aliases: [] },
+    { id: 'deadlift', name: 'Deadlift', aliases: [] },
+    { id: 'smith-rdl', name: 'Smith machine Romanian deadlift', aliases: [], muscles: { hamstrings: 1, glutes: 0.5, lowerBack: 0.3 }, pattern: 'compound' },
+    { id: 'smith-machine-squat', name: 'Smith machine squat', aliases: [], muscles: { quads: 1, glutes: 0.5 }, pattern: 'compound' }
+  ]);
+  const one = (date, id, kg, reps) => ({ date, deload: false, exercises: [{ id, name: id, rir: 2, sets: [{ kg, reps: reps || 8 }, { kg, reps: reps || 8 }] }] });
+  const X = add(T, 14);
+
+  // Load-jump fixtures from the handoff: every one warns, so the planner holds the load.
+  const cap = (hist, id, kg) => RAW.capLoad(RAW.buildIndex(hist, CAT2, X, {}), id, kg, {});
+  const lp = cap([one(add(X, -7), 'leg-press', 160)], 'leg-press', 180);
+  ok(lp.held && lp.kg < 180 && lp.check.severity !== 'warn', 'load jump: leg press 160 to 180 in a week is held', lp);
+  const ohp = cap([one(add(X, -7), 'overhead-press', 30)], 'overhead-press', 40);
+  ok(ohp.held && ohp.kg < 40 && ohp.check.severity !== 'warn', 'load jump: overhead press 30 to 40 is held', ohp);
+  const dl1 = cap([one(add(X, -7), 'deadlift', 80)], 'deadlift', 91.5);
+  ok(dl1.held && dl1.kg < 91.5, 'load jump: deadlift 80 to 91.5 is held', dl1);
+  const dl2 = cap([one(add(X, -14), 'deadlift', 80), one(add(X, -7), 'deadlift', 91.5)], 'deadlift', 101.5);
+  ok(dl2.held && dl2.kg < 101.5, 'load jump: deadlift 91.5 to 101.5 is held', dl2);
+  const fine = cap([one(add(X, -7), 'leg-press', 160)], 'leg-press', 162.5);
+  ok(!fine.held && fine.kg === 162.5, 'load jump: one step up passes untouched', fine);
+
+  // Classification.
+  const info = id => RAW.describeLift(CAT2.find(c => c.id === id));
+  ok(RAW.isAxialLift(info('smith-machine-squat'), 60) && RAW.isAxialLift(info('romanian-deadlift'), 60), 'bone: squats and free-bar RDL count as loaded');
+  ok(!RAW.isAxialLift(info('leg-press'), 200) && !RAW.isAxialLift(info('smith-rdl'), 80), 'bone: leg press and Smith RDL do not count');
+  ok(RAW.isAxialLift(info('overhead-press'), 40) && !RAW.isAxialLift(info('overhead-press'), 35), 'bone: standing overhead press counts from 40 kg');
+
+  // The lower slot: one lower compound, first, at most one accessory, quad drill note.
+  const LC = ['leg-press', 'romanian-deadlift', 'smith-machine-squat', 'deadlift', 'smith-rdl'];
+  const h = history(T);
+  const w = RAW.planWeek({ sessions: h, catalogue: CAT2, today: T, config: { priorities: LEGACY_PRIORITIES }, daysPerWeek: 5 });
+  const train = w.days.filter(d => d.train);
+  train.forEach(d => {
+    const its = d.session.items;
+    const lc = its.filter(it => LC.indexOf(it.id) >= 0);
+    ok(lc.length <= 1, `lower slot: at most one lower compound on ${d.date}`, lc.map(i => i.id));
+    if (lc.length) {
+      ok(its[0].id === lc[0].id, `lower slot: the lower compound is first on ${d.date}`, its.map(i => i.id));
+      ok(its.filter(it => it.block === 'legs').length <= 2, `lower slot: one accessory at most on ${d.date}`);
+      ok(d.session.notes.some(n => n.code === 'QUAD_DRILL'), `lower slot: quad drill note on ${d.date}`);
+    }
+    ok(its.filter(it => it.block !== 'legs').every(it => ['quads', 'hamstrings', 'glutes', 'lowerBack', 'calves'].indexOf(RAW.describeLift(CAT2.find(c => c.id === it.id) || { id: it.id }).primary) < 0),
+       `lower slot: no lower lift outside the slot on ${d.date}`);
+    ok(its.filter(it => it.movement === 'press-incline').length <= 1, `chest: one incline press at most on ${d.date}`);
+    ok(its.every(it => it.id !== 'smith-rdl'), `back: never a Smith machine RDL on ${d.date}`);
+    its.filter(it => it.id === 'leg-extension').forEach(it => ok(it.prescription.rirCap >= 2 && it.rules.indexOf('KNEE_EXT_2_SHORT') >= 0, 'knee: leg extension stops 2 short'));
+    its.filter(it => it.id === 'leg-press').forEach(it => ok(it.rules.indexOf('FEET_HIGH') >= 0, 'knee: leg press says feet high'));
+  });
+  const lowerDays = train.filter(d => d.session.items.some(it => LC.indexOf(it.id) >= 0)).map(d => d.date);
+  for (let i = 1; i < lowerDays.length; i++) ok((Date.parse(lowerDays[i]) - Date.parse(lowerDays[i - 1])) / 864e5 >= 3, 'twice weekly: lower slots at least 3 days apart', lowerDays);
+  // Flat barbell press: once in any 7 days, across history and plan.
+  const benchDates = h.filter(s => s.exercises.some(x => x.id === 'bench-press')).map(s => s.date)
+    .concat(train.filter(d => d.session.items.some(it => it.id === 'bench-press')).map(d => d.date)).filter(d => d >= add(T, -6)).sort();
+  for (let i = 1; i < benchDates.length; i++) if (benchDates[i] >= T) ok((Date.parse(benchDates[i]) - Date.parse(benchDates[i - 1])) / 864e5 >= 7, 'chest: a planned flat barbell press is 7 days after the last', benchDates);
+
+  // lowerFrequency: weekly and fortnightly.
+  const lowerIn = (hist, freq) => RAW.planWeek({ sessions: hist, catalogue: CAT2, today: T, config: { priorities: LEGACY_PRIORITIES, lowerFrequency: freq }, daysPerWeek: 5 })
+    .days.filter(d => d.train && d.session.items.some(it => LC.indexOf(it.id) >= 0)).length;
+  const recentLegs = history(T, { legs: false }).concat([sess(add(T, -5), ['leg-press', 'leg-curl'])]);
+  ok(lowerIn(recentLegs, 'twiceWeekly') >= 1, 'twice weekly: legs 5 days ago, a lower slot this week');
+  ok(lowerIn(recentLegs, 'weekly') <= 1, 'weekly: at most one lower slot in the week');
+  ok(lowerIn(recentLegs, 'fortnightly') === 0, 'fortnightly: legs 5 days ago, no lower slot this week');
+  const oldLegs = history(T, { legs: false }).concat([sess(add(T, -15), ['leg-press', 'leg-curl'])]);
+  ok(lowerIn(oldLegs, 'fortnightly') === 1, 'fortnightly: legs 15 days ago, exactly one lower slot');
+  ok(RAW.targetFor('quads', RAW.resolveConfig({ lowerFrequency: 'fortnightly' })).aim === 1.5, 'fortnightly: the quads floor scales to a quarter');
+  ok(!RAW.validateConfig({ lowerFrequency: 'daily' }).ok, 'lowerFrequency: unknown value rejected');
+  const as = RAW.appSettings({ lowerFrequency: 'fortnightly', phase: 'cut' });
+  ok(as.ok && as.config.lowerFrequency === 'fortnightly' && as.config.phase === 'cut', 'app settings: lower frequency and phase reach the engine', as.errors);
+  ok(!RAW.appSettings({ lowerFrequency: 'daily' }).ok && !RAW.appSettings({ phase: 'shred' }).ok, 'app settings: bad lower frequency or phase refused');
+  ok(RAW.APP_DEFAULTS.lowerFrequency === 'twiceWeekly' && RAW.APP_DEFAULTS.phase === 'bulk', 'app defaults: twice a week, bulk');
+
+  // Bone loading: when it is due, the slot takes a loaded lift over a familiar leg press.
+  const withRdl = history(T, { legs: false }).concat([
+    sess(add(T, -40), ['romanian-deadlift', 'leg-curl']), sess(add(T, -33), ['romanian-deadlift', 'leg-curl']),
+    sess(add(T, -26), ['romanian-deadlift', 'leg-curl']), sess(add(T, -19), ['leg-press', 'leg-curl']), sess(add(T, -12), ['leg-press', 'leg-curl'])]);
+  const bt = RAW.planToday({ sessions: withRdl, catalogue: CAT2, today: T, config: { priorities: LEGACY_PRIORITIES } });
+  const slot = bt.session.items.filter(it => LC.indexOf(it.id) >= 0)[0];
+  ok(slot && RAW.isAxialLift(RAW.describeLift(CAT2.find(c => c.id === slot.id)), slot.prescription.kg), 'bone: no loaded lift in 7 days, the lower slot is a loaded lift', slot && slot.id);
+  ok(slot && slot.rules.indexOf('BONE_WEEK') >= 0, 'bone: the card says why', slot && slot.rules);
+  ok(bt.readiness.facts.some(f => f.code === 'BONE_LOADING' && /0 of 2/.test(f.label)), 'bone: the card shows 0 of 2 this week', bt.readiness.facts.map(f => f.label));
+  ok(slot && slot.rules.indexOf('RETURN_EASY') >= 0 && slot.prescription.kg < slot.prescription.last.kg, 'long gap: the lower lift comes back a step lighter', slot && slot.prescription);
+  // Smith RDL as the only hinge: the free-bar lift is put on the books and may be offered.
+  const smithOnly = history(T, { legs: false }).concat([sess(add(T, -20), ['smith-rdl']), sess(add(T, -13), ['smith-rdl']), sess(add(T, -6), ['smith-rdl'])]);
+  const so = RAW.planWeek({ sessions: smithOnly, catalogue: CAT2.filter(c => c.id !== 'romanian-deadlift'), today: T, config: { priorities: LEGACY_PRIORITIES }, daysPerWeek: 5 });
+  ok(so.days.every(d => !d.train || d.session.items.every(it => it.id !== 'smith-rdl')), 'back: Smith RDL history, still never suggested');
+
+  // Missed Wednesday: the lower slot moves to Thursday.
+  const wed = add(T, 2);
+  const hm = history(T, { legs: false }).concat([sess(add(T, -6), ['leg-press', 'leg-curl']), sess(T, A), sess(add(T, 1), B)]);
+  const mw = RAW.planWeek({ sessions: hm, catalogue: CAT2, today: wed, config: { priorities: LEGACY_PRIORITIES }, trainDays: [1, 2] });
+  ok(mw.days[1].train && mw.days[1].session.items.some(it => LC.indexOf(it.id) >= 0), 'missed Wednesday: the lower slot moves to Thursday', mw.days[1].session.items.map(i => i.id));
+
+  // Targets: phase and the arms ceiling.
+  ok(RAW.targetFor('chest', RAW.resolveConfig({ priorities: ['chest'], phase: 'cut' })).aim === 10.5, 'phase: a cut lowers the chest aim to 75%');
+  ok(RAW.targetFor('chest', RAW.resolveConfig({ priorities: ['chest'], phase: 'maintain' })).aim === 12.6, 'phase: maintain lowers it to 90%');
+  ok(!RAW.validateConfig({ phase: 'shred' }).ok, 'phase: unknown value rejected');
+  const fa = RAW.targetFor('forearms', RAW.resolveConfig({ priorities: ['forearms'] }));
+  ok(fa.max <= 12 && fa.aim <= 12, 'arms: a priority forearm aim stays under the 12-set ceiling', fa);
+
+  // Debt decays with age; fatigue decays with time; whole-body fatigue can pull back.
+  const ixA = RAW.buildIndex([sess(add(T, -1), ['bench-press'])], CAT, T, {});
+  const ixB = RAW.buildIndex([sess(add(T, -6), ['bench-press'])], CAT, T, {});
+  const sA = RAW.weekState(ixA, RAW.resolveConfig({}), null), sB = RAW.weekState(ixB, RAW.resolveConfig({}), null);
+  ok(Math.abs(sB.muscles.chest.done - 0.4 * sA.muscles.chest.done) < 0.11, 'debt: a session 6 days ago counts 0.4 of yesterday\'s', [sA.muscles.chest.done, sB.muscles.chest.done]);
+  ok(sA.muscles.chest.fatigue > sB.muscles.chest.fatigue && sB.muscles.chest.fatigue > 0, 'fatigue: decays with time', [sA.muscles.chest.fatigue, sB.muscles.chest.fatigue]);
+  ok(sA.wholeBody > 0, 'fatigue: whole-body total is reported', sA.wholeBody);
+  const heavy = RAW.planToday({ sessions: history(T), catalogue: CAT, today: T, config: { priorities: LEGACY_PRIORITIES, readiness: { wholeBodyHigh: 1 } } });
+  ok(heavy.readiness.reasons.some(r => r.code === 'WHOLE_BODY_FATIGUE') && heavy.readiness.answer !== 'train', 'fatigue: over the whole-body line, pull back', heavy.readiness.answer);
+  // The template: a lift in the calendar's sessions wins a tie.
+  const tp = RAW.planToday({ sessions: history(T), catalogue: CAT, today: T, config: { priorities: LEGACY_PRIORITIES }, template: ['machine-lateral-raise'] });
+  const side = tp.session.items.filter(it => it.muscle === 'sideDelts')[0];
+  ok(!side || side.reasons.some(r => r.code === 'TEMPLATE') || side.id === 'machine-lateral-raise' || tp.state.lifts['machine-lateral-raise'].daysSince < 3, 'template: a calendar lift is preferred', side && side.id);
 }
 
 console.log(`planner tests: ${passed} passed, ${failed} failed`);

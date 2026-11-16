@@ -735,6 +735,8 @@ function fillPlanner(){
   }
   pm.value = String(ps.sessionMinutes);
   document.getElementById('plRestMode').value = ps.restMode;
+  document.getElementById('plLower').value = ps.lowerFrequency;
+  document.getElementById('plPhase').value = ps.phase;
   document.getElementById('plWeekdays').innerHTML = WEEKDAYS.map(d =>
     `<label class="pill"><input type="checkbox" data-plday="${d}" hidden${ps.availableWeekdays.indexOf(d) >= 0 ? ' checked' : ''}> ${d}</label>`).join('');
 }
@@ -744,7 +746,9 @@ function readPlannerForm(){
     daysPerWeek: +document.getElementById('plDays').value,
     availableWeekdays: Array.from(document.querySelectorAll('[data-plday]')).filter(cb => cb.checked).map(cb => cb.dataset.plday),
     restMode: document.getElementById('plRestMode').value,
-    sessionMinutes: +document.getElementById('plMinutes').value
+    sessionMinutes: +document.getElementById('plMinutes').value,
+    lowerFrequency: document.getElementById('plLower').value,
+    phase: document.getElementById('plPhase').value
   };
 }
 document.getElementById('savePlanner').onclick = ()=>{
@@ -754,11 +758,11 @@ document.getElementById('savePlanner').onclick = ()=>{
   PLANNER_SETTINGS = r.settings;
   saveTargets(); fillPlanner(); render();
   const s = r.settings;
-  setStatus(st, `Saved · ${s.priorities.map(g => LedgerCore.MUSCLE_LABEL[g]).join(' > ')} · ${s.daysPerWeek} days a week on ${s.availableWeekdays.join(', ')} · ${s.sessionMinutes} min.`, 'good');
+  setStatus(st, `Saved · ${s.priorities.map(g => LedgerCore.MUSCLE_LABEL[g]).join(' > ')} · ${s.daysPerWeek} days a week on ${s.availableWeekdays.join(', ')} · ${s.sessionMinutes} min · lower body ${({ twiceWeekly: 'twice a week', weekly: 'once a week', fortnightly: 'once every two weeks' })[s.lowerFrequency]} · ${s.phase}.`, 'good');
 };
 document.getElementById('resetPlanner').onclick = ()=>{
   PLANNER_SETTINGS = null; saveTargets(); fillPlanner(); render();
-  setStatus(document.getElementById('plannerStatus'), 'Planner defaults restored: chest > side delts > lats > forearms, 5 days a week, Monday to Friday, lighter session instead of rest, 90 min.', 'good');
+  setStatus(document.getElementById('plannerStatus'), 'Planner defaults restored: chest > side delts > lats > forearms, 5 days a week, Monday to Friday, lighter session instead of rest, 90 min, lower body twice a week, bulk.', 'good');
 };
 document.getElementById('savePens').onclick = ()=>{
   const st = document.getElementById('penStatus');

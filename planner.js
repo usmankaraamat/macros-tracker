@@ -67,7 +67,20 @@
     perSessionMuscleCap: 8,                         // fractional hard sets for one muscle in one session
     liftWindow: { earliest: 3, idealMin: 4, idealMax: 8 },   // days between two sessions of the same lift
     muscleMinGapDays: 2,                            // days between two sessions that hit a muscle hard
-    legBlockGapDays: 3,                             // days between two leg blocks
+    legBlockGapDays: 3,                             // days between two lower slots (twiceWeekly)
+    // How often the lower slot (one lower compound, an optional accessory, first in the session)
+    // may be scheduled: 'twiceWeekly' = once in a rolling 3 days (legBlockGapDays), 'weekly' = once
+    // in 7, 'fortnightly' = once in 14. The quads and hamstrings floors scale with it (x1, x0.5, x0.25).
+    lowerFrequency: 'twiceWeekly',
+    longGapDays: 10,                                // a lower lift after more than this: start below the last load
+    // Training phase: weekly set targets x1 (bulk), x0.9 (maintain), x0.75 (cut). He switches it.
+    phase: 'bulk',
+    armsCap: 12,                                    // weekly sets ceiling for biceps, triceps, forearms
+    // Fatigue left in a muscle decays with this time constant (hours): legs slowest, arms fastest.
+    fatigueTauHours: { legs: 72, torso: 60, small: 42 },
+    // "Done this week" in rolling mode (weekStart null): a session 1-2 days ago counts in full,
+    // older ones count less (x0.85 at 3 days down to x0.25 at 7), so a missed day turns into debt.
+    debtDecay: true,
     rirCap: { compound: 2, isolation: 1, legs: 2 },
     pullBackRirExtra: 1,
     maxConsecutiveDays: 7,                          // kept for compatibility; days in a row are no longer a rule
@@ -76,7 +89,7 @@
     setsPerLift: { min: 2, max: 4, legBlock: [2, 3] },
     maxLiftsPerSession: 7,
     loadStep: { barbell: 2.5, smith: 2.5, machine: 2.5, cable: 2.5, dumbbell: 2, bodyweight: 0, other: 2.5 },
-    timing: { warmupMin: 8, workSec: 45, restSec: { compound: 150, isolation: 90 }, changeoverSec: 60 },
+    timing: { warmupMin: 8, workSec: 45, restSec: { compound: 150, isolation: 90 }, changeoverSec: 60, drillMin: 2 },
     availableWeekdays: WEEKDAY.slice(),             // weekdays he can train on, e.g. ['Mon','Tue','Wed','Thu','Fri']
     restMode: 'rest',                               // 'rest' or 'lighter' (never says "rest")
     // How "sets done this week" is counted. null: the 7 days before today (rolling). A weekday
@@ -89,14 +102,26 @@
       dropoffHighCount: 2,      // lifts in the last session over the drop-off line
       regressingCount: 2,       // regressing lifts (done in the last 14 days) = a fatigue signal
       restRegressingCount: 3,   // ...this many plus a drop-off signal = rest
-      lowIntakeRatio: 0.85      // yesterday's kcal below 85% of the corridor floor = low intake
+      lowIntakeRatio: 0.85,     // yesterday's kcal below 85% of the corridor floor = low intake
+      wholeBodyHigh: 45         // decayed hard sets across all muscles; above this = pull back
     },
+    // A muscle counts as recovered once its minimum gap has passed OR the fatigue left in it is
+    // under this many sets, so push and pull on back-to-back days are allowed.
+    recoveredBelow: 4,                              // half of perSessionMuscleCap
     learning: { minPerSide: 15, minTotal: 30, mediumZ: 1.5, highZ: 2.5, highTotal: 80, hardFloorDays: 2 },
     volumeStep: 2,              // weekly sets added or removed by the between-week adjustment
     volumeAims: {},             // muscle -> weekly aim, written by adjustVolume()
     stallRotateDays: 21,        // no new best for this long (and 3+ sessions) = rotate the lift out
     stapleWindowDays: 56        // "recent" for how familiar a lift is
   };
+  const LOWER_FREQ = ['twiceWeekly', 'weekly', 'fortnightly'];
+  const PHASES = ['bulk', 'maintain', 'cut'];
+  const PHASE_FACTOR = { bulk: 1, maintain: 0.9, cut: 0.75 };
+  const ARM_MUSCLES = ['biceps', 'triceps', 'forearms'];
+  const TAU_GROUP = { quads: 'legs', hamstrings: 'legs', glutes: 'legs', lowerBack: 'legs', calves: 'legs',
+    chest: 'torso', lats: 'torso', upperBack: 'torso', traps: 'torso' };
+  const lowerGapDays = cfg => cfg.lowerFrequency === 'weekly' ? 7 : cfg.lowerFrequency === 'fortnightly' ? 14 : cfg.legBlockGapDays;
+  const lowerFloorFactor = cfg => cfg.lowerFrequency === 'weekly' ? 0.5 : cfg.lowerFrequency === 'fortnightly' ? 0.25 : 1;
   const PRIORITY_WEIGHTS = [1.5, 1.4, 1.3, 1.2, 1.1, 1.05];
 
   function isObj(x) { return x && typeof x === 'object' && !Array.isArray(x); }
@@ -153,6 +178,9 @@
       e.push('liftWindow needs 1 <= earliest <= idealMin <= idealMax <= 28');
     if (!isNum(c.muscleMinGapDays) || c.muscleMinGapDays < 1 || c.muscleMinGapDays > 7) e.push('muscleMinGapDays must be 1..7');
     if (!isNum(c.legBlockGapDays) || c.legBlockGapDays < 1 || c.legBlockGapDays > 7) e.push('legBlockGapDays must be 1..7');
+    if (LOWER_FREQ.indexOf(c.lowerFrequency) < 0) e.push('lowerFrequency must be ' + LOWER_FREQ.join(', '));
+    if (PHASES.indexOf(c.phase) < 0) e.push('phase must be ' + PHASES.join(', '));
+    if (!isNum(c.armsCap) || c.armsCap < 4 || c.armsCap > 30) e.push('armsCap must be 4..30');
     ['compound', 'isolation', 'legs'].forEach(k => {
       const v = c.rirCap[k];
       if (!isNum(v) || v < 0 || v > 5) e.push(`rirCap.${k} must be 0..5`);
@@ -222,6 +250,113 @@
     }
   }
   const family = mv => String(mv || '').split('-')[0];
+
+  // =====================================================================================
+  // 2b. Safety classification (step 2 rules): lower slot, knee, back, bone loading
+  // =====================================================================================
+  const LOWER = ['quads', 'hamstrings', 'glutes', 'lowerBack', 'calves'];
+  const nameOfInfo = info => ' ' + C.normalizeName(info.name || info.id) + ' ';
+  const isLowerLift = info => !!info && LOWER.indexOf(info.primary) >= 0;
+  // One lower compound per session: squat, Romanian or other deadlift, leg press (a hack squat
+  // counts as the machine knee lift).
+  function lowerKind(info) {
+    if (!isLowerLift(info) || info.pattern !== 'compound') return null;
+    const n = nameOfInfo(info);
+    if (/ leg press | hack /.test(n)) return 'legpress';
+    if (/ lunge | split squat | step up | hip thrust /.test(n)) return null;
+    if (/ squat /.test(n)) return 'squat';
+    if (/ deadlift | rdl | good morning /.test(n)) return 'hinge';
+    return null;
+  }
+  const isLowerAccessory = info => isLowerLift(info) && info.pattern !== 'compound' && / leg curl | leg extension /.test(nameOfInfo(info));
+  const isLegExtension = info => / leg extension /.test(nameOfInfo(info));
+  const isLegPress = info => / leg press /.test(nameOfInfo(info));
+  const isSmithHinge = info => lowerKind(info) === 'hinge' && info.equipment === 'smith';
+  function isStandingOHP(info) {
+    const n = nameOfInfo(info);
+    return / press /.test(n) && / overhead | military | ohp | standing /.test(n)
+      && !/ seated | machine | dumbbell | smith | cable | incline | bench /.test(n)
+      && (info.primary === 'frontDelts' || info.primary === 'sideDelts');
+  }
+  // Axial = loads the spine: squat variants (a Smith squat counts: the bar is on the back),
+  // deadlifts, loaded holds, standing overhead press at 40 kg or more. Machines and cables never.
+  function isAxialLift(info, kg) {
+    if (!info) return false;
+    const n = nameOfInfo(info);
+    if (/ cable | leg press | hack | belt /.test(n)) return false;
+    if (/ squat /.test(n) && !/ machine press /.test(n)) return true;
+    if (/ deadlift | rdl /.test(n)) return !/ smith /.test(n);
+    if (/ carry | farmer | suitcase | loaded hold /.test(n)) return true;
+    if (isStandingOHP(info) && +kg >= 40) return true;
+    return false;
+  }
+  const topKgOf = sets => (sets || []).reduce((m, s) => Math.max(m, +s.kg || 0), 0);
+  // Axial work in a rolling window ending the day before index.today (including planned sessions).
+  function boneStatus(index, days) {
+    const from = addDays(index.today, -days);
+    const ss = index.sessions.filter(s => s.date >= from);
+    const ax = ss.filter(s => s.exercises.some(x => isAxialLift(index.info[x.id], topKgOf(x.sets))));
+    return { sessions: ss.length, axial: ax.length, dates: ax.map(s => s.date) };
+  }
+  // The plain-words reason line for every rule that shaped a card.
+  const REASON_WORDS = {
+    LOWER_SLOT: 'the one lower lift today, first in the session',
+    LOWER_ACCESSORY: 'lower accessory, after the lower lift',
+    AXIAL_DUE: 'no squat or deadlift for 4 days, so this one is a loaded lift (bone loading)',
+    BONE_WEEK: 'a loaded lift is due to reach two this week (bone loading)',
+    SMITH_RDL_FREE_BAR: 'no Smith machine Romanian deadlift (back): free bar, find a load',
+    KNEE_EXT_2_SHORT: 'stop 2 reps short on leg extension (knee)',
+    FEET_HIGH: 'feet high on the platform (knee)',
+    LOAD_JUMP_HELD: 'load held: a bigger jump than this in a week is too fast',
+    OHP_CAP: 'overhead press goes up 2.5 kg at most in a week (back)',
+    RETURN_EASY: 'long gap since this lift: start a step below the last load',
+    INCLINE_FIRST: 'incline preferred over flat for chest',
+    VERTICAL_FIRST: 'chin-ups and pulldowns preferred over rows for lats'
+  };
+  const rxText = rx => {
+    const load = rx.bw ? (rx.kg > 0 ? `bw+${rx.kg}kg` : 'bw') : `${rx.kg}kg`;
+    return `${rx.sets} × ${rx.reps} at ${load}, stop ${rx.rirCap} short`;
+  };
+  // Every suggested load passes core.loadJumpCheck against the lift's last 14 days (same lift,
+  // same equipment tag). A warn is stepped down one load step at a time until it passes.
+  function capLoad(index, id, kg, config) {
+    const cfg = resolveConfig(config);
+    const info = index.info[id] || describeLift({ id: id });
+    const step = cfg.loadStep[info.equipment] != null ? cfg.loadStep[info.equipment] : cfg.loadStep.other;
+    const entries = (index.byLift[id] || []).filter(h => h.date >= addDays(index.today, -14));
+    const tag = entries.length ? (entries[entries.length - 1].equipment || null) : null;
+    const hist = entries.filter(h => (h.equipment || null) === tag).map(h => ({ date: h.date, sets: h.sets }));
+    const check = k => C.loadJumpCheck(k, hist, { asOf: index.today, equipment: info.equipment, pattern: info.pattern });
+    let k = kg, c = check(k), held = false;
+    for (let guard = 0; c.severity === 'warn' && k > 0 && guard < 60; guard++) {
+      k = Math.round((k - (step > 0 ? step : 0.5)) * 100) / 100; held = true; c = check(k);
+    }
+    return { kg: k, held: held, from: kg, check: c };
+  }
+  // Safety pass over a prescription: long-gap return, overhead-press cap, load-jump check.
+  function applyRules(l, rx, cfg, index, opts) {
+    const codes = [];
+    if (rx.kg == null || rx.bw) return { rx: rx, codes: codes };
+    const o = opts || {};
+    const step = cfg.loadStep[l.info.equipment] != null ? cfg.loadStep[l.info.equipment] : cfg.loadStep.other;
+    let kg = rx.kg;
+    if (o.lowerSlot && l.daysSince != null && l.daysSince > cfg.longGapDays && l.lastTop && l.lastTop.kg - step > 0 && kg > l.lastTop.kg - step) {
+      kg = Math.round((l.lastTop.kg - step) * 100) / 100; codes.push('RETURN_EASY');
+    }
+    if (isStandingOHP(l.info)) {
+      const wk = (index.byLift[l.id] || []).filter(h => h.date >= addDays(index.today, -7));
+      const ref = wk.length ? Math.max.apply(null, wk.map(h => topKgOf(h.sets))) : (l.lastTop ? l.lastTop.kg : null);
+      if (ref != null && kg > ref + 2.5) { kg = ref + 2.5; codes.push('OHP_CAP'); }
+    }
+    const j = capLoad(index, l.id, kg, cfg);
+    if (j.held) { kg = j.kg; codes.push('LOAD_JUMP_HELD'); }
+    if (kg === rx.kg) return { rx: rx, codes: codes };
+    const out = Object.assign({}, rx, { kg: kg });
+    if (rx.rule === 'ADD_LOAD' && kg <= (rx.last ? rx.last.kg : kg)) { out.reps = rx.repHigh; out.rule = 'LOAD_HELD'; }
+    else if (codes.indexOf('RETURN_EASY') >= 0) out.rule = 'RETURN_EASY';
+    out.text = rxText(out);
+    return { rx: out, codes: codes };
+  }
   // One catalogue record (or a logged exercise with no record) -> what the planner needs.
   function describeLift(entry) {
     const e = entry || {};
@@ -292,10 +427,17 @@
     cat.forEach(c => { if (c && c.id) { byId[c.id] = c; info[c.id] = describeLift(c); } });
     all.forEach(s => s.exercises.forEach(x => {
       if (!info[x.id]) info[x.id] = describeLift({ id: x.id, name: x.name });
-      (byLift[x.id] = byLift[x.id] || []).push({ date: s.date, sets: x.sets, rir: x.rir, deload: s.deload, planned: s.planned, name: x.name });
+      (byLift[x.id] = byLift[x.id] || []).push({ date: s.date, sets: x.sets, rir: x.rir, deload: s.deload, planned: s.planned, name: x.name, equipment: x.equipment || null });
       lastDate[x.id] = s.date;
       if (!firstDate[x.id]) firstDate[x.id] = s.date;
     }));
+    // A Smith machine Romanian deadlift is never suggested; when that is the only deadlift he has
+    // logged, the free-bar lift must be on the books so it can be suggested ("find a load").
+    const hingeIds = Object.keys(info).filter(id => lowerKind(info[id]) === 'hinge');
+    if (hingeIds.some(id => isSmithHinge(info[id]) && byLift[id]) && !hingeIds.some(id => !isSmithHinge(info[id]))) {
+      const seed = (C.SEED_EXERCISES || []).filter(x => x.id === 'romanian-deadlift')[0];
+      if (seed && !info[seed.id]) { byId[seed.id] = seed; info[seed.id] = describeLift(seed); }
+    }
     const catalogueForCore = Object.keys(info).map(id => byId[id] || { id: id, name: info[id].name });
     // Equipment "implied by his catalogue": what he has actually logged on. Empty history
     // means nothing is known yet, so nothing is excluded.
@@ -349,7 +491,7 @@
     const stalled = t.verdict !== 'progressing' && t.verdict !== 'thin' && daysSinceBest != null
       && daysSinceBest >= cfg.stallRotateDays && sinceBest >= 3;
     return { id: id, name: info.name, info: info, sessions: real.length, recent: recent,
-             daysSince: daysSince, lastDate: last ? last.date : null, verdict: t.verdict,
+             daysSince: daysSince, lastDate: last ? last.date : null, lastRealDate: lastReal ? lastReal.date : null, verdict: t.verdict,
              confidence: t.confidence, pctPerMonth: t.pctPerMonth, lastTop: lastTop, lastRir: lastRir,
              lastSets: lastReal ? lastReal.sets : [], dropoff: dropoff,
              daysSinceBest: daysSinceBest, sessionsSinceBest: sinceBest, stalled: stalled };
@@ -493,10 +635,19 @@
     const ws = cfg.weeklySets;
     let t;
     if (pr) t = { kind: 'priority', min: ws.priority.min, aim: ws.priority.aim, max: ws.priority.max, weight: pr.weight };
-    else if (ws.legsFloor[g] != null) t = { kind: 'legs', min: ws.legsFloor[g], aim: ws.legsFloor[g], max: Math.max(ws.legsFloor[g], ws.maintenance.max), weight: cfg.legWeight };
+    else if (ws.legsFloor[g] != null) {
+      const f = ws.legsFloor[g] * lowerFloorFactor(cfg);
+      t = { kind: 'legs', min: f, aim: f, max: Math.max(f, ws.maintenance.max), weight: cfg.legWeight };
+    }
     else if (cfg.maintenanceMuscles.indexOf(g) >= 0) t = { kind: 'maintenance', min: ws.maintenance.min, aim: ws.maintenance.aim, max: ws.maintenance.max, weight: cfg.maintenanceWeight };
     else t = { kind: 'none', min: 0, aim: 0, max: 0, weight: 0 };
     if (cfg.volumeAims[g] != null && t.kind !== 'none') t.aim = clamp(cfg.volumeAims[g], t.min, t.max);
+    // A cut or maintenance phase lowers every target; arms never go past their weekly ceiling.
+    const f = PHASE_FACTOR[cfg.phase] || 1;
+    if (f !== 1 && t.kind !== 'none') { t.min = r1(t.min * f); t.aim = r1(t.aim * f); t.max = r1(t.max * f); }
+    if (ARM_MUSCLES.indexOf(g) >= 0 && t.kind !== 'none') {
+      t.max = Math.min(t.max, cfg.armsCap); t.aim = Math.min(t.aim, t.max); t.min = Math.min(t.min, t.aim);
+    }
     return t;
   }
 
@@ -514,7 +665,31 @@
       range = { from: addDays(today, -back), to: addDays(today, -1) };
     }
     // Monday with a Monday week start: nothing done yet this week.
-    const done = range.from > range.to ? {} : C.weeklyVolumeByMuscle(index.sessions, index.catalogue, range);
+    let done = range.from > range.to ? {} : C.weeklyVolumeByMuscle(index.sessions, index.catalogue, range);
+    // Rolling debt: each day's sets weighted by age, so work from a week ago counts for little.
+    const fatigue = {};
+    MUSCLES.forEach(g => { fatigue[g] = 0; });
+    const tauOf = g => cfg.fatigueTauHours[TAU_GROUP[g] || 'small'];
+    const days = {};
+    index.sessions.filter(s => s.date >= addDays(today, -14)).forEach(s => { days[s.date] = 1; });
+    const perDay = {};
+    Object.keys(days).forEach(d => { perDay[d] = C.weeklyVolumeByMuscle(index.sessions, index.catalogue, { from: d, to: d }); });
+    if (!cfg.weekStart && cfg.debtDecay) {
+      done = {};
+      Object.keys(perDay).forEach(d => {
+        const age = dnum(today) - dnum(d);
+        if (age < 1 || age > 7) return;
+        const w = age <= 2 ? 1 : Math.max(0.25, 1 - (age - 2) * 0.15);
+        Object.keys(perDay[d]).forEach(g => { done[g] = (done[g] || 0) + perDay[d][g] * w; });
+      });
+    }
+    // Fatigue still in each muscle at the start of today: sets x exp(-hours / tau), sessions at
+    // the same time of day, so a session d days ago is d x 24 hours old.
+    Object.keys(perDay).forEach(d => {
+      const hours = (dnum(today) - dnum(d)) * 24;
+      MUSCLES.forEach(g => { if (perDay[d][g]) fatigue[g] += perDay[d][g] * Math.exp(-hours / tauOf(g)); });
+    });
+    const wholeBody = r1(MUSCLES.reduce((a, g) => a + fatigue[g], 0));
     const freq = C.muscleFrequency(index.sessions, index.catalogue);
     const muscles = {};
     MUSCLES.forEach(g => {
@@ -526,7 +701,7 @@
                      target: { min: t.min, aim: t.aim, max: t.max }, done: d,
                      deficit: r1(Math.max(0, t.aim - d)),
                      daysSince: last ? dnum(today) - dnum(last) : null, lastDate: last,
-                     minGap: effectiveMuscleGap(model, cfg, g) };
+                     minGap: effectiveMuscleGap(model, cfg, g), fatigue: r1(fatigue[g]) };
     });
     const lifts = {};
     Object.keys(index.info).forEach(id => { lifts[id] = liftState(index, id, cfg); });
@@ -534,7 +709,7 @@
     let consecutive = 0;
     for (let d = addDays(today, -1); tr[d]; d = addDays(d, -1)) consecutive++;
     const lastSession = index.sessions.length ? index.sessions[index.sessions.length - 1] : null;
-    return { today: today, range: range, muscles: muscles, lifts: lifts, untaggedSets: r1(done.__untagged || 0),
+    return { today: today, range: range, muscles: muscles, lifts: lifts, untaggedSets: r1(done.__untagged || 0), wholeBody: wholeBody,
              consecutive: consecutive, lastSessionDate: lastSession ? lastSession.date : null,
              daysSinceLast: lastSession ? dnum(today) - dnum(lastSession.date) : null,
              sessionsLast7: index.sessions.filter(s => s.date >= addDays(today, -7)).length };
@@ -557,11 +732,12 @@
     });
     drops.sort((a, b) => b.dropoff - a.dropoff || (a.id < b.id ? -1 : 1));
     const regressing = Object.keys(state.lifts).map(id => state.lifts[id])
-      .filter(l => l.verdict === 'regressing' && l.daysSince != null && l.daysSince <= 14)
+      .filter(l => l.verdict === 'regressing' && l.lastRealDate != null && dnum(index.today) - dnum(l.lastRealDate) <= 14)
       .sort((a, b) => a.id < b.id ? -1 : 1);
     return { drops: drops, dropoffHigh: drops.length >= R.dropoffHighCount,
              regressing: regressing, lastDate: last ? last.date : null };
   }
+  const isRecovered = (m, cfg) => m.daysSince == null || m.daysSince >= m.minGap || (m.fatigue != null && m.fatigue < cfg.recoveredBelow);
   function topPriority(state, cfg) {
     let best = null, bestScore = -1;
     cfg.priorities.forEach(p => {
@@ -601,7 +777,7 @@
       return l.daysSince < effectiveWindow(model, cfg, id, l.info.primary).earliest;
     });
     if (inWindow.length) add('PLANNED_IN_WINDOW', 'swap', { lifts: inWindow.map(id => ({ id: id, name: state.lifts[id].name, daysSince: state.lifts[id].daysSince })) });
-    if (top && top.daysSince != null && top.daysSince < top.minGap)
+    if (top && !isRecovered(top, cfg))
       add('PRIORITY_NOT_RECOVERED', 'swap', { muscle: top.muscle, daysSince: top.daysSince, minGap: top.minGap });
 
     // Pull-back rules
@@ -609,6 +785,7 @@
     if (sig.regressing.length >= R.regressingCount) add('LIFTS_REGRESSING', 'pull_back', { lifts: sig.regressing.map(l => ({ id: l.id, name: l.name })) });
     if (feelLow) add('FEEL_LOW', 'pull_back', {});
     if (lowIntake) add('LOW_INTAKE_YESTERDAY', 'pull_back', { kcal: Math.round(inp.intake.kcal), floor: Math.round(inp.intake.floor) });
+    if (state.wholeBody != null && state.wholeBody > R.wholeBodyHigh) add('WHOLE_BODY_FATIGUE', 'pull_back', { value: state.wholeBody, limit: R.wholeBodyHigh });
 
     const has = a => reasons.some(r => r.answer === a);
     let answer = has('rest') ? 'rest' : has('swap') ? 'swap' : has('pull_back') ? 'pull_back' : 'train';
@@ -639,9 +816,14 @@
       if (r.code === 'LIFTS_REGRESSING' || r.code === 'REGRESSING_AND_DROPOFF') fact('REGRESSING', sig.regressing.length, `${plural(sig.regressing.length, 'lift')} regressing`);
       if (r.code === 'LOW_INTAKE_YESTERDAY') fact('LOW_INTAKE', r.data, `ate ${r.data.kcal} kcal yesterday, floor ${r.data.floor}`);
       if (r.code === 'FEEL_LOW') fact('FEEL', 'low', 'you said you feel low');
+      if (r.code === 'WHOLE_BODY_FATIGUE') fact('WHOLE_BODY', r.data.value, `${Math.round(r.data.value)} sets of fatigue still in you (limit ${r.data.limit})`);
     });
     if (state.daysSinceLast != null) fact('DAYS_SINCE_LAST', state.daysSinceLast, `${plural(state.daysSinceLast, 'day')} since last session`);
     if (top && top.daysSince != null) fact('DAYS_SINCE_PRIORITY', top.daysSince, `${plural(top.daysSince, 'day')} since ${LABEL[top.muscle].toLowerCase()}`);
+    // Bone loading is a fact, never a rule that forces a lower lift: the card shows any shortfall.
+    // Ahead of "days since legs" so the collapsed card (four facts) keeps it in view.
+    const bone = boneStatus(index, 7);
+    if (bone.axial < 2 && (bone.sessions >= 2 || cfg.lowerFrequency !== 'twiceWeekly')) fact('BONE_LOADING', bone, `${bone.axial} of 2 bone-loading lifts this week`);
     fact('DAYS_SINCE_LEGS', legDays === 999 ? null : legDays, legDays === 999 ? 'no leg work logged' : `${plural(legDays, 'day')} since legs`);
     // A fact only: days in a row never change the answer by themselves.
     fact('IN_A_ROW', wouldBe, wouldBe === 1 ? 'first day after a rest day' : `would be day ${wouldBe} in a row`);
@@ -674,7 +856,8 @@
         REP_DROPOFF: sig.drops[0] ? `${sig.drops[0].name} fell from ${sig.drops[0].from} to ${sig.drops[0].to} reps.` : 'Reps fell off set to set.',
         LIFTS_REGRESSING: `${plural(sig.regressing.length, 'lift')} regressing.`,
         FEEL_LOW: 'You feel low.',
-        LOW_INTAKE_YESTERDAY: 'You ate well under your floor yesterday.'
+        LOW_INTAKE_YESTERDAY: 'You ate well under your floor yesterday.',
+        WHOLE_BODY_FATIGUE: 'A lot of training in the last few days is still in your system.'
       }[code] || '';
       return `${why} Stop compounds with ${capC} reps left.`.trim();
     }
@@ -713,7 +896,10 @@
     // muscle has any familiar lift at all, rarely done lifts are not offered: waiting a day
     // for a staple beats a lift with no history to progress from.
     const familiar = l => l.sessions >= 3 || l.recent >= 1;
-    const anyFamiliar = pool.some(id => familiar(state.lifts[id]));
+    // Familiar among the lifts that could be picked here (a Smith RDL never can; in the lower slot
+    // only lower compounds can), so the free-bar RDL is offered when the Smith one was his only hinge.
+    const pickable = l => !isSmithHinge(l.info) && (!o.lowerCompoundOnly || lowerKind(l.info));
+    const anyFamiliar = pool.some(id => familiar(state.lifts[id]) && pickable(state.lifts[id]));
     return pool.map(id => {
       const l = state.lifts[id];
       const win = effectiveWindow(model, cfg, id, l.info.primary);
@@ -724,6 +910,13 @@
       else if (anyFamiliar && !familiar(l)) blocked = 'RARELY_DONE';
       else if (o.avoid && o.avoid[id]) blocked = o.avoid[id];
       else if (o.chosen && o.chosen[id]) blocked = 'ALREADY_TODAY';
+      else if (isSmithHinge(l.info)) blocked = 'SMITH_RDL';
+      else if (o.lowerCompoundOnly && !lowerKind(l.info)) blocked = 'NOT_LOWER_COMPOUND';
+      else if (o.axialOnly && !isAxialLift(l.info, l.lastTop ? l.lastTop.kg : 0)) blocked = 'NOT_AXIAL';
+      else if (o.accessoryOnly && !isLowerAccessory(l.info)) blocked = 'NOT_LOWER_ACCESSORY';
+      else if (o.noLower && isLowerLift(l.info)) blocked = 'LOWER_SLOT_ONLY';
+      else if (o.inclineToday && l.info.movement === 'press-incline') blocked = 'ONE_INCLINE';
+      else if (o.flatThisWeek && l.info.movement === 'press-flat' && l.info.equipment === 'barbell') blocked = 'FLAT_THIS_WEEK';
       return { id: id, lift: l, win: win, score: sc.score, reasons: sc.reasons, blocked: blocked };
     });
   }
@@ -734,6 +927,11 @@
       if (o.preferCompound && c.lift.info.pattern === 'compound') c.score += 1;
       if (o.preferIsolation && c.lift.info.pattern === 'isolation') c.score += 0.5;
       if (o.avoidMovement && o.avoidMovement.indexOf(c.lift.info.movement) >= 0) c.score -= 2;
+      // The calendar's five sessions are the template: their lifts win ties.
+      if (o.template && o.template[c.id]) { c.score += 1; c.reasons.push('TEMPLATE'); }
+      if (g === 'chest' && c.lift.info.movement === 'press-incline') { c.score += 0.5; c.reasons.push('INCLINE_FIRST'); }
+      if (g === 'lats' && c.lift.info.movement === 'pull-vertical') { c.score += 0.5; c.reasons.push('VERTICAL_FIRST'); }
+      if (o.preferAxial && isAxialLift(c.lift.info, c.lift.lastTop ? c.lift.lastTop.kg : 0)) { c.score += 3; c.reasons.push('AXIAL_DUE'); }
     });
     cands.sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : 1));
     return cands[0] || null;
@@ -797,17 +995,30 @@
     const items = [], chosen = {};
     const movementsFor = {};
     const deficitNow = g => Math.max(0, state.muscles[g].target.aim - credit[g]);
-    const recovered = g => state.muscles[g].daysSince == null || state.muscles[g].daysSince >= state.muscles[g].minGap;
+    const recovered = g => isRecovered(state.muscles[g], cfg);
     const addItem = (pick, g, sets, block, why) => {
       const l = pick.lift;
       const isLeg = block === 'legs';
       const capBase = isLeg ? cfg.rirCap.legs : l.info.pattern === 'compound' ? cfg.rirCap.compound : cfg.rirCap.isolation;
       const rirCap = Math.min(5, capBase + (mod.rirExtra || 0));
       const s = Math.max(cfg.setsPerLift.min, sets + (mod.setsDelta || 0));
-      const rx = prescribe(l, cfg, rirCap, s, isLeg);
+      // Knee: leg extension always stops at least 2 reps short.
+      const extCap = isLegExtension(l.info) ? Math.max(rirCap, 2) : rirCap;
+      const raw = prescribe(l, cfg, extCap, s, isLeg);
+      const safe = applyRules(l, raw, cfg, index, { lowerSlot: isLeg });
+      const rx = safe.rx;
+      const rules = safe.codes.slice();
+      if (isLegExtension(l.info)) rules.push('KNEE_EXT_2_SHORT');
+      if (isLegPress(l.info)) rules.push('FEET_HIGH');
+      if (isLeg && l.info.pattern === 'compound') rules.unshift('LOWER_SLOT');
+      if (isLeg && l.info.pattern !== 'compound') rules.unshift('LOWER_ACCESSORY');
+      (pick.reasons || []).forEach(c => { if ((c === 'AXIAL_DUE' || c === 'INCLINE_FIRST' || c === 'VERTICAL_FIRST') && rules.indexOf(c) < 0) rules.push(c); });
+      if (why.bone && rules.indexOf('AXIAL_DUE') >= 0) rules[rules.indexOf('AXIAL_DUE')] = 'BONE_WEEK';
+      if (l.id === 'romanian-deadlift' && !l.sessions && index.sessions.some(x => x.exercises.some(e => isSmithHinge(index.info[e.id] || {})))) rules.push('SMITH_RDL_FREE_BAR');
       const item = { id: l.id, name: l.name, muscle: g, block: block || null, pattern: l.info.pattern,
                      movement: l.info.movement, equipment: l.info.equipment, sets: s,
-                     prescription: rx, value: why.value,
+                     prescription: rx, value: why.value, rules: rules,
+                     notes: rules.map(c => REASON_WORDS[c]).filter(Boolean),
                      reasons: [{ code: why.code, muscle: g, deficit: why.deficit }].concat(pick.reasons.map(c => ({ code: c }))),
                      reasonText: liftReasonText(l, g, why.deficit), window: pick.win };
       items.push(item);
@@ -817,25 +1028,48 @@
       return item;
     };
 
-    // (a) Leg block first, when a leg muscle is under its floor, recovered, and the last leg
-    // work was at least legBlockGapDays ago. Each block aims at half the weekly floor, so two
-    // blocks a week cover it. Quads get a compound; hamstrings then get an isolation, so the
-    // block is never two heavy hinge/squat patterns back to back.
-    const legDays = Math.min.apply(null, LEG_MUSCLES.map(g => state.muscles[g].daysSince == null ? 999 : state.muscles[g].daysSince));
-    if (!lighter && legDays >= cfg.legBlockGapDays) {
-      LEG_MUSCLES.forEach(g => {
-        const m = state.muscles[g];
-        if (!(m.target.aim > 0) || deficitNow(g) < 1 || !recovered(g)) return;
-        const afterCompound = items.some(it => it.block === 'legs' && it.pattern === 'compound');
-        const pick = pickLift(g, state, index, cfg, model, { chosen: chosen, avoid: mod.avoid,
-          preferCompound: !afterCompound, preferIsolation: afterCompound });
-        if (!pick) return;
-        const lb = cfg.setsPerLift.legBlock;
-        const inv = pick.lift.info.muscles[g] || 1;
-        const sets = clamp(Math.ceil(Math.min(deficitNow(g), m.target.aim / 2) / inv), lb[0], lb[1]);
-        addItem(pick, g, sets, 'legs', { code: 'LEGS_BELOW_FLOOR', deficit: deficitNow(g), value: m.weight * (deficitNow(g) / m.target.aim) + 0.5 });
+    const template = {};
+    (ctx.template || []).forEach(id => { template[id] = true; });
+    // (a) The lower slot: exactly one lower compound (squat, deadlift or leg press), first in the
+    // session, plus at most one accessory (leg curl or leg extension). Scheduled only when the
+    // last lower compound was at least lowerGapDays ago (3 / 7 / 14 by the lowerFrequency
+    // setting) and a leg muscle is under its floor and recovered. Never on a lighter day. When
+    // fewer than two loaded (axial) lifts are in the last 7 days, a squat or deadlift is preferred.
+    const lowerDates = [];
+    Object.keys(index.byLift).forEach(id => { if (lowerKind(index.info[id])) index.byLift[id].forEach(h => lowerDates.push(h.date)); });
+    const lastLower = lowerDates.length ? lowerDates.sort().pop() : null;
+    const lowerDays = lastLower ? dnum(index.today) - dnum(lastLower) : 999;
+    const bone = boneStatus(index, 7);
+    const boneDue = bone.axial < 2;
+    if (!lighter && lowerDays >= lowerGapDays(cfg)) {
+      const need = LEG_MUSCLES.filter(g => state.muscles[g].target.aim > 0 && deficitNow(g) >= 1 && recovered(g))
+        .sort((a, b) => deficitNow(b) / state.muscles[b].target.aim - deficitNow(a) / state.muscles[a].target.aim || (a < b ? -1 : 1));
+      let pick = null, pg = null;
+      const pools = need.concat(need.indexOf('hamstrings') >= 0 ? ['lowerBack'] : []);
+      // Bone loading is a health rule: when it is due, the best loaded lift wins outright, even a
+      // stalled one; leg press is the fallback only when no squat or deadlift can be done today.
+      const tryPools = axialOnly => pools.forEach(g => {
+        if (pick && !boneDue) return;
+        const p = pickLift(g, state, index, cfg, model, { chosen: chosen, avoid: mod.avoid, lowerCompoundOnly: true,
+          axialOnly: axialOnly, preferAxial: boneDue, template: template });
+        if (p && (!pick || p.score > pick.score)) { pick = p; pg = LEG_MUSCLES.indexOf(g) >= 0 ? g : 'hamstrings'; }
       });
+      if (boneDue) tryPools(true);
+      if (!pick) tryPools(false);
+      if (pick) {
+        const m = state.muscles[pg], lb = cfg.setsPerLift.legBlock;
+        addItem(pick, pg, lb[1], 'legs', { code: 'LEGS_BELOW_FLOOR', deficit: deficitNow(pg), bone: boneDue,
+          value: m.weight * (deficitNow(pg) / m.target.aim) + 0.5 });
+        // One accessory for the other leg muscle when it is still under its floor after the compound.
+        const other = LEG_MUSCLES.filter(g => g !== pg && state.muscles[g].target.aim > 0 && deficitNow(g) >= 1 && recovered(g))[0];
+        const acc = other && pickLift(other, state, index, cfg, model, { chosen: chosen, avoid: mod.avoid, accessoryOnly: true, template: template });
+        if (acc) addItem(acc, other, lb[0], 'legs', { code: 'LEGS_BELOW_FLOOR', deficit: deficitNow(other),
+          value: state.muscles[other].weight * (deficitNow(other) / state.muscles[other].target.aim) + 0.4 });
+      }
     }
+    // Chest balance: one incline press a session, one flat barbell press in any 7 days.
+    const flatThisWeek = Object.keys(index.byLift).some(id => index.info[id].movement === 'press-flat' && index.info[id].equipment === 'barbell'
+      && index.byLift[id].some(h => h.date >= addDays(index.today, -6)));
 
     // (b) Upper-body muscles by value: priority weight x share of weekly aim still missing x
     // recovery, times the quality of the best lift available for it today. A muscle whose
@@ -846,14 +1080,17 @@
     const fill = (ceilingOf, code) => {
       for (let guard = 0; guard < 30 && items.length < maxLifts; guard++) {
         const need = g => Math.max(0, ceilingOf(g) - credit[g]);
-        const options = MUSCLES.filter(g => LEG_MUSCLES.indexOf(g) < 0 && state.muscles[g].target.aim > 0 && recovered(g))
+        const options = MUSCLES.filter(g => LOWER.indexOf(g) < 0 && state.muscles[g].target.aim > 0 && recovered(g))
           .filter(g => need(g) >= 1.5 && sessionCredit[g] < cfg.perSessionMuscleCap - 1)
           .filter(g => !(lighter && state.muscles[g].kind !== 'priority'))
           .map(g => {
             const m = state.muscles[g], nth = (movementsFor[g] || []).length;
             const pick = pickLift(g, state, index, cfg, model, { chosen: chosen, avoid: mod.avoid,
-              preferCompound: nth === 0 && m.kind === 'priority', preferIsolation: nth > 0, avoidMovement: movementsFor[g] || [] });
-            const rec = m.daysSince == null ? 1 : Math.min(1, m.daysSince / (m.minGap + 1));
+              preferCompound: nth === 0 && m.kind === 'priority', preferIsolation: nth > 0, avoidMovement: movementsFor[g] || [],
+              noLower: true, template: template, flatThisWeek: flatThisWeek,
+              inclineToday: items.some(it => it.movement === 'press-incline') });
+            // Recovery: the fatigue still in the muscle against one session's worth of work.
+            const rec = clamp(1 - (m.fatigue || 0) / cfg.perSessionMuscleCap, 0.2, 1);
             const v = pick ? m.weight * (need(g) / m.target.aim) * rec * quality(pick) : 0;
             return { g: g, m: m, nth: nth, pick: pick, v: v };
           })
@@ -862,7 +1099,8 @@
           .sort((a, b) => b.v - a.v || (MUSCLES.indexOf(a.g) - MUSCLES.indexOf(b.g)));
         if (!options.length) break;
         const { g, m, nth, pick, v } = options[0];
-        const perSession = m.kind === 'priority' ? Math.ceil(m.target.aim / 2) : m.target.aim;
+            // A priority muscle's week is spread over three sessions in a 4-5 day week, two otherwise.
+        const perSession = m.kind === 'priority' ? Math.ceil(m.target.aim / (cfg.daysPerWeek.preferred >= 4 ? 3 : 2)) : m.target.aim;
         const want = Math.min(cfg.perSessionMuscleCap - sessionCredit[g], need(g), perSession);
         const inv = pick.lift.info.muscles[g] || 1;
         let sets = Math.round(want / inv);
@@ -890,7 +1128,8 @@
 
     // (d) Time budget: drop the lowest-value item until the estimate fits.
     const dropped = [];
-    const total = () => cfg.timing.warmupMin + items.reduce((s, it) => s + itemMinutes(it, cfg), 0);
+    const drill = () => items.some(it => it.block === 'legs') ? cfg.timing.drillMin : 0;
+    const total = () => cfg.timing.warmupMin + drill() + items.reduce((s, it) => s + itemMinutes(it, cfg), 0);
     while (items.length > 1 && total() > cfg.sessionMinutes) {
       let worst = 0;
       items.forEach((it, i) => { if (it.value < items[worst].value || (it.value === items[worst].value && it.id > items[worst].id)) worst = i; });
@@ -900,6 +1139,7 @@
     items.forEach(it => { it.minutes = r1(itemMinutes(it, cfg)); });
     // Nearly nothing left to do: the week's aims are already met for every recovered muscle.
     const notes = [];
+    if (items.some(it => it.block === 'legs')) notes.push({ code: 'QUAD_DRILL', text: `Quad-set drill (${cfg.timing.drillMin} min) before the lower lift (knee).` });
     if (!lighter && (items.length < 3 || total() < 0.4 * cfg.sessionMinutes)) notes.push({ code: 'AHEAD_OF_WEEK', text: 'The week’s aims are mostly met already; a rest day costs nothing.' });
     const muscles = {};
     items.forEach(it => Object.keys(state.lifts[it.id].info.muscles).forEach(g => {
@@ -907,7 +1147,8 @@
     }));
     return { date: index.today, rest: false, lighter: lighter, items: items, minutes: Math.round(total()),
              budget: cfg.sessionMinutes, dropped: dropped, muscles: muscles, notes: notes,
-             legBlock: items.some(it => it.block === 'legs') };
+             legBlock: items.some(it => it.block === 'legs'), bone: bone,
+             lowerDue: lowerDays >= lowerGapDays(cfg), daysSinceLower: lowerDays === 999 ? null : lowerDays };
   }
 
   // Plan changes the card lists: compare a planned list (calendar) with the generated one.
@@ -928,7 +1169,7 @@
     const model = input.model || recoveryModel(index, cfg);
     const state = weekState(index, cfg, model);
     const rd = readiness(index, state, cfg, input.readinessInput, model);
-    const session = generateSession({ index: index, state: state, readiness: rd, config: cfg, model: model });
+    const session = generateSession({ index: index, state: state, readiness: rd, config: cfg, model: model, template: input.template });
     return { index: index, model: model, state: state, readiness: rd, session: session,
              changes: input.readinessInput && input.readinessInput.planned ? planChanges(input.readinessInput.planned, session, rd) : [] };
   }
@@ -1004,7 +1245,7 @@
         const index = buildIndex(sim, input.catalogue, date, { weights: input.weights });
         const state = weekState(index, cfg, model);
         const rd = i === 0 ? rd0 : readiness(index, state, cfg, {}, model);
-        const session = generateSession({ index: index, state: state, readiness: rd.answer === 'rest' ? Object.assign({}, rd, { answer: 'pull_back' }) : rd, config: cfg, model: model });
+        const session = generateSession({ index: index, state: state, readiness: rd.answer === 'rest' ? Object.assign({}, rd, { answer: 'pull_back' }) : rd, config: cfg, model: model, template: input.template });
         days.push({ date: date, weekday: weekday(date), train: true, readiness: { answer: rd.answer, codes: rd.reasons.map(r => r.code) }, session: session });
         sim.push({ date: date, planned: true, deload: false, exercises: session.items.map(it => ({
           id: it.id, name: it.name, rir: it.prescription.rirCap,
@@ -1311,7 +1552,7 @@
   // What the app stores in targets.planner. The engine's own defaults differ on purpose
   // (restMode 'rest', all seven weekdays); the app passes these explicitly.
   const APP_DEFAULTS = { priorities: ['chest', 'sideDelts', 'lats', 'forearms'], daysPerWeek: 5,
-    availableWeekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], restMode: 'lighter', sessionMinutes: 90 };
+    availableWeekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], restMode: 'lighter', sessionMinutes: 90, lowerFrequency: 'twiceWeekly', phase: 'bulk' };
   const SESSION_LENGTHS = [60, 75, 90, 120];
   // Muscles the Settings form offers as priorities. Leg muscles are not offered in this pass.
   const PRIORITY_CHOICES = ['chest', 'lats', 'upperBack', 'frontDelts', 'sideDelts', 'rearDelts', 'triceps', 'biceps', 'forearms'];
@@ -1325,6 +1566,8 @@
     s.daysPerWeek = +s.daysPerWeek;
     s.sessionMinutes = +s.sessionMinutes;
     const e = [];
+    if (LOWER_FREQ.indexOf(s.lowerFrequency) < 0) e.push('Choose how often to train lower body: twice a week, once a week or once every two weeks.');
+    if (PHASES.indexOf(s.phase) < 0) e.push('Choose a phase: bulk, maintain or cut.');
     if (!s.priorities.length) e.push('Pick at least one priority muscle.');
     if (s.priorities.length > 4) e.push('Pick at most four priority muscles.');
     s.priorities.forEach(p => { if (PRIORITY_CHOICES.indexOf(p) < 0) e.push(`${LABEL[p] || p} cannot be a priority here.`); });
@@ -1332,14 +1575,16 @@
     if (!(Number.isInteger(s.daysPerWeek) && s.daysPerWeek >= 3 && s.daysPerWeek <= 5)) e.push('Days per week must be 3, 4 or 5.');
     if (!s.availableWeekdays.length) e.push('Tick at least one weekday you can train on.');
     else if (Number.isInteger(s.daysPerWeek) && s.availableWeekdays.length < Math.min(3, s.daysPerWeek)) e.push(`Tick at least ${Math.min(3, s.daysPerWeek)} weekdays.`);
-    // His weeks run Monday to Friday, so the weekly aim is counted per calendar week.
+    // Debt is rolling with age decay (v2): a missed day carries over instead of resetting on Monday.
     const v = validateConfig({ priorities: s.priorities, daysPerWeek: { min: 3, max: 5, preferred: s.daysPerWeek },
-      availableWeekdays: s.availableWeekdays, restMode: s.restMode, sessionMinutes: s.sessionMinutes, weekStart: 'Mon' });
+      availableWeekdays: s.availableWeekdays, restMode: s.restMode, sessionMinutes: s.sessionMinutes, weekStart: null, phase: PHASES.indexOf(s.phase) < 0 ? 'bulk' : s.phase,
+      lowerFrequency: LOWER_FREQ.indexOf(s.lowerFrequency) < 0 ? 'twiceWeekly' : s.lowerFrequency });
     // The engine's own checks still run; its messages are reworded where the form has a field.
     const own = e.length;
     v.errors.forEach(x => {
       if (/^sessionMinutes/.test(x)) e.push('Session length must be 20 to 240 minutes.');
       else if (/^restMode/.test(x)) e.push('Choose what to do when a rest day is due.');
+      else if (/^(lowerFrequency|phase)/.test(x)) { /* already reported above */ }
       else if (!own || !/priorit|daysPerWeek|availableWeekdays/.test(x)) e.push(x);
     });
     return { ok: e.length === 0, errors: e, settings: s, config: v.config };
@@ -1363,7 +1608,7 @@
     const legs = LEG_MUSCLES.map(g => state.muscles[g]);
     const legDays = legs.some(m => m.daysSince == null) ? null : Math.max.apply(null, legs.map(m => m.daysSince));
     LEG_MUSCLES.forEach(g => { seen[g] = 1; });
-    row('Legs', legDays, cfg.legBlockGapDays, r1(legs.reduce((a, m) => a + m.deficit, 0)));
+    row('Legs', legDays, lowerGapDays(cfg), r1(legs.reduce((a, m) => a + m.deficit, 0)));
     MUSCLES.forEach(g => {
       const m = state.muscles[g];
       if (seen[g] || m.kind === 'none' || !(m.deficit >= 1)) return;
@@ -1377,14 +1622,16 @@
     const cfg = resolveConfig(ctx.config);
     const l = ctx.state.lifts[altId];
     if (!l) return null;
-    const rx = prescribe(l, cfg, item.prescription.rirCap, item.sets, item.block === 'legs');
+    const raw = prescribe(l, cfg, item.prescription.rirCap, item.sets, item.block === 'legs');
+    const rx = ctx.index ? applyRules(l, raw, cfg, ctx.index, { lowerSlot: item.block === 'legs' }).rx : raw;
     return Object.assign({}, item, { id: l.id, name: l.name, pattern: l.info.pattern, movement: l.info.movement,
       equipment: l.info.equipment, prescription: rx, swappedFrom: { id: item.id, name: item.name },
       reasonText: `swapped in for ${item.name}; ` + liftReasonText(l, item.muscle, null) });
   }
 
   return {
-    APP_DEFAULTS: APP_DEFAULTS, SESSION_LENGTHS: SESSION_LENGTHS, PRIORITY_CHOICES: PRIORITY_CHOICES, appSettings: appSettings,
+    APP_DEFAULTS: APP_DEFAULTS, SESSION_LENGTHS: SESSION_LENGTHS, LOWER_FREQ: LOWER_FREQ, PHASES: PHASES, isRecovered: isRecovered, REASON_WORDS: REASON_WORDS,
+    capLoad: capLoad, boneStatus: boneStatus, isAxialLift: isAxialLift, lowerKind: lowerKind, lowerGapDays: lowerGapDays, PRIORITY_CHOICES: PRIORITY_CHOICES, appSettings: appSettings,
     daysSinceRows: daysSinceRows, swapItem: swapItem, weekday: weekday,
     DEFAULT_CONFIG: DEFAULT_CONFIG, validateConfig: validateConfig, resolveConfig: resolveConfig,
     describeLift: describeLift, inferEquipment: inferEquipment, movementOf: movementOf,
